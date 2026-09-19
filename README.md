@@ -1,0 +1,149 @@
+# agent-toggle
+
+Temporarily disable and restore AI-agent resources — skills, agents, commands,
+plugins, MCP servers — across Claude Code, Codex, Grok CLI and OpenClaw.
+
+**Nothing is ever deleted.** Everything is parked and recorded, and `enable`
+puts it back where it came from.
+
+## Why
+
+| target | native mechanism | the gap |
+|---|---|---|
+| plugin | `claude plugin disable/enable` | fine — this tool just batches it |
+| skill | none | moving files by hand hits the rename trap below |
+| agent | none | same |
+| command | none | same, plus nested `group/name.md` paths get flattened |
+| MCP | `remove` only | the config is gone unless you saved it first |
+
+## Install
+
+```sh
+git clone <this repo> ~/Documents/Workspace/agent-toggle
+cd ~/Documents/Workspace/agent-toggle && sh install.sh
+```
+
+`install.sh` drops a thin skill shim into every harness it finds, so
+`/agent-toggle` works from any of them. The tool itself stays in one place.
+
+## Usage
+
+```sh
+python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
+```
+
+| command | what it does |
+|---|---|
+| `status` | health check: harnesses found, types each supports, parked counts, gitignore |
+| `list [type]` | what is currently disabled |
+| `disable <type> <name>...` | park one or more items |
+| `enable <type> <name>...` | put them back |
+| `migrate` | import an older `~/.claude-toggle/` state |
+
+`<type>` = `skill` / `agent` / `command` / `plugin` / `mcp`.
+`--harness claude|codex|grok|openclaw` picks the target (default `claude`).
+
+```sh
+agent_toggle.py disable skill   academic-plotting matplotlib
+agent_toggle.py disable command orch:batch          # nested commands/orch/batch.md
+agent_toggle.py disable agent   kubernetes-architect
+agent_toggle.py disable mcp     telegram-mcp
+agent_toggle.py disable skill   foo --harness codex
+agent_toggle.py enable  mcp     telegram-mcp
+```
+
+A colon addresses nesting: `orch:batch` is `commands/orch/batch.md`.
+
+## What each harness supports
+
+| harness | home | skill | agent | command | plugin | mcp |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
+| codex | `~/.codex` | ✓ | ✓ | ✓ | ✓ | ✓ `config.toml` |
+| grok | `~/.grok` | ✓ | — | — | — | — |
+| openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — (sqlite) |
+
+Unsupported pairs fail loudly. OpenClaw keeps MCP servers in
+`state/openclaw.sqlite`, not a file this tool can safely slice, so it refuses
+rather than guessing.
+
+## Companion files
+
+A skill or command often calls a helper next to it — `scripts/foo.py`,
+`tg-send.sh`. On `disable`, the item's text is scanned for such references and
+each one is classified:
+
+- **exclusive** (nothing else in the harness mentions it) → parked alongside
+  the item, restored with it.
+- **shared** (anything else references it) → **left alone**, and reported.
+
+Sharing is a veto, not a warning. `tg-send.sh` is referenced by five different
+commands; moving it because one of them got disabled would silently break the
+other four.
+
+Detection reads file text, so a path built at runtime cannot be found. Every
+companion decision is printed before anything moves, so a wrong guess is
+visible rather than silent.
+
+## MCP backups are verbatim
+
+- **Claude**: the raw entry from `~/.claude.json`. Never `claude mcp get` —
+  that prints a human summary and silently drops auth fields (`headers`,
+  `headersHelper`), so a server restored from it fails with 401.
+- **Codex**: the exact `[mcp_servers.<name>]` text block including its
+  `.tools.*` sub-tables. Python's stdlib reads TOML but cannot write it, and a
+  hand-rolled serializer would mangle comments — a text slice is lossless and
+  much less code.
+
+MCP changes need a **new session** to take effect.
+
+## Where state lives
+
+All of it in `~/.agent-toggle/`, never as marker files next to the targets —
+your `git status` in your own project must not change because of our
+bookkeeping.
+
+| file | contents |
+|---|---|
+| `state.json` | current disabled list (atomic write) |
+| `log.jsonl` | one line per operation |
+| `mcp-backups/` | `<harness>__<server>.json` |
+| `companions/` | parked exclusive helper files |
+
+## Two guardrails, both earned
+
+**1. `safe_move()` never lets the source be renamed into the destination.**
+`mv X dest/` when `dest` does not exist *renames* `X` to `dest` — the first
+item fails, the second "succeeds" by becoming that directory, and `SKILL.md`
+and `.git` end up scattered at the root. `shutil.move()` behaves identically.
+So: create the directory, prove it *is* a directory, prove the target does not
+exist, and only then touch the source.
+
+Order matters too: `mkdir(exist_ok=True)` raises `FileExistsError` when the
+path exists as a *file*, so the `is_dir()` check has to come **before** the
+`mkdir` or it is unreachable.
+
+**2. Park dirs that are not gitignored get a warning.** Without it, every
+disable leaves dozens of deletion lines in `git status`.
+
+## Paths are resolved before comparison
+
+`~/.claude` is often a symlink, and on macOS `/var` is one. Comparing
+unresolved paths makes every companion look like it lives outside the harness.
+Both sides are resolved first.
+
+## Tests
+
+```sh
+cd ~/Documents/Workspace/agent-toggle && python3 test_agent_toggle.py
+```
+
+35 assertions, stdlib only, no fixtures, no network.
+
+## Cross-machine behaviour
+
+Disabling is a **local** decision: park dirs are gitignored and do not sync.
+But a disappearance under `skills/` is itself a tracked change, so committing
+it means other machines lose those skills on pull. The content stays in git
+history — `git checkout <commit> -- skills/<name>` brings it back. Don't
+commit those deletions if you don't want them to travel.
