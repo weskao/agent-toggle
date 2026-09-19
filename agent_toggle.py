@@ -156,6 +156,21 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
     return target
 
 
+def prune_empty(start: Path, stop: Path) -> None:
+    """Drop directories left empty by a move, up to but excluding `stop`.
+
+    Restoring commands/orch/batch.md otherwise leaves an empty `orch/` behind
+    in the park dir, which accumulates and inflates the parked counts.
+    """
+    cur = start
+    while cur != stop and stop in cur.parents:
+        try:
+            cur.rmdir()          # refuses non-empty, which is the guard
+        except OSError:
+            return
+        cur = cur.parent
+
+
 def gitignored(path: Path, repo: Path) -> bool:
     """True if git ignores `path`. Unknown (no git / not a repo) counts as False."""
     try:
@@ -357,6 +372,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 log(action, type_, name, "error", str(e))
                 fails += 1
                 continue
+            prune_empty(src.parent, parked)
             print(f"  v {type_} {name} enabled")
             if entry:
                 restore_companions(entry)

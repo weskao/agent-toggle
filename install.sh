@@ -6,6 +6,13 @@ set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 SHIM="$ROOT/shims/claude/SKILL.md"
 
+# Harness dirs are often git repos that sync across machines, so write the
+# path `~`-relative whenever this repo lives under $HOME.
+case "$ROOT" in
+    "$HOME"/*) SHIM_ROOT="~${ROOT#"$HOME"}" ;;
+    *)         SHIM_ROOT="$ROOT" ;;
+esac
+
 [ -f "$SHIM" ] || { echo "missing shim: $SHIM" >&2; exit 1; }
 
 installed=0
@@ -13,7 +20,8 @@ for home in "$HOME/.claude" "$HOME/.codex" "$HOME/.grok" "$HOME/.openclaw"; do
     [ -d "$home" ] || continue
     dest="$home/skills/agent-toggle"
     mkdir -p "$dest"
-    cp "$SHIM" "$dest/SKILL.md"
+    # Bake in where this repo actually sits, so a clone anywhere works.
+    sed "s|__AGENT_TOGGLE_ROOT__|$SHIM_ROOT|g" "$SHIM" > "$dest/SKILL.md"
     echo "  installed  $dest/SKILL.md"
     installed=$((installed + 1))
 

@@ -8,12 +8,12 @@ description: Temporarily disable or restore AI-agent resources — skills, agent
 Parks and restores agent resources. **Never deletes anything.**
 
 The tool lives outside any single harness:
-`~/Documents/Workspace/agent-toggle/agent_toggle.py`
+`__AGENT_TOGGLE_ROOT__/agent_toggle.py`
 
 ## Usage
 
 ```bash
-python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
+python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> [args]
 ```
 
 | command | what it does |

@@ -131,6 +131,9 @@ def test_nested_command_roundtrip() -> None:
         check("nested command restored to its original path",
               (sb.home / "commands/orch/batch.md").read_text() == "batch")
         check("state entry cleared", not state["disabled"])
+        check("empty park subdir pruned",
+              not (sb.home / "commands-disabled/orch").exists())
+        check("park root kept", (sb.home / "commands-disabled").is_dir())
     finally:
         sb.close()
 
