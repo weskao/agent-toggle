@@ -18,6 +18,7 @@ python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> [args]
 
 | command | what it does |
 |---|---|
+| `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
 | `status` | harnesses found, types each supports, parked counts, gitignore check |
 | `list [type]` | what is currently disabled |
 | `disable <type> <name>...` | park one or more items |
@@ -36,6 +37,16 @@ agent_toggle.py enable  mcp     telegram-mcp
 ```
 
 A colon addresses nesting: `orch:batch` → `commands/orch/batch.md`.
+
+## Interactive picker
+
+`agent_toggle.py ui` opens a curses picker: type to filter, `↑`/`↓` to move,
+`Tab` to tick/untick, `Enter` to apply, `Esc` to cancel. `[x]` means live,
+`[ ]` means parked, `*` marks a staged change. Nothing is applied until Enter.
+
+Suggest it when the user wants to browse or change several things at once —
+it is faster than naming each item. Plugins are not in the picker; they stay
+a CLI operation.
 
 **Run `status` first.** The `claude` CLI is often missing from a hook or agent
 PATH; without it the `plugin` and `mcp` actions fail, while `skill`, `agent`

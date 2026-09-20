@@ -294,6 +294,85 @@ def test_mcp_without_backend_fails_loudly() -> None:
         sb.close()
 
 
+# ---------------------------------------------------------------------- ui
+
+def test_live_names_addresses_nesting_with_colon() -> None:
+    import ui
+    sb = Sandbox()
+    try:
+        sb.write("commands/google.md")
+        sb.write("commands/news-briefing/ai.md")
+        sb.write("skills/solo/SKILL.md")
+        names = ui.live_names(sb.home / "commands", "command")
+        check("flat command listed", "google" in names)
+        check("nested command uses a colon", "news-briefing:ai" in names, str(names))
+        check("skills listed as directories",
+              ui.live_names(sb.home / "skills", "skill") == ["solo"])
+        check("missing dir yields nothing",
+              ui.live_names(sb.home / "nope", "skill") == [])
+    finally:
+        sb.close()
+
+
+def test_live_mcp_reads_toml_server_names() -> None:
+    import ui
+    sb = Sandbox()
+    try:
+        (sb.home / "config.toml").write_text(
+            '[mcp_servers.alpha]\ncommand = "a"\n'
+            "[mcp_servers.alpha.tools.x]\nenabled = true\n"
+            '[mcp_servers.beta]\ncommand = "b"\n[other]\nk = 1\n'
+        )
+        names = ui.live_mcp(sb.home, "toml")
+        check("toml servers listed once each", names == ["alpha", "beta"], str(names))
+        check("sub-tables are not mistaken for servers", "alpha.tools.x" not in names)
+    finally:
+        sb.close()
+
+
+def test_collect_merges_live_and_parked() -> None:
+    import ui
+    sb = Sandbox()
+    try:
+        sb.write("skills/live-one/SKILL.md")
+        state = {"version": 2, "disabled": {
+            "claude:skill:parked-one": {"harness": "claude", "type": "skill",
+                                        "name": "parked-one", "at": "2026-09-19"},
+            "claude:plugin:x": {"harness": "claude", "type": "plugin",
+                                "name": "x", "at": "2026-09-19"},
+        }}
+        rows = ui.collect(state, {"claude": (sb.home, ("skill",), None)},
+                          {"skill": "skills"})
+        by_name = {r.name: r for r in rows}
+        check("live item present and ticked",
+              by_name["live-one"].enabled is True)
+        check("parked item present and unticked",
+              by_name["parked-one"].enabled is False)
+        check("plugins stay out of the picker", "x" not in by_name)
+    finally:
+        sb.close()
+
+
+def test_match_filters_on_all_terms() -> None:
+    import ui
+    rows = [ui.Row("claude", "command", "orch:batch", True),
+            ui.Row("codex", "skill", "orch-helper", True),
+            ui.Row("claude", "skill", "unrelated", True)]
+    check("single term filters", len(ui.match(rows, "orch")) == 2)
+    check("terms are ANDed", len(ui.match(rows, "orch claude")) == 1)
+    check("match is case-insensitive", len(ui.match(rows, "ORCH")) == 2)
+    check("empty query returns everything", len(ui.match(rows, "")) == 3)
+
+
+def test_row_tracks_staged_change() -> None:
+    import ui
+    r = ui.Row("claude", "skill", "demo", True)
+    check("unchanged row reports no change", not r.changed)
+    r.staged = False
+    check("unticking marks a change", r.changed)
+    check("label is harness/type/name", r.label == "claude/skill/demo")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

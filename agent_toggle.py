@@ -13,6 +13,7 @@ to the targets -- a user's `git status` must not change because of our
 bookkeeping.
 
 Usage:
+    agent_toggle.py ui                         # interactive picker (curses)
     agent_toggle.py disable <type> <name>...   [--harness H]
     agent_toggle.py enable  <type> <name>...   [--harness H]
     agent_toggle.py list [<type>]              # what is currently disabled
@@ -625,6 +626,43 @@ def cmd_migrate(state: dict) -> int:
 
 # --------------------------------------------------------------------- main
 
+def apply_changes(changes: list, state: dict) -> int:
+    """Run the staged picker changes, batched per harness/type/direction."""
+    batches: dict[tuple[str, str, str], list[str]] = {}
+    for row in changes:
+        action = "enable" if row.staged else "disable"
+        batches.setdefault((row.harness, row.type, action), []).append(row.name)
+
+    fails = 0
+    for (harness, type_, action), names in sorted(batches.items()):
+        home, supported, backend = HARNESSES[harness]
+        print(f"\n{action} {type_} on {harness}:")
+        if type_ in SUBDIRS:
+            fails += toggle_dir_type(action, type_, names, state, harness, home)
+        elif type_ == "mcp":
+            fails += toggle_mcp(action, names, state, harness, home, backend)
+    return fails
+
+
+def cmd_ui(state: dict) -> int:
+    try:
+        import ui
+    except ImportError as e:                 # no curses build (rare)
+        die(f"interactive UI unavailable: {e}")
+    changes = ui.pick(state, HARNESSES, SUBDIRS)
+    if changes is None:
+        print("cancelled -- nothing changed")
+        return 0
+    if not changes:
+        print("no changes")
+        return 0
+    fails = apply_changes(changes, state)
+    save_state(state)
+    if any(r.type == "mcp" for r in changes):
+        print("\nMCP changed -- open a NEW session for it to take effect.")
+    return 1 if fails else 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
@@ -641,6 +679,8 @@ def main(argv: list[str]) -> int:
     cmd, rest = argv[0], argv[1:]
     state = load_state()
 
+    if cmd in ("ui", "pick"):
+        return cmd_ui(state)
     if cmd == "status":
         return cmd_status(state)
     if cmd == "migrate":

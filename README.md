@@ -34,6 +34,7 @@ python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
 
 | command | what it does |
 |---|---|
+| `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore |
 | `list [type]` | what is currently disabled |
 | `disable <type> <name>...` | park one or more items |
@@ -53,6 +54,44 @@ agent_toggle.py enable  mcp     telegram-mcp
 ```
 
 A colon addresses nesting: `orch:batch` is `commands/orch/batch.md`.
+
+## Interactive picker
+
+```sh
+agent_toggle.py ui
+```
+
+```
+ filter: telegram█
+  [x] claude   command telegram-summary
+ *[ ] claude   skill   telegram-display
+  [x] claude   skill   telegram-group-send
+  [ ] claude   mcp     telegram-mcp
+
+ 4 shown  |  1 change(s) staged -- Enter to apply
+ ↑↓ move  Tab tick/untick  Enter apply  Esc cancel  type to filter
+```
+
+| key | action |
+|---|---|
+| any printable character | appends to the filter (terms are ANDed, case-insensitive) |
+| `Backspace` / `Ctrl-U` | delete one character / clear the filter |
+| `↑` `↓` / `Ctrl-P` `Ctrl-N` | move; `PgUp`/`PgDn` jump a screen |
+| `Tab` | tick / untick the highlighted row |
+| `Enter` | apply every staged change |
+| `Esc` / `Ctrl-C` | cancel — nothing is applied |
+
+The checkbox shows the **enabled** state: `[x]` is live, `[ ]` is parked. A
+`*` marks a row you changed.
+
+Nothing happens while the picker is open. Changes are staged, the screen is
+torn down, and only then do the real operations run — so their output (which
+companion files moved, which were kept because they are shared) is readable
+instead of fighting curses for the terminal.
+
+Built on stdlib `curses`, so there is nothing to install. Plugins are not in
+the picker: enumerating them needs a `claude plugin list` subprocess whose
+output format is not contracted, so they stay a CLI operation.
 
 ## What each harness supports
 
