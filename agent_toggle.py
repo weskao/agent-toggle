@@ -454,6 +454,52 @@ def claude_mcp_config(name: str) -> tuple[dict, str, str | None] | None:
     return hits[0][1], "local", hits[0][0]
 
 
+def claudeai_connector_names() -> set[str]:
+    """Names claude.ai connectors are known under (account-level, no local
+    mcpServers entry -- .claudeAiMcpEverConnected is the only place they are
+    listed)."""
+    try:
+        cfg = json.loads((HOME / ".claude.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return set(cfg.get("claudeAiMcpEverConnected", []) or [])
+
+
+def toggle_claudeai_connector(action: str, name: str) -> tuple[bool, list | str]:
+    """Fan a claude.ai connector on/off across every EXISTING project entry
+    in ~/.claude.json's disabledMcpServers list -- the only place /mcp writes
+    that state; no `claude mcp` CLI verb reaches it.
+
+    ponytail: covers projects that exist now; a project dir opened for the
+    first time later starts without the entry until this is re-run for it.
+    """
+    path = HOME / ".claude.json"
+    try:
+        cfg = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return False, f"~/.claude.json unreadable: {e}"
+
+    touched = []
+    for proj, pdata in cfg.get("projects", {}).items():
+        if not isinstance(pdata, dict):
+            continue
+        cur = pdata.get("disabledMcpServers") or []
+        has = name in cur
+        if action == "disable" and not has:
+            pdata["disabledMcpServers"] = [*cur, name]
+            touched.append(proj)
+        elif action == "enable" and has:
+            pdata["disabledMcpServers"] = [n for n in cur if n != name]
+            touched.append(proj)
+
+    if not touched:
+        return True, []
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    tmp.replace(path)
+    return True, touched
+
+
 # ---------------------------------------------------------------- mcp: toml
 
 def toml_block(text: str, name: str) -> tuple[int, int] | None:
@@ -509,6 +555,31 @@ def toggle_mcp(action: str, names: list[str], state: dict,
     fails = 0
     for name in names:
         key = f"{harness}:mcp:{name}"
+
+        if backend == "claude-json" and name in claudeai_connector_names():
+            ok, detail = toggle_claudeai_connector(action, name)
+            if not ok:
+                print(f"  x mcp {name}: {detail}")
+                log(action, "mcp", name, "error", str(detail))
+                fails += 1
+                continue
+            n = len(detail)
+            if action == "disable":
+                state["disabled"][key] = {
+                    "harness": harness, "type": "mcp", "name": name,
+                    "connector": True,
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                print(f"  v mcp {name} disabled across {n} project(s) "
+                      f"(claude.ai connector -- account stays connected, "
+                      f"just parked per-project; new project dirs need a re-run)")
+            else:
+                state["disabled"].pop(key, None)
+                print(f"  v mcp {name} restored across {n} project(s) "
+                      f"(open a NEW session for it to load)")
+            log(action, "mcp", name, "ok", json.dumps(detail))
+            continue
+
         bp = BACKUP_DIR / f"{harness}__{name.replace('/', '_')}.json"
         scope, project = "user", None
 
