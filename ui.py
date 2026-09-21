@@ -59,9 +59,15 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
     if backend == "claude-json":
         try:
             cfg = json.loads((Path.home() / ".claude.json").read_text())
-            return sorted(cfg.get("mcpServers", {}))
         except (OSError, json.JSONDecodeError):
             return []
+        # Local-scope servers are nested per project; without them the picker
+        # silently hides everything added with `claude mcp add -s local`.
+        names = set(cfg.get("mcpServers", {}))
+        for pdata in cfg.get("projects", {}).values():
+            if isinstance(pdata, dict):
+                names.update(pdata.get("mcpServers") or {})
+        return sorted(names)
     if backend == "toml":
         config = home / "config.toml"
         if not config.is_file():

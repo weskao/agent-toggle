@@ -136,6 +136,22 @@ visible rather than silent.
 
 MCP changes need a **new session** to take effect.
 
+### Claude MCP scopes
+
+Both scopes stored in `~/.claude.json` are togglable, and the scope round-trips:
+
+| scope | lives in | toggle |
+|---|---|---|
+| user | top-level `mcpServers` | ✓ |
+| local | `projects/<dir>/mcpServers` | ✓ — project path saved with the backup |
+| project | the repo's own `.mcp.json` | — committed config, not ours to move |
+| claude.ai connector | your account | — turn off at claude.ai → Settings → Connectors |
+
+`claude mcp remove -s local` only sees the project it runs in, so the project
+path is recorded at disable time and the restore runs back in that directory.
+One name that is local-scope in several projects is refused unless your cwd
+picks the winner — guessing would restore it into the wrong project.
+
 ## Where state lives
 
 All of it in `~/.agent-toggle/`, never as marker files next to the targets —

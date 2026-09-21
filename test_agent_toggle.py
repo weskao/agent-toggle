@@ -235,6 +235,75 @@ def test_toml_mcp_roundtrip() -> None:
         sb.close()
 
 
+# ----------------------------------------------------------- mcp: scopes
+
+def _claude_json(sb: Sandbox, payload: dict) -> None:
+    (sb.tmp / ".claude.json").write_text(json.dumps(payload))
+
+
+def test_mcp_lookup_reports_scope_and_project() -> None:
+    sb = Sandbox()
+    try:
+        _claude_json(sb, {
+            "mcpServers": {"dart": {"command": "dart"}},
+            "projects": {"/work/app": {"mcpServers": {"mobile": {"command": "npx"}}}},
+        })
+        check("user-scope server is found", at.claude_mcp_config("dart")
+              == ({"command": "dart"}, "user", None))
+        check("local-scope server is found with its project",
+              at.claude_mcp_config("mobile")
+              == ({"command": "npx"}, "local", "/work/app"))
+        check("absent server is still None", at.claude_mcp_config("nope") is None)
+    finally:
+        sb.close()
+
+
+def test_mcp_lookup_refuses_ambiguous_local_scope() -> None:
+    """Same name in two projects: guessing would restore it to the wrong one."""
+    sb = Sandbox()
+    try:
+        _claude_json(sb, {"projects": {
+            "/work/a": {"mcpServers": {"dup": {"command": "a"}}},
+            "/work/b": {"mcpServers": {"dup": {"command": "b"}}},
+        }})
+        try:
+            at.claude_mcp_config("dup")
+            check("ambiguous local scope is refused", False, "no LookupError")
+        except LookupError as e:
+            check("ambiguous local scope is refused", "2 projects" in str(e))
+        state = {"version": 2, "disabled": {}}
+        fails = at.toggle_mcp("disable", ["dup"], state, "claude", sb.home,
+                              "claude-json")
+        check("ambiguity counts as a failure, not a crash", fails == 1)
+        check("nothing recorded for the ambiguous server", not state["disabled"])
+    finally:
+        sb.close()
+
+
+def test_mcp_enable_defaults_to_user_scope_for_old_entries() -> None:
+    """Entries parked before scope tracking have no scope field."""
+    sb = Sandbox()
+    try:
+        at.BACKUP_DIR.mkdir(parents=True)
+        bp = at.BACKUP_DIR / "claude__legacy.json"
+        bp.write_text('{"command": "x"}')
+        calls: list[tuple[list[str], str | None]] = []
+        saved = at.run_cli
+        at.run_cli = lambda b, args, cwd=None: (calls.append((args, cwd)), (True, ""))[1]
+        try:
+            state = {"version": 2, "disabled": {"claude:mcp:legacy": {
+                "harness": "claude", "type": "mcp", "name": "legacy",
+                "backend": "claude-json", "backup": str(bp), "at": "2026-01-01"}}}
+            at.toggle_mcp("enable", ["legacy"], state, "claude", sb.home, "claude-json")
+        finally:
+            at.run_cli = saved
+        args, cwd = calls[-1]
+        check("scopeless entry restores to user scope", "user" in args)
+        check("scopeless entry restores with no cwd", cwd is None)
+    finally:
+        sb.close()
+
+
 # ----------------------------------------------------------------- migrate
 
 def test_migrate_imports_legacy_state() -> None:

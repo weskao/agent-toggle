@@ -114,13 +114,17 @@ def claude_bin() -> str | None:
     return None
 
 
-def run_cli(binary: str | None, args: list[str]) -> tuple[bool, str]:
+def run_cli(binary: str | None, args: list[str], cwd: str | None = None) -> tuple[bool, str]:
+    """Run a harness CLI. `cwd` matters: `claude mcp -s local` is per-project."""
     if not binary:
         return False, "CLI not found on PATH"
     try:
-        p = subprocess.run([binary, *args], capture_output=True, text=True, timeout=120)
+        p = subprocess.run([binary, *args], capture_output=True, text=True,
+                           timeout=120, cwd=cwd)
     except subprocess.TimeoutExpired:
         return False, "CLI timed out after 120s"
+    except OSError as e:                     # cwd gone, binary unexecutable
+        return False, f"cannot run CLI{f' in {cwd}' if cwd else ''}: {e}"
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
@@ -410,18 +414,44 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str) -> i
 
 # ---------------------------------------------------------------- mcp: json
 
-def claude_mcp_config(name: str) -> dict | None:
-    """Read a server's RAW config from ~/.claude.json.
+def claude_mcp_config(name: str) -> tuple[dict, str, str | None] | None:
+    """Find a server's RAW config in ~/.claude.json -> (config, scope, project).
 
     `claude mcp get` prints a human summary that silently drops auth fields
     (headers, headersHelper), so a backup built from it restores a server that
     then fails with 401. The raw entry is the only lossless source.
+
+    Two places hold one: user scope at the top level, and local scope nested
+    under projects/<dir>. The project path travels with the backup because
+    `claude mcp remove -s local` only sees the project it is run in -- restore
+    it from the wrong directory and the server reappears in the wrong project.
+
+    Raises LookupError when one name is local-scope in several projects and
+    the cwd does not pick a winner.
     """
     try:
         cfg = json.loads((HOME / ".claude.json").read_text())
-        return cfg.get("mcpServers", {}).get(name)
     except (OSError, json.JSONDecodeError):
         return None
+
+    raw = cfg.get("mcpServers", {}).get(name)
+    if raw is not None:
+        return raw, "user", None
+
+    hits = [(proj, pdata["mcpServers"][name])
+            for proj, pdata in cfg.get("projects", {}).items()
+            if isinstance(pdata, dict) and name in (pdata.get("mcpServers") or {})]
+    if not hits:
+        return None
+    cwd = str(Path.cwd())
+    for proj, raw in hits:
+        if proj == cwd:
+            return raw, "local", proj
+    if len(hits) > 1:
+        raise LookupError(
+            f"local-scope in {len(hits)} projects "
+            f"({', '.join(p for p, _ in hits)}) -- cd into the one you mean")
+    return hits[0][1], "local", hits[0][0]
 
 
 # ---------------------------------------------------------------- mcp: toml
@@ -480,22 +510,32 @@ def toggle_mcp(action: str, names: list[str], state: dict,
     for name in names:
         key = f"{harness}:mcp:{name}"
         bp = BACKUP_DIR / f"{harness}__{name.replace('/', '_')}.json"
+        scope, project = "user", None
 
         if action == "disable":
             if backend == "claude-json":
-                raw = claude_mcp_config(name)
-                if raw is None:
+                try:
+                    found = claude_mcp_config(name)
+                except LookupError as e:
+                    print(f"  x mcp {name}: {e}")
+                    log(action, "mcp", name, "error", str(e))
+                    fails += 1
+                    continue
+                if found is None:
                     ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
                     hint = ("account-level claude.ai connector -- disable it at "
                             "claude.ai (Settings -> Connectors)"
                             if ok and "claude.ai config" in cfg
-                            else "not in ~/.claude.json user scope")
+                            else "not in ~/.claude.json (user or local scope) -- "
+                                 "project scope lives in the repo's own .mcp.json")
                     print(f"  x mcp {name}: {hint}")
                     log(action, "mcp", name, "error", hint)
                     fails += 1
                     continue
+                raw, scope, project = found
                 bp.write_text(json.dumps(raw, indent=2, ensure_ascii=False))
-                ok, out = run_cli(claude_bin(), ["mcp", "remove", name, "-s", "user"])
+                ok, out = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
+                                  cwd=project)
                 if not ok:
                     print(f"  x mcp {name}: {out[:100]}")
                     log(action, "mcp", name, "error", out[:200])
@@ -513,9 +553,11 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             state["disabled"][key] = {
                 "harness": harness, "type": "mcp", "name": name,
                 "backend": backend, "backup": str(bp),
+                "scope": scope, "project": project,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
-            print(f"  v mcp {name} removed (config saved to {bp})")
+            where = f" [{scope}{f': {project}' if project else ''}]"
+            print(f"  v mcp {name} removed{where} (config saved to {bp})")
             log(action, "mcp", name, "ok", str(bp))
         else:
             entry = state["disabled"].get(key)
@@ -528,8 +570,18 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             if (entry or {}).get("backend", backend) == "toml":
                 codex_mcp_add(home / "config.toml", json.loads(payload)["toml"])
             else:
+                # Entries parked before scope tracking have neither field;
+                # they were user-scope by construction, so that is the default.
+                scope = (entry or {}).get("scope") or "user"
+                project = (entry or {}).get("project")
+                if project and not Path(project).is_dir():
+                    print(f"  x mcp {name}: project {project} is gone -- "
+                          f"re-add it by hand from {path}")
+                    fails += 1
+                    continue
                 ok, out = run_cli(claude_bin(),
-                                  ["mcp", "add-json", "--scope", "user", name, payload])
+                                  ["mcp", "add-json", "--scope", scope, name, payload],
+                                  cwd=project)
                 if not ok:
                     print(f"  x mcp {name}: {out[:120]}")
                     log(action, "mcp", name, "error", out[:200])
