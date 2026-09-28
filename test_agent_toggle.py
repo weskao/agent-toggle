@@ -442,6 +442,22 @@ def test_row_tracks_staged_change() -> None:
     check("label is harness/type/name", r.label == "claude/skill/demo")
 
 
+def test_parked_drift_flags_untracked_and_live_twins() -> None:
+    sb = Sandbox()
+    try:
+        parked, live = sb.home / "skills-disabled", sb.home / "skills"
+        for n in ("tracked", "orphan", "twin"):
+            (parked / n).mkdir(parents=True)
+        (live / "twin").mkdir()
+        items = sorted(parked.iterdir())
+        untracked, twins = at.parked_drift(items, parked, live, {str(parked / "tracked")})
+        check("tracked item is not drift",
+              sorted(p.name for p in untracked) == ["orphan", "twin"])
+        check("only the live-twin is reported as a twin", twins == ["twin"])
+    finally:
+        sb.close()
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

@@ -35,7 +35,7 @@ python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
 | command | what it does |
 |---|---|
 | `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
-| `status` | health check: harnesses found, types each supports, parked counts, gitignore |
+| `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items and stale live twins |
 | `list [type]` | what is currently disabled |
 | `disable <type> <name>...` | park one or more items |
 | `enable <type> <name>...` | put them back |

@@ -703,14 +703,30 @@ def cmd_status(state: dict) -> int:
             # sit one level down. Counting rglob("*") for skills would report
             # every file inside every skill.
             if not parked.is_dir():
-                n = 0
+                items = []
             elif t == "skill":
-                n = sum(1 for _ in parked.iterdir())
+                items = list(parked.iterdir())
             else:
-                n = sum(1 for p in parked.rglob("*") if p.is_file())
+                items = [p for p in parked.rglob("*") if p.is_file()]
             ign = "gitignored" if gitignored(parked, home) else "NOT gitignored"
-            print(f"          {t:<8} {n:>3} parked  [{ign}]")
+            print(f"          {t:<8} {len(items):>3} parked  [{ign}]")
+            tracked = {e["parked_at"] for e in state["disabled"].values()
+                       if e.get("harness") == hname and e.get("type") == t}
+            untracked, twins = parked_drift(items, parked, home / SUBDIRS[t], tracked)
+            if untracked:
+                print(f"                   ! {len(untracked)} untracked (parked outside this tool)"
+                      + (f", {len(twins)} also live: {', '.join(twins)}"
+                         " -- stale copies; `disable` of these names will refuse" if twins else ""))
     return 0
+
+
+def parked_drift(items: list[Path], parked: Path, live: Path,
+                 tracked: set[str]) -> tuple[list[Path], list[str]]:
+    """Parked items with no state entry, and the names among them that also exist live."""
+    untracked = [p for p in items if str(p) not in tracked]
+    twins = sorted(str(p.relative_to(parked)) for p in untracked
+                   if (live / p.relative_to(parked)).exists())
+    return untracked, twins
 
 
 def cmd_migrate(state: dict) -> int:

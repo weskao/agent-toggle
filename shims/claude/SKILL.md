@@ -19,7 +19,7 @@ python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> [args]
 | command | what it does |
 |---|---|
 | `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
-| `status` | harnesses found, types each supports, parked counts, gitignore check |
+| `status` | harnesses found, types each supports, parked counts, gitignore check, untracked parked items + stale live twins |
 | `list [type]` | what is currently disabled |
 | `disable <type> <name>...` | park one or more items |
 | `enable <type> <name>...` | put them back |
