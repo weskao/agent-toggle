@@ -179,7 +179,8 @@ def prune_empty(start: Path, stop: Path) -> None:
 def gitignored(path: Path, repo: Path) -> bool:
     """True if git ignores `path`. Unknown (no git / not a repo) counts as False."""
     try:
-        p = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", str(path)],
+        target_str = str(path) + "/"
+        p = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", target_str],
                            capture_output=True, timeout=10)
         return p.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
