@@ -138,7 +138,7 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
     end up scattered at the parked-dir root. shutil.move() behaves the same.
     So: create the directory, then prove it is a directory, before touching src.
     """
-    if not src.exists():
+    if not (src.exists() or src.is_symlink()):
         raise FileNotFoundError(f"{src} does not exist")
 
     # Order matters: mkdir(exist_ok=True) raises FileExistsError when the path
@@ -154,7 +154,7 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
         raise NotADirectoryError(f"{dest_dir} is not a directory after mkdir")
 
     target = dest_dir / src.name
-    if target.exists():
+    if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists -- refusing to overwrite")
 
     shutil.move(str(src), str(target))
@@ -318,7 +318,7 @@ def resolve_item(base: Path, name: str) -> Path | None:
     rel = name.replace(":", "/")
     for suffix in PROBE_SUFFIXES:
         p = base / (rel + suffix)
-        if p.exists():
+        if p.exists() or p.is_symlink():
             return p
     return None
 
@@ -364,7 +364,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
         else:
             entry = state["disabled"].get(key)
             src = Path(entry["parked_at"]) if entry else resolve_item(parked, name)
-            if src is None or not src.exists():
+            if src is None or not (src.exists() or src.is_symlink()):
                 print(f"  x {type_} {name}: nothing parked to restore")
                 fails += 1
                 continue
@@ -725,7 +725,7 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
     """Parked items with no state entry, and the names among them that also exist live."""
     untracked = [p for p in items if str(p) not in tracked]
     twins = sorted(str(p.relative_to(parked)) for p in untracked
-                   if (live / p.relative_to(parked)).exists())
+                   if (live / p.relative_to(parked)).exists() or (live / p.relative_to(parked)).is_symlink())
     return untracked, twins
 
 

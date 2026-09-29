@@ -442,6 +442,26 @@ def test_row_tracks_staged_change() -> None:
     check("label is harness/type/name", r.label == "claude/skill/demo")
 
 
+def test_symlink_disable_roundtrip() -> None:
+    sb = Sandbox()
+    try:
+        live = sb.home / "skills"
+        live.mkdir(parents=True, exist_ok=True)
+        # Create a broken symlink
+        link = live / "broken-symlink"
+        link.symlink_to(sb.home / "nonexistent-target")
+        state = {"version": 2, "disabled": {}}
+        fails = at.toggle_dir_type("disable", "skill", ["broken-symlink"], state, "claude", sb.home)
+        check("broken symlink disabled without error", fails == 0)
+        check("broken symlink moved to parked", (sb.home / "skills-disabled" / "broken-symlink").is_symlink())
+        check("broken symlink gone from live", not (live / "broken-symlink").exists() and not (live / "broken-symlink").is_symlink())
+        fails_enable = at.toggle_dir_type("enable", "skill", ["broken-symlink"], state, "claude", sb.home)
+        check("broken symlink restored without error", fails_enable == 0)
+        check("broken symlink back in live", (live / "broken-symlink").is_symlink())
+    finally:
+        sb.close()
+
+
 def test_parked_drift_flags_untracked_and_live_twins() -> None:
     sb = Sandbox()
     try:

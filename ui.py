@@ -47,12 +47,15 @@ def live_names(base: Path, type_: str) -> list[str]:
         return []
     if type_ == "skill":
         return sorted(p.name for p in base.iterdir()
-                      if p.is_dir() and not p.name.startswith("."))
+                      if (p.is_dir() or p.is_symlink()) and not p.name.startswith("."))
     names = []
-    for p in sorted(base.rglob("*.md")):
-        rel = p.relative_to(base).with_suffix("")
-        names.append(str(rel).replace("/", ":"))
-    return names
+    for p in sorted(base.rglob("*")):
+        if p.name.startswith("."):
+            continue
+        if p.suffix in (".md", ".toml", ".yaml", ".yml") or p.is_symlink() or (p.is_file() and not p.suffix):
+            rel = p.relative_to(base).with_suffix("")
+            names.append(str(rel).replace("/", ":"))
+    return sorted(set(names))
 
 
 def live_mcp(home: Path, backend: str | None) -> list[str]:
