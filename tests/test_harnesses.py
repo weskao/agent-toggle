@@ -1,0 +1,46 @@
+"""The harness table: frozen records, today's capabilities, sandbox HOME."""
+from __future__ import annotations
+
+import dataclasses
+
+from base import SandboxCase
+
+from agent_toggle import harnesses as hz
+from agent_toggle.harnesses import build
+
+TODAY = {
+    ("claude", t) for t in ("skill", "agent", "command", "plugin", "mcp")
+} | {
+    ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
+} | {("grok", "skill"), ("openclaw", "skill"), ("openclaw", "agent")}
+
+
+class HarnessTableTest(SandboxCase):
+    def test_records_are_frozen(self) -> None:
+        h = build(self.tmp)["claude"]
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            h.name = "x"                       # type: ignore[misc]
+        with self.assertRaises(TypeError):
+            h.dirs["skill"] = ("elsewhere",)   # type: ignore[index]
+        with self.assertRaises(TypeError):
+            h.mechanisms["skill"] = "flag"     # type: ignore[index]
+
+    def test_supported_pairs_match_today(self) -> None:
+        pairs = {(n, t) for n, h in build(self.tmp).items() for t in h.types}
+        self.assertEqual(pairs, TODAY)
+
+    def test_every_move_pair_has_dirs(self) -> None:
+        for n, h in build(self.tmp).items():
+            for t, mech in h.mechanisms.items():
+                if mech == "move":
+                    self.assertTrue(h.dirs.get(t), f"{n}:{t} claims move but has no dirs")
+
+    def test_homes_and_mcp_backends(self) -> None:
+        t = build(self.tmp)
+        self.assertEqual(t["claude"].home, self.tmp / ".claude")
+        self.assertEqual(t["claude"].backend, "claude-json")
+        self.assertEqual(t["codex"].backend, "toml")
+        self.assertIsNone(t["openclaw"].mcp)
+
+    def test_harnesses_honours_sandbox_home(self) -> None:
+        self.assertEqual(hz.harnesses()["codex"].home, self.tmp / ".codex")

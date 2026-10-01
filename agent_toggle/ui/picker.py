@@ -84,7 +84,7 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
     return []
 
 
-def collect(state: dict, harnesses: dict, subdirs: dict) -> list[Row]:
+def collect(state: dict, harnesses: dict) -> list[Row]:
     """Every togglable resource on this machine, live and parked.
 
     Plugins are absent on purpose: enumerating them needs a `claude plugin
@@ -94,14 +94,16 @@ def collect(state: dict, harnesses: dict, subdirs: dict) -> list[Row]:
     rows: list[Row] = []
     seen: set[tuple[str, str, str]] = set()
 
-    for hname, (home, types, backend) in harnesses.items():
+    for hname, h in harnesses.items():
+        home = h.home
         if not home.is_dir():
             continue
-        for type_ in types:
-            if type_ in subdirs:
-                names = live_names(home / subdirs[type_], type_)
+        for type_ in h.types:
+            if type_ in h.dirs:
+                names = sorted({n for sub in h.dirs[type_]
+                                for n in live_names(home / sub, type_)})
             elif type_ == "mcp":
-                names = live_mcp(home, backend)
+                names = live_mcp(home, h.backend)
             else:
                 continue                      # plugin: CLI only
             for name in names:
@@ -209,8 +211,8 @@ def loop(win, rows: list[Row]) -> list[Row] | None:
         # KEY_RESIZE and anything else just redraw
 
 
-def pick(state: dict, harnesses: dict, subdirs: dict) -> list[Row] | None:
-    rows = collect(state, harnesses, subdirs)
+def pick(state: dict, harnesses: dict) -> list[Row] | None:
+    rows = collect(state, harnesses)
     if not rows:
         print("nothing to show")
         return None

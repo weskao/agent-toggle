@@ -16,7 +16,7 @@ from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
 from .backends.plugin_cli import claude_bin, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
-from .harnesses import PROBE_SUFFIXES, SUBDIRS
+from .harnesses import PROBE_SUFFIXES, harnesses
 from .output import Result
 from .store import log
 
@@ -50,27 +50,40 @@ def resolve_item(base: Path, name: str) -> Path | None:
     return None
 
 
+def _probe(home: Path, subs: tuple[str, ...], name: str,
+           suffix: str) -> tuple[str, Path | None]:
+    """First candidate subdir (`<sub><suffix>`) holding `name`; (subs[0], None) if none."""
+    for sub in subs:
+        found = resolve_item(home / (sub + suffix), name)
+        if found:
+            return sub, found
+    return subs[0], None
+
+
 def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                     harness: str, home: Path, out: Result | None = None,
                     dry_run: bool = False) -> int:
     """Park / restore skills, agents, commands. dry_run plans and writes nothing."""
     out = out or Result()
-    live = home / SUBDIRS[type_]
-    parked = home / f"{SUBDIRS[type_]}-disabled"
+    subs = harnesses()[harness].dirs[type_]     # candidate subdirs, probed in order
     fails = 0
 
-    if action == "disable" and not gitignored(parked, home):
-        out.warn(f"{parked} is NOT gitignored -- disabling will dirty `git status`. "
-                 f"fix: echo '{parked.name}/' >> {home}/.gitignore")
+    if action == "disable":
+        for sub in subs:
+            parked = home / f"{sub}-disabled"
+            if not gitignored(parked, home):
+                out.warn(f"{parked} is NOT gitignored -- disabling will dirty `git status`. "
+                         f"fix: echo '{parked.name}/' >> {home}/.gitignore")
 
     for name in names:
         fs.refresh_lock()
         key = f"{harness}:{type_}:{name}"
         if action == "disable":
-            src = resolve_item(live, name)
+            sub, src = _probe(home, subs, name, "")
+            live, parked = home / sub, home / f"{sub}-disabled"
             if src is None:
                 fails += _fail(out, dry_run, harness, type_, action, name,
-                               f"not found under {live}")
+                               "not found under " + " or ".join(str(home / s_) for s_ in subs))
                 continue
             # Preserve nesting: commands/orch/batch.md parks as orch/batch.md,
             # so two different <group>/mcp.md cannot collide at the park root.
@@ -95,7 +108,12 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 log(action, type_, name, "ok", harness)
         else:
             entry = state["disabled"].get(key)
-            src = Path(entry["parked_at"]) if entry else resolve_item(parked, name)
+            sub, src = _probe(home, subs, name, "-disabled")
+            if entry:
+                src = Path(entry["parked_at"])
+                sub = next((s_ for s_ in subs
+                            if src.is_relative_to(home / f"{s_}-disabled")), sub)
+            live, parked = home / sub, home / f"{sub}-disabled"
             if src is None or not (src.exists() or src.is_symlink()):
                 fails += _fail(out, dry_run, harness, type_, action, name,
                                "nothing parked to restore")

@@ -33,7 +33,7 @@ class InstallShimsCase(SandboxCase):
         return rc, json.loads(buf.getvalue())
 
     def installed(self) -> set[str]:
-        return {h for h, (home, _, _) in harnesses().items() if shim(home).is_file()}
+        return {h for h, rec in harnesses().items() if shim(rec.home).is_file()}
 
     def test_writes_only_existing_harnesses(self) -> None:
         rc, env = self.run_cli()

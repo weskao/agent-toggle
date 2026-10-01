@@ -6,6 +6,8 @@ import unittest
 
 from base import SandboxCase
 
+from agent_toggle.harnesses import build
+
 try:
     from agent_toggle.ui import picker
 except ImportError:              # no curses build (Windows without windows-curses)
@@ -49,8 +51,7 @@ class PickerTest(SandboxCase):
             "claude:plugin:x": {"harness": "claude", "type": "plugin",
                                 "name": "x", "at": "2026-09-19"},
         }}
-        rows = picker.collect(state, {"claude": (self.home, ("skill",), None)},
-                              {"skill": "skills"})
+        rows = picker.collect(state, {"claude": build(self.tmp)["claude"]})
         by_name = {r.name: r for r in rows}
         # live item present and ticked
         self.assertIs(by_name["live-one"].enabled, True)

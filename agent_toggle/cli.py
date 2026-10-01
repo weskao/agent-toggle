@@ -37,7 +37,7 @@ from pathlib import Path
 from . import __version__, fs, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
-from .harnesses import SUBDIRS, TYPES, harness_of, harnesses
+from .harnesses import TYPES, harness_of, harnesses
 from .mechanisms import toggle_dir_type, toggle_mcp, toggle_plugin
 from .output import CliError, Result, die
 from .store import load_state, save_state
@@ -84,36 +84,46 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     out.row(None, None, None, "status", "ok", "", show=False,
             state_file=str(fs.state_file()), log_file=str(fs.log_file()),
             disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy)
-    for hname, (home, types, backend) in harnesses().items():
+    for hname, h in harnesses().items():
         if only and hname != only:
             continue
+        home, backend = h.home, h.backend
         if not home.is_dir():
             out.say(f"{hname:<9} {home}  (not installed)")
             out.row(hname, None, None, "status", "not-installed", "", show=False,
                     home=str(home))
             continue
-        bits = [t for t in types if t not in SUBDIRS or (home / SUBDIRS[t]).is_dir()]
+        bits = [t for t in h.types
+                if t not in h.dirs or any((home / s).is_dir() for s in h.dirs[t])]
         out.say(f"{hname:<9} {home}  types: {','.join(bits)}  mcp: {backend or '-'}")
         info: dict = {}
         for t in bits:
-            if t not in SUBDIRS:
+            if t not in h.dirs:
                 continue
-            parked = home / f"{SUBDIRS[t]}-disabled"
-            # Skills are directories; agents and commands are files that may
-            # sit one level down. Counting rglob("*") for skills would report
-            # every file inside every skill.
-            if not parked.is_dir():
-                items = []
-            elif t == "skill":
-                items = list(parked.iterdir())
-            else:
-                items = [p for p in parked.rglob("*") if p.is_file()]
-            ign = gitignored(parked, home)
-            out.say(f"          {t:<8} {len(items):>3} parked  "
-                    f"[{'gitignored' if ign else 'NOT gitignored'}]")
             tracked = {e["parked_at"] for e in state["disabled"].values()
                        if e.get("harness") == hname and e.get("type") == t}
-            untracked, twins = parked_drift(items, parked, home / SUBDIRS[t], tracked)
+            items: list[Path] = []
+            untracked: list[Path] = []
+            twins: list[str] = []
+            ign = True
+            for sub in h.dirs[t]:
+                parked = home / f"{sub}-disabled"
+                # Skills are directories; agents and commands are files that may
+                # sit one level down. Counting rglob("*") for skills would report
+                # every file inside every skill.
+                if not parked.is_dir():
+                    found = []
+                elif t == "skill":
+                    found = list(parked.iterdir())
+                else:
+                    found = [p for p in parked.rglob("*") if p.is_file()]
+                items += found
+                ign = ign and gitignored(parked, home)
+                u, tw = parked_drift(found, parked, home / sub, tracked)
+                untracked += u
+                twins += tw
+            out.say(f"          {t:<8} {len(items):>3} parked  "
+                    f"[{'gitignored' if ign else 'NOT gitignored'}]")
             if untracked:
                 out.say(f"                   ! {len(untracked)} untracked (parked outside this tool)"
                         + (f", {len(twins)} also live: {', '.join(twins)}"
@@ -145,12 +155,12 @@ def apply_changes(changes: list, state: dict, out: Result | None = None) -> int:
     table = harnesses()
     fails = 0
     for (harness, type_, action), names in sorted(batches.items()):
-        home, supported, backend = table[harness]
+        h = table[harness]
         out.say(f"\n{action} {type_} on {harness}:")
-        if type_ in SUBDIRS:
-            fails += toggle_dir_type(action, type_, names, state, harness, home, out)
+        if type_ in h.dirs:
+            fails += toggle_dir_type(action, type_, names, state, harness, h.home, out)
         elif type_ == "mcp":
-            fails += toggle_mcp(action, names, state, harness, home, backend, out)
+            fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out)
     return fails
 
 
@@ -159,7 +169,7 @@ def cmd_ui(state: dict, out: Result) -> None:
         from .ui import picker as ui
     except ImportError as e:                 # no curses build (rare)
         die(f"interactive UI unavailable: {e}")
-    changes = ui.pick(state, harnesses(), SUBDIRS)
+    changes = ui.pick(state, harnesses())
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
@@ -178,19 +188,20 @@ def cmd_ui(state: dict, out: Result) -> None:
 
 def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     action, type_, names, harness = args.command, args.type, args.names, args.harness
-    home, supported, backend = harness_of(harness)
+    h = harness_of(harness)
+    home, supported = h.home, h.types
     if not home.is_dir():
         die(f"{harness} is not installed ({home} does not exist)", 4)
     if type_ not in supported:
         die(f"{harness} has no {type_} support (it has: {', '.join(supported)})", 4)
 
     def run(state: dict) -> None:
-        if type_ in SUBDIRS:
+        if type_ in h.dirs:
             toggle_dir_type(action, type_, names, state, harness, home, out, args.dry_run)
         elif type_ == "plugin":
             toggle_plugin(action, names, state, harness, out, args.dry_run)
         else:
-            toggle_mcp(action, names, state, harness, home, backend, out, args.dry_run)
+            toggle_mcp(action, names, state, harness, home, h.backend, out, args.dry_run)
 
     if args.dry_run:                # no lock, no state write, no log: plan only
         run(load_state(write_back=False))
@@ -234,19 +245,20 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
         text = "".join(ln for ln in template.splitlines(keepends=True)
                        if "__AGENT_TOGGLE_ROOT__" not in ln)
     table = harnesses()
-    park = sorted({f"{SUBDIRS[t]}-disabled" for _, types, _ in table.values()
-                   for t in types if t in SUBDIRS})
+    park = sorted({f"{sub}-disabled" for h in table.values()
+                   for subs in h.dirs.values() for sub in subs})
     verb = "would install" if args.dry_run else "installed"
     installed = 0
-    for hname, (home, types, _) in table.items():
+    for hname, h in table.items():
+        home = h.home
         if args.harness and hname != args.harness:
             continue
-        if "skill" not in types or not home.is_dir():
+        if "skill" not in h.dirs or not home.is_dir():
             out.row(hname, None, None, "install-shims", "skipped",
                     "not installed" if not home.is_dir() else "no skill support",
                     show=False, home=str(home))
             continue
-        dest = home / SUBDIRS["skill"] / "agent-toggle" / "SKILL.md"
+        dest = home / h.dirs["skill"][0] / "agent-toggle" / "SKILL.md"
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(text, encoding="utf-8")
