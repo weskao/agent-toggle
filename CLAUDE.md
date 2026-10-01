@@ -11,6 +11,7 @@ behave identically (same output, same exit code):
 | `version` | `--version` |
 | `status` | `--status` |
 | `list` | `--list` |
+| `cost` | `--cost` |
 | `ui` (alias `pick`) | `--ui`, `--pick` |
 | `migrate` | `--migrate` |
 | `install-shims` | `--install-shims` |

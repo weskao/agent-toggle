@@ -3,6 +3,7 @@ remove/re-add an MCP server."""
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -49,6 +50,52 @@ def resolve_item(base: Path, name: str) -> Path | None:
         if p.exists() or p.is_symlink():
             return p
     return None
+
+
+MCP_TOML_RE = re.compile(r"^\[mcp_servers\.([^.\]]+)\]\s*$", re.M)
+
+
+def live_names(base: Path, type_: str) -> list[str]:
+    """Names of live resources, with nesting addressed by a colon."""
+    if not base.is_dir():
+        return []
+    if type_ == "skill":
+        return sorted(p.name for p in base.iterdir()
+                      if (p.is_dir() or p.is_symlink()) and not p.name.startswith("."))
+    names = []
+    for p in sorted(base.rglob("*")):
+        if p.name.startswith("."):
+            continue
+        if p.suffix in (".md", ".toml", ".yaml", ".yml") or p.is_symlink() or (p.is_file() and not p.suffix):
+            rel = p.relative_to(base).with_suffix("")
+            names.append(str(rel).replace("/", ":"))
+    return sorted(set(names))
+
+
+def live_mcp(home: Path, backend: str | None) -> list[str]:
+    """Names of the MCP servers currently configured for one harness."""
+    if backend == "claude-json":
+        try:
+            cfg = json.loads(fs.claude_json().read_text())
+        except (OSError, json.JSONDecodeError):
+            return []
+        # Local-scope servers are nested per project; without them the picker
+        # silently hides everything added with `claude mcp add -s local`.
+        names = set(cfg.get("mcpServers", {}))
+        for pdata in cfg.get("projects", {}).values():
+            if isinstance(pdata, dict):
+                names.update(pdata.get("mcpServers") or {})
+        return sorted(names)
+    if backend == "toml":
+        config = home / "config.toml"
+        if not config.is_file():
+            return []
+        try:
+            # Same text-level approach as the write path: no TOML parser needed.
+            return sorted(set(MCP_TOML_RE.findall(config.read_text())))
+        except OSError:
+            return []
+    return []
 
 
 class DirView(NamedTuple):

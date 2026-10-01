@@ -12,7 +12,8 @@ to the targets -- a user's `git status` must not change because of our
 bookkeeping.
 
 Usage:
-    agent_toggle.py ui                         # interactive picker (curses)
+    agent_toggle.py ui [--dry-run]             # interactive picker (curses)
+    agent_toggle.py cost [--type T]            # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py list [<type>]              # what is currently disabled
@@ -34,7 +35,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, fs, store
+from . import __version__, cost, fs, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
@@ -159,7 +160,32 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
     return untracked, twins
 
 
-def apply_changes(changes: list, state: dict, out: Result | None = None) -> int:
+def cmd_cost(state: dict, out: Result, harness: str | None = None,
+             type_: str | None = None) -> None:
+    """Estimated startup tokens per item, biggest first. Read-only."""
+    items = [i for i in cost.inventory(state, harnesses(), out.warn)
+             if (not harness or harness in (i.harness, *i.shared_with))
+             and (not type_ or i.type == type_)]
+    items.sort(key=lambda i: (-i.tokens, -i.would_save, i.harness, i.type, i.name))
+    for i in items:
+        what = (f"~{i.tokens:>6} tok  {i.basis}" if i.enabled
+                else f"~{0:>6} tok  parked, would save ~{i.would_save} tok  ({i.basis})")
+        extra = f"  shared with {', '.join(i.shared_with)}" if i.shared_with else ""
+        out.say(f"  {i.harness:<9} {i.type:<8} {i.name:<36} {what}{extra}")
+        out.row(i.harness, i.type, i.name, "cost", "ok", i.basis, show=False,
+                enabled=i.enabled, tokens=i.tokens, would_save=i.would_save,
+                chars=i.chars, shared_with=list(i.shared_with))
+    live = sum(i.tokens for i in items)
+    saved = sum(i.would_save for i in items)
+    out.say(f"\n{len(items)} item(s): ~{live} tok loaded at startup; "
+            f"~{saved} tok already saved by parked items  "
+            f"(chars/{cost.CHARS_PER_TOKEN} estimate, +-25%)")
+    out.row(harness, type_, None, "cost", "ok", "total", show=False, items=len(items),
+            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA)
+
+
+def apply_changes(changes: list, state: dict, out: Result | None = None,
+                  dry_run: bool = False) -> int:
     """Run the staged picker changes, batched per harness/type/direction."""
     out = out or Result()
     batches: dict[tuple[str, str, str], list[str]] = {}
@@ -173,23 +199,29 @@ def apply_changes(changes: list, state: dict, out: Result | None = None) -> int:
         h = table[harness]
         out.say(f"\n{action} {type_} on {harness}:")
         if type_ in h.dirs:
-            fails += toggle_dir_type(action, type_, names, state, harness, h.home, out)
+            fails += toggle_dir_type(action, type_, names, state, harness, h.home, out, dry_run)
+        elif type_ == "plugin":
+            fails += toggle_plugin(action, names, state, harness, out, dry_run)
         elif type_ == "mcp":
-            fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out)
+            fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out, dry_run)
     return fails
 
 
-def cmd_ui(state: dict, out: Result) -> None:
+def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
     try:
         from .ui import picker as ui
     except ImportError as e:                 # no curses build (rare)
         die(f"interactive UI unavailable: {e}")
-    changes = ui.pick(state, harnesses())
+    changes = ui.pick(state, harnesses(), plugins=not dry_run)
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
     if not changes:
         out.say("no changes")
+        return
+    if dry_run:                     # plan only: no lock, no state write, no log
+        apply_changes(changes, load_state(write_back=False), out, True)
+        out.say("\ndry run -- nothing changed")
         return
     with fs.lock():
         state = load_state()          # re-read: the picker's copy may be stale
@@ -197,8 +229,8 @@ def cmd_ui(state: dict, out: Result) -> None:
             apply_changes(changes, state, out)
         finally:
             save_state(state)         # keep what already moved even if a later item crashed
-    if any(r.type == "mcp" for r in changes):
-        out.say("\nMCP changed -- open a NEW session for it to take effect.")
+    if any(r.type in ("mcp", "plugin") for r in changes):
+        out.say("\nMCP/plugin changed -- open a NEW session for it to take effect.")
 
 
 def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
@@ -299,7 +331,8 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     out.say(f"{installed} harness(es) {'planned' if args.dry_run else 'installed'}")
 
 
-COMMANDS = ("ui", "pick", "status", "list", "migrate", "disable", "enable", "install-shims")
+COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
+            "install-shims")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -349,10 +382,15 @@ def build_parser() -> argparse.ArgumentParser:
                        "3 locked, 4 unsupported pair / harness not installed")
     sub = p.add_subparsers(dest="command", required=True, metavar="command",
                            parser_class=_Parser)
-    sub.add_parser("ui", aliases=["pick"], parents=[common], help="interactive picker")
+    up = sub.add_parser("ui", aliases=["pick"], parents=[common], help="interactive picker")
+    up.add_argument("--dry-run", action="store_true",
+                    help="show the plan for what you stage; change nothing")
     sub.add_parser("status", parents=[common], help="health check")
     ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
     ls.add_argument("type", nargs="?", choices=TYPES)
+    cp = sub.add_parser("cost", parents=[common],
+                        help="estimated startup tokens per item, biggest first")
+    cp.add_argument("--type", choices=TYPES, help="only this resource type")
     sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
@@ -379,7 +417,9 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "ui":
             if out.json_mode:
                 die("ui is interactive; --json is not supported", 2)
-            cmd_ui(load_state(write_back=False), out)
+            cmd_ui(load_state(write_back=False), out, args.dry_run)
+        elif cmd == "cost":
+            cmd_cost(load_state(write_back=False), out, args.harness, args.type)
         elif cmd == "status":
             cmd_status(load_state(write_back=False), out, args.harness)
         elif cmd == "list":
