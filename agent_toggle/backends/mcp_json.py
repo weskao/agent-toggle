@@ -58,7 +58,8 @@ def claudeai_connector_names() -> set[str]:
     return set(cfg.get("claudeAiMcpEverConnected", []) or [])
 
 
-def toggle_claudeai_connector(action: str, name: str) -> tuple[bool, list | str]:
+def toggle_claudeai_connector(action: str, name: str,
+                              dry_run: bool = False) -> tuple[bool, list | str]:
     """Fan a claude.ai connector on/off across every EXISTING project entry
     in ~/.claude.json's disabledMcpServers list -- the only place /mcp writes
     that state; no `claude mcp` CLI verb reaches it.
@@ -85,8 +86,8 @@ def toggle_claudeai_connector(action: str, name: str) -> tuple[bool, list | str]
             pdata["disabledMcpServers"] = [n for n in cur if n != name]
             touched.append(proj)
 
-    if not touched:
-        return True, []
+    if not touched or dry_run:
+        return True, touched
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
     tmp.replace(path)

@@ -28,13 +28,15 @@ def toml_block(text: str, name: str) -> tuple[int, int] | None:
     return None if start is None else (start, end)
 
 
-def codex_mcp_remove(config: Path, name: str) -> str | None:
+def codex_mcp_remove(config: Path, name: str, dry_run: bool = False) -> str | None:
     text = config.read_text()
     span = toml_block(text, name)
     if span is None:
         return None
     lines = text.splitlines(keepends=True)
     block = "".join(lines[span[0]:span[1]])
+    if dry_run:
+        return block
     config.write_text("".join(lines[:span[0]] + lines[span[1]:]))
     return block
 

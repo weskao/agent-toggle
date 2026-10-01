@@ -37,12 +37,32 @@ python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
 | `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items and stale live twins |
 | `list [type]` | what is currently disabled |
-| `disable <type> <name>...` | park one or more items |
-| `enable <type> <name>...` | put them back |
+| `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan) |
+| `enable <type> <name>...` | put them back (`--dry-run` shows the plan) |
 | `migrate` | import an older `~/.claude-toggle/` state |
 
 `<type>` = `skill` / `agent` / `command` / `plugin` / `mcp`.
-`--harness claude|codex|grok|openclaw` picks the target (default `claude`).
+
+Flags accepted by every command, before or after the subcommand:
+
+- `--harness claude|codex|grok|openclaw` picks the target (default `claude`;
+  on `list` / `status` it filters when given).
+- `--json` prints exactly one JSON document and nothing else on stdout:
+  `{"ok", "command", "results": [{harness, type, name, action, status, detail, ...}],
+  "warnings", "needs_new_session"}`. Errors still emit it, with `"ok": false`.
+- `--version` prints the version.
+
+`--dry-run` (`disable` / `enable`) computes the plan -- moves, companions,
+backups, MCP edits, warnings -- and writes nothing: no state, log, lock or
+backup. Result rows say `would-disable` / `would-enable`.
+
+| exit code | meaning |
+|:-:|---|
+| `0` | ok |
+| `1` | partial failure (some items failed) |
+| `2` | usage error |
+| `3` | locked by another run |
+| `4` | unsupported harness/type pair, or harness not installed |
 
 ```sh
 agent_toggle.py disable skill   academic-plotting matplotlib

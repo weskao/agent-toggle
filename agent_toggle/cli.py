@@ -13,61 +13,81 @@ bookkeeping.
 
 Usage:
     agent_toggle.py ui                         # interactive picker (curses)
-    agent_toggle.py disable <type> <name>...   [--harness H]
-    agent_toggle.py enable  <type> <name>...   [--harness H]
+    agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
+    agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py list [<type>]              # what is currently disabled
     agent_toggle.py status                     # health check
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
 
     <type> = skill | agent | command | plugin | mcp
+    --json prints exactly one JSON document; exit codes: 0 ok, 1 partial
+    failure, 2 usage error, 3 locked, 4 unsupported pair / harness missing.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
+import io
 import sys
 from pathlib import Path
 
-from . import fs, store
+from . import __version__, fs, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import SUBDIRS, TYPES, harness_of, harnesses
 from .mechanisms import toggle_dir_type, toggle_mcp, toggle_plugin
-from .output import die
+from .output import CliError, Result, die
 from .store import load_state, save_state
 
 
-def cmd_list(type_filter: str | None, state: dict) -> int:
+def cmd_list(type_filter: str | None, state: dict, out: Result,
+             harness: str | None = None) -> None:
     items = [v for v in state["disabled"].values()
-             if not type_filter or v["type"] == type_filter]
+             if (not type_filter or v["type"] == type_filter)
+             and (not harness or v.get("harness") == harness)]
     if not items:
-        print("nothing disabled")
-        return 0
+        out.say("nothing disabled")
+        return
     for v in sorted(items, key=lambda x: (x.get("harness", ""), x["type"], x["name"])):
         extra = f"  +{len(v['companions'])} files" if v.get("companions") else ""
-        print(f"  {v.get('harness', '?'):<9} {v['type']:<8} {v['name']:<36} "
-              f"since {v['at'][:10]}{extra}")
-    print(f"\n{len(items)} disabled")
-    return 0
+        out.say(f"  {v.get('harness', '?'):<9} {v['type']:<8} {v['name']:<36} "
+                f"since {v['at'][:10]}{extra}")
+        out.row(v.get("harness"), v["type"], v["name"], "list", "disabled",
+                f"since {v['at'][:10]}", show=False, at=v["at"],
+                mechanism=v.get("mechanism"), companions=len(v.get("companions") or []))
+    out.say(f"\n{len(items)} disabled")
 
 
-def cmd_status(state: dict) -> int:
+def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     legacy_state_dir = fs.legacy_state_dir()
-    print(f"state   {fs.state_file()}  ({len(state['disabled'])} disabled)")
-    print(f"log     {fs.log_file()}")
+    claude = claude_bin()
+    legacy = None
+    out.say(f"state   {fs.state_file()}  ({len(state['disabled'])} disabled)")
+    out.say(f"log     {fs.log_file()}")
     if fs.too_open(fs.state_dir()):
-        print(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
-              f"auth headers; fix: chmod 700 {fs.state_dir()}")
-    print(f"claude  {claude_bin() or 'NOT FOUND -- plugin/mcp actions will fail'}")
+        out.say(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
+                f"auth headers; fix: chmod 700 {fs.state_dir()}", warn=True)
+    out.say(f"claude  {claude or 'NOT FOUND -- plugin/mcp actions will fail'}")
     if legacy_state_dir.exists():
         done = any(k.startswith("claude:") for k in state["disabled"])
-        print(f"legacy  {legacy_state_dir} present -- "
-              + ("already imported; safe to delete once verified" if done
-                 else "run `migrate` to import it"))
+        legacy = "imported" if done else "present"
+        out.say(f"legacy  {legacy_state_dir} present -- "
+                + ("already imported; safe to delete once verified" if done
+                   else "run `migrate` to import it"))
+    out.row(None, None, None, "status", "ok", "", show=False,
+            state_file=str(fs.state_file()), log_file=str(fs.log_file()),
+            disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy)
     for hname, (home, types, backend) in harnesses().items():
+        if only and hname != only:
+            continue
         if not home.is_dir():
-            print(f"{hname:<9} {home}  (not installed)")
+            out.say(f"{hname:<9} {home}  (not installed)")
+            out.row(hname, None, None, "status", "not-installed", "", show=False,
+                    home=str(home))
             continue
         bits = [t for t in types if t not in SUBDIRS or (home / SUBDIRS[t]).is_dir()]
-        print(f"{hname:<9} {home}  types: {','.join(bits)}  mcp: {backend or '-'}")
+        out.say(f"{hname:<9} {home}  types: {','.join(bits)}  mcp: {backend or '-'}")
+        info: dict = {}
         for t in bits:
             if t not in SUBDIRS:
                 continue
@@ -81,16 +101,21 @@ def cmd_status(state: dict) -> int:
                 items = list(parked.iterdir())
             else:
                 items = [p for p in parked.rglob("*") if p.is_file()]
-            ign = "gitignored" if gitignored(parked, home) else "NOT gitignored"
-            print(f"          {t:<8} {len(items):>3} parked  [{ign}]")
+            ign = gitignored(parked, home)
+            out.say(f"          {t:<8} {len(items):>3} parked  "
+                    f"[{'gitignored' if ign else 'NOT gitignored'}]")
             tracked = {e["parked_at"] for e in state["disabled"].values()
                        if e.get("harness") == hname and e.get("type") == t}
             untracked, twins = parked_drift(items, parked, home / SUBDIRS[t], tracked)
             if untracked:
-                print(f"                   ! {len(untracked)} untracked (parked outside this tool)"
-                      + (f", {len(twins)} also live: {', '.join(twins)}"
-                         " -- stale copies; `disable` of these names will refuse" if twins else ""))
-    return 0
+                out.say(f"                   ! {len(untracked)} untracked (parked outside this tool)"
+                        + (f", {len(twins)} also live: {', '.join(twins)}"
+                           " -- stale copies; `disable` of these names will refuse" if twins else ""),
+                        warn=True)
+            info[t] = {"parked": len(items), "gitignored": ign,
+                       "untracked": len(untracked), "live_twins": twins}
+        out.row(hname, None, None, "status", "installed", "", show=False,
+                home=str(home), types=bits, mcp=backend, parked=info)
 
 
 def parked_drift(items: list[Path], parked: Path, live: Path,
@@ -102,8 +127,9 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
     return untracked, twins
 
 
-def apply_changes(changes: list, state: dict) -> int:
+def apply_changes(changes: list, state: dict, out: Result | None = None) -> int:
     """Run the staged picker changes, batched per harness/type/direction."""
+    out = out or Result()
     batches: dict[tuple[str, str, str], list[str]] = {}
     for row in changes:
         action = "enable" if row.staged else "disable"
@@ -113,97 +139,142 @@ def apply_changes(changes: list, state: dict) -> int:
     fails = 0
     for (harness, type_, action), names in sorted(batches.items()):
         home, supported, backend = table[harness]
-        print(f"\n{action} {type_} on {harness}:")
+        out.say(f"\n{action} {type_} on {harness}:")
         if type_ in SUBDIRS:
-            fails += toggle_dir_type(action, type_, names, state, harness, home)
+            fails += toggle_dir_type(action, type_, names, state, harness, home, out)
         elif type_ == "mcp":
-            fails += toggle_mcp(action, names, state, harness, home, backend)
+            fails += toggle_mcp(action, names, state, harness, home, backend, out)
     return fails
 
 
-def cmd_ui(state: dict) -> int:
+def cmd_ui(state: dict, out: Result) -> None:
     try:
         from .ui import picker as ui
     except ImportError as e:                 # no curses build (rare)
         die(f"interactive UI unavailable: {e}")
     changes = ui.pick(state, harnesses(), SUBDIRS)
     if changes is None:
-        print("cancelled -- nothing changed")
-        return 0
+        out.say("cancelled -- nothing changed")
+        return
     if not changes:
-        print("no changes")
-        return 0
+        out.say("no changes")
+        return
     with fs.lock():
         state = load_state()          # re-read: the picker's copy may be stale
-        fails = apply_changes(changes, state)
+        apply_changes(changes, state, out)
         save_state(state)
     if any(r.type == "mcp" for r in changes):
-        print("\nMCP changed -- open a NEW session for it to take effect.")
-    return 1 if fails else 0
+        out.say("\nMCP changed -- open a NEW session for it to take effect.")
+
+
+def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
+    action, type_, names, harness = args.command, args.type, args.names, args.harness
+    home, supported, backend = harness_of(harness)
+    if not home.is_dir():
+        die(f"{harness} is not installed ({home} does not exist)", 4)
+    if type_ not in supported:
+        die(f"{harness} has no {type_} support (it has: {', '.join(supported)})", 4)
+
+    def run(state: dict) -> None:
+        if type_ in SUBDIRS:
+            toggle_dir_type(action, type_, names, state, harness, home, out, args.dry_run)
+        elif type_ == "plugin":
+            toggle_plugin(action, names, state, harness, out, args.dry_run)
+        else:
+            toggle_mcp(action, names, state, harness, home, backend, out, args.dry_run)
+
+    if args.dry_run:                # no lock, no state write, no log: plan only
+        run(load_state(write_back=False))
+        return
+    with fs.lock():
+        state = load_state()
+        try:
+            run(state)
+        finally:
+            save_state(state)       # keep what already moved even if a later item crashed
+
+
+def cmd_migrate(out: Result) -> None:
+    buf = io.StringIO()             # store.migrate prints; fold it into the result
+    with fs.lock():
+        state = load_state()
+        with contextlib.redirect_stdout(buf):
+            store.migrate(state)
+        save_state(state)
+    lines = buf.getvalue().splitlines()
+    out.say(buf.getvalue().rstrip("\n"))
+    out.row(None, None, None, "migrate", "ok", "; ".join(lines), show=False)
+
+
+COMMANDS = ("ui", "pick", "status", "list", "migrate", "disable", "enable")
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        die(message, 2)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    # SUPPRESS: a flag given before the subcommand must survive the subparser's
+    # own defaults, so neither level sets a default; main() fills them in.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--harness", choices=list(harnesses()), default=argparse.SUPPRESS,
+                        help="target harness (default: claude)")
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help="print exactly one JSON document instead of text")
+    common.add_argument("--version", action="version", default=argparse.SUPPRESS,
+                        version=f"agent-toggle {__version__}")
+    p = _Parser(prog="agent-toggle", parents=[common],
+                description="Temporarily disable / re-enable AI-agent resources.",
+                epilog="exit codes: 0 ok, 1 partial failure, 2 usage error, "
+                       "3 locked, 4 unsupported pair / harness not installed")
+    sub = p.add_subparsers(dest="command", required=True, metavar="command",
+                           parser_class=_Parser)
+    sub.add_parser("ui", aliases=["pick"], parents=[common], help="interactive picker")
+    sub.add_parser("status", parents=[common], help="health check")
+    ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
+    ls.add_argument("type", nargs="?", choices=TYPES)
+    sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
+    for name, verb in (("disable", "park"), ("enable", "restore")):
+        sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
+        sp.add_argument("type", choices=TYPES)
+        sp.add_argument("names", nargs="+", metavar="name")
+        sp.add_argument("--dry-run", action="store_true",
+                        help="show the plan; change nothing")
+    return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run one command and return its exit code (the process exit code)."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv)
     try:
-        return _main(argv)
-    except fs.Locked as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-
-
-def _main(argv: list[str] | None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    if not argv:
-        print(__doc__)
-        return 1
-
-    harness = "claude"
-    if "--harness" in argv:
-        i = argv.index("--harness")
-        if i + 1 >= len(argv):
-            die("--harness needs a value")
-        harness = argv[i + 1]
-        argv = argv[:i] + argv[i + 2:]
-
-    cmd, rest = argv[0], argv[1:]
-
-    if cmd in ("ui", "pick"):
-        return cmd_ui(load_state(write_back=False))
-    if cmd == "status":
-        return cmd_status(load_state(write_back=False))
-    if cmd == "migrate":
-        with fs.lock():
-            state = load_state()
-            rc = store.migrate(state)
-            save_state(state)
-        return rc
-    if cmd == "list":
-        tf = rest[0] if rest else None
-        if tf and tf not in TYPES:
-            die(f"unknown type {tf!r} (expected: {', '.join(TYPES)})")
-        return cmd_list(tf, load_state(write_back=False))
-    if cmd not in ("disable", "enable"):
-        die(f"unknown command {cmd!r} (expected: disable, enable, list, status, migrate)")
-    if len(rest) < 2:
-        die(f"usage: agent_toggle.py {cmd} <{'|'.join(TYPES)}> <name>... [--harness H]")
-
-    type_, names = rest[0], rest[1:]
-    if type_ not in TYPES:
-        die(f"unknown type {type_!r} (expected: {', '.join(TYPES)})")
-
-    home, supported, backend = harness_of(harness)
-    if not home.is_dir():
-        die(f"{harness} is not installed ({home} does not exist)")
-    if type_ not in supported:
-        die(f"{harness} has no {type_} support (it has: {', '.join(supported)})")
-
-    with fs.lock():
-        state = load_state()
-        if type_ in SUBDIRS:
-            fails = toggle_dir_type(cmd, type_, names, state, harness, home)
-        elif type_ == "plugin":
-            fails = toggle_plugin(cmd, names, state, harness)
+        args = build_parser().parse_args(argv)
+        out.command = "ui" if args.command == "pick" else args.command
+        out.json_mode = getattr(args, "json", False)
+        args.harness = getattr(args, "harness", None)
+        cmd = out.command
+        if cmd == "ui":
+            if out.json_mode:
+                die("ui is interactive; --json is not supported", 2)
+            cmd_ui(load_state(write_back=False), out)
+        elif cmd == "status":
+            cmd_status(load_state(write_back=False), out, args.harness)
+        elif cmd == "list":
+            cmd_list(args.type, load_state(write_back=False), out, args.harness)
+        elif cmd == "migrate":
+            cmd_migrate(out)
         else:
-            fails = toggle_mcp(cmd, names, state, harness, home, backend)
-        save_state(state)
-    return 1 if fails else 0
+            args.harness = args.harness or "claude"
+            cmd_toggle(args, out)
+        rc = out.exit_code()
+    except fs.Locked as e:
+        out.error(str(e))
+        rc = 3
+    except CliError as e:
+        out.error(e.msg)
+        rc = e.code
+    except SystemExit as e:             # argparse --help / --version
+        return e.code or 0
+    out.render()
+    return rc
