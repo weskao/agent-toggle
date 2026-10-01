@@ -227,7 +227,7 @@ public multi-OS release live in `docs/DESIGN.md`.
 ## Tests
 
 ```sh
-cd ~/Documents/Workspace/agent-toggle && python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 stdlib `unittest`, no fixtures, no network. Every test runs against a
