@@ -187,6 +187,11 @@ disable leaves dozens of deletion lines in `git status`.
 unresolved paths makes every companion look like it lives outside the harness.
 Both sides are resolved first.
 
+## Design and roadmap
+
+Architecture, harness survey, cost model, and the phased roadmap toward a
+public multi-OS release live in `docs/DESIGN.md`.
+
 ## Tests
 
 ```sh
