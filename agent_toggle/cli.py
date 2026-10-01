@@ -18,6 +18,7 @@ Usage:
     agent_toggle.py list [<type>]              # what is currently disabled
     agent_toggle.py status                     # health check
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
+    agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
 
     <type> = skill | agent | command | plugin | mcp
     --json prints exactly one JSON document; exit codes: 0 ok, 1 partial
@@ -214,7 +215,63 @@ def cmd_migrate(out: Result) -> None:
     out.row(None, None, None, "migrate", "ok", "; ".join(lines), show=False)
 
 
-COMMANDS = ("ui", "pick", "status", "list", "migrate", "disable", "enable")
+SHIM_TEMPLATE = Path(__file__).with_name("shims") / "claude.md.tmpl"
+
+
+def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
+    """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
+    supports skills; keep park dirs out of an existing harness-home .gitignore."""
+    template = SHIM_TEMPLATE.read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parent.parent
+    if (root / "agent_toggle.py").is_file():
+        # Harness dirs often sync across machines: write `~`-relative under $HOME.
+        try:
+            shown = "~/" + root.relative_to(fs.home()).as_posix()
+        except ValueError:
+            shown = str(root)
+        text = template.replace("__AGENT_TOGGLE_ROOT__", shown)
+    else:                                 # installed package: no checkout to point at
+        text = "".join(ln for ln in template.splitlines(keepends=True)
+                       if "__AGENT_TOGGLE_ROOT__" not in ln)
+    table = harnesses()
+    park = sorted({f"{SUBDIRS[t]}-disabled" for _, types, _ in table.values()
+                   for t in types if t in SUBDIRS})
+    verb = "would install" if args.dry_run else "installed"
+    installed = 0
+    for hname, (home, types, _) in table.items():
+        if args.harness and hname != args.harness:
+            continue
+        if "skill" not in types or not home.is_dir():
+            out.row(hname, None, None, "install-shims", "skipped",
+                    "not installed" if not home.is_dir() else "no skill support",
+                    show=False, home=str(home))
+            continue
+        dest = home / SUBDIRS["skill"] / "agent-toggle" / "SKILL.md"
+        if not args.dry_run:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(text, encoding="utf-8")
+        out.row(hname, None, None, "install-shims", "planned" if args.dry_run else "ok",
+                str(dest), show=False, home=str(home))
+        out.say(f"  {verb}  {dest}")
+        installed += 1
+        # A tracked park dir turns every disable into deletion noise in
+        # `git status`; only touch a .gitignore that already exists.
+        ignore = home / ".gitignore"
+        if ignore.is_file():
+            body = ignore.read_text(encoding="utf-8")
+            missing = [f"{d}/" for d in park if f"{d}/" not in body.splitlines()]
+            if missing and not args.dry_run:
+                with ignore.open("a", encoding="utf-8") as fh:
+                    fh.write(("" if body.endswith("\n") or not body else "\n")
+                             + "".join(f"{m}\n" for m in missing))
+            if missing:
+                out.say(f"  gitignore  {ignore}: {' '.join(missing)}")
+    if not installed:
+        die("no harness found", 4)
+    out.say(f"{installed} harness(es) {'planned' if args.dry_run else 'installed'}")
+
+
+COMMANDS = ("ui", "pick", "status", "list", "migrate", "disable", "enable", "install-shims")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -245,6 +302,9 @@ def build_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
     ls.add_argument("type", nargs="?", choices=TYPES)
     sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
+    sp = sub.add_parser("install-shims", parents=[common],
+                        help="write the skill shim into every installed harness")
+    sp.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
         sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
         sp.add_argument("type", choices=TYPES)
@@ -274,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_list(args.type, load_state(write_back=False), out, args.harness)
         elif cmd == "migrate":
             cmd_migrate(out)
+        elif cmd == "install-shims":
+            cmd_install_shims(args, out)
         else:
             args.harness = args.harness or "claude"
             cmd_toggle(args, out)

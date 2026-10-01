@@ -19,17 +19,20 @@ puts it back where it came from.
 ## Install
 
 ```sh
-git clone <this repo> ~/Documents/Workspace/agent-toggle
-cd ~/Documents/Workspace/agent-toggle && sh install.sh
+git clone <this repo> agent-toggle
+cd agent-toggle && ./install.sh        # same as: python3 agent_toggle.py install-shims
 ```
 
-`install.sh` drops a thin skill shim into every harness it finds, so
-`/agent-toggle` works from any of them. The tool itself stays in one place.
+`install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
+every installed harness that supports skills, so `/agent-toggle` works from any
+of them, and adds the park dirs (`skills-disabled/` etc.) to a `.gitignore`
+already present in that harness home. It is idempotent; `--dry-run` shows the
+plan. The tool itself stays in one place.
 
 ## Usage
 
 ```sh
-python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
+python3 agent_toggle.py <command> [args]
 ```
 
 | command | what it does |
@@ -37,6 +40,7 @@ python3 ~/Documents/Workspace/agent-toggle/agent_toggle.py <command> [args]
 | `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items and stale live twins |
 | `list [type]` | what is currently disabled |
+| `install-shims` | write the skill shim into every installed harness (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan) |
 | `migrate` | import an older `~/.claude-toggle/` state |

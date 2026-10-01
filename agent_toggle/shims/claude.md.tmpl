@@ -1,0 +1,39 @@
+---
+name: agent-toggle
+description: Temporarily disable or restore AI-agent resources — skills, agents, commands, plugins, MCP servers — across Claude Code, Codex, Grok CLI and OpenClaw. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "停用這個 skill" / "關掉某個 MCP" / "把它加回來".
+---
+
+# agent-toggle
+
+Parks and restores agent resources (skills, agents, commands, plugins, MCP
+servers). **Never deletes anything**; every change is reversible.
+
+## Run it
+
+```bash
+agent-toggle <command> --json
+python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> --json   # if agent-toggle is not on PATH
+```
+
+Commands: `status` (run first), `list [type]`, `disable <type> <name>...`,
+`enable <type> <name>...`, `migrate`; add `--harness claude|codex|grok|openclaw`
+(default `claude`) and `--dry-run` to preview. `<type>` = `skill` / `agent` /
+`command` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
+`ui` is an interactive picker for the user, not for you.
+
+## Read the result
+
+`--json` prints one envelope on stdout: `ok`, `command`, `results` (one row
+per item: harness, type, name, status, detail), `warnings`,
+`needs_new_session`. Summarise the rows for the user; do not paste the JSON.
+Branch on the exit code:
+
+| code | meaning | do |
+|---|---|---|
+| 0 | ok | report; if `needs_new_session`, tell the user to open a NEW session (MCP changes only apply then) |
+| 1 | partial | list the failed rows and why |
+| 2 | usage error | fix the arguments and retry |
+| 3 | locked | another run is active; retry later |
+| 4 | unsupported pair / harness missing | tell the user; do not retry |
+
+Rollback is `enable <type> <name>`. State lives in `~/.agent-toggle/`.
