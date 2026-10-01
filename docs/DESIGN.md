@@ -438,6 +438,7 @@ Phase status (tick a phase only once its acceptance criteria hold):
 - [ ] Phase 3 — remaining harnesses
 - [ ] Phase 4 — PyPI release
 - [ ] Phase 5 — Linux + Windows
+- [ ] Phase 6 — CI hardening + Telegram failure alerts
 
 | phase | content | acceptance |
 |---|---|---|
@@ -447,6 +448,7 @@ Phase status (tick a phase only once its acceptance criteria hold):
 | **3 — remaining harnesses** | copilot (skills, agents, mcp-config.json), vibe (skills), devin (explicit N/A), agy (table row; adapter once layout observed) | each has a fixture home and passes the shared conformance test |
 | **4 — PyPI release** | publish `agent-toggle` to PyPI (trusted publishing from a tag via GitHub Actions), README install switches to `uv tool install agent-toggle` | tagged release installs from PyPI on a clean macOS runner and passes the phase-0 smoke test |
 | **5 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI | full suite green on Windows runner including picker fallback; documented harness homes per OS |
+| **6 — CI hardening + Telegram alerts** | §8.1: bring `.github/workflows/ci.yml` up to the aicp CI pattern — `permissions: contents: read`, per-ref `concurrency` with cancel-in-progress, `PYTHONUTF8=1`, job `timeout-minutes`, `fail-fast: false`, and a `notify-telegram` job; README "CI notifications" section with the two `gh secret set` commands | a forced test failure on a push sends one Telegram message naming repo, branch, short SHA and the run URL; with the secrets unset the notify job exits 0 with a `::notice::`; PRs never notify; no token or chat id appears in the repo |
 
 Order rationale: cost visibility is the feature that serves the stated goal,
 so it is phase 1, before any new harness. Profiles make the saving
@@ -454,6 +456,31 @@ repeatable, so they precede the long tail of harnesses. PyPI waits until the CLI
 surface has settled, because a published name and version are hard to take
 back. OS ports come last
 because the mechanism code is OS-neutral and CI proves that from phase 0.
+CI alerts (phase 6) come after everything else: the basic CI matrix already
+lands in phase 0, and alerts only pay off once the project has outside
+pushes to watch.
+
+### 8.1 Phase 6 reference: aicp CI
+
+Model the workflow on the CI of the aicp project
+(`https://github.com/weskao/aicp`, `.github/workflows/ci.yml`), which already
+runs this pattern in production:
+
+- `on: [push, pull_request]`; `permissions: contents: read`;
+  `concurrency: ci-${{ github.workflow }}-${{ github.ref }}` with
+  `cancel-in-progress: true`; `env: PYTHONUTF8: "1"`.
+- Test job: OS matrix with `fail-fast: false` and `timeout-minutes: 15`.
+- `notify-telegram` job: `needs: test`,
+  `if: ${{ failure() && github.event_name == 'push' }}`, `timeout-minutes: 5`.
+  Reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from repository secrets
+  only. If either is empty (a fork, or an owner who never set them) it prints
+  `::notice::` and exits 0, so a missing secret never adds a second red X.
+  The message uses `parse_mode=HTML` with `&`, `<`, `>` escaped in the branch
+  and commit fields, and is sent with
+  `curl --fail --silent --show-error --max-time 30 --data-urlencode ...`.
+- README gets a "CI notifications" section listing the two
+  `gh secret set TELEGRAM_BOT_TOKEN` / `gh secret set TELEGRAM_CHAT_ID`
+  commands. Secrets never appear in the workflow file or the docs.
 
 ---
 
@@ -492,6 +519,7 @@ because the mechanism code is OS-neutral and CI proves that from phase 0.
 | 2026-10-02 | MIT + PyPI | Apache-2.0; clone only | standard for dev tooling; `uv tool install` is cross-OS with no packaging work |
 | 2026-10-02 | Declarative table + 3 protocols | class per harness; entry-point plugins | 8 classes would be near-identical; nobody has asked for third-party adapters |
 | 2026-10-02 | PyPI moved from phase 0 to phase 4; OS ports to phase 5 | PyPI in phase 0 | install from git is enough for early users; publish once the CLI and state schema stop changing |
+| 2026-10-02 | Phase 6: CI hardening + Telegram failure alerts, modelled on aicp | alerts in phase 0; no alerts | basic CI already ships in phase 0; failure alerts are only worth wiring once outside pushes exist, and aicp's job is a proven template |
 | 2026-10-02 | Phase-0 OSS hygiene section | minimal; none | the project is going public; these items block the first external user |
 
 ## 11. Open questions (need a real install to answer)
