@@ -284,6 +284,30 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "migrate", "disable", "enable", "install-shims")
+_GLOBAL_FLAGS = ("--json", "-v", "--verbose")
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Accept `--status` for `status` and bare `help` / `version` for `--help` / `--version`.
+
+    Only the command position is rewritten (after any leading global flags), so a
+    resource that happens to be named `list` or `help` is never touched.
+    """
+    argv = list(argv)
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--harness":
+            i += 2
+        elif a in _GLOBAL_FLAGS or a.startswith("--harness="):
+            i += 1
+        else:
+            if a.startswith("--") and a[2:] in COMMANDS:
+                argv[i] = a[2:]
+            elif a in ("help", "version"):
+                argv[i] = "--" + a
+            break
+    return argv
 
 
 class _Parser(argparse.ArgumentParser):
@@ -328,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code (the process exit code)."""
-    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = normalize_argv(sys.argv[1:] if argv is None else argv)
     out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv)
     try:
         args = build_parser().parse_args(argv)

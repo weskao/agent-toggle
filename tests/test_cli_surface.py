@@ -233,6 +233,35 @@ class SpellingTest(CliCase):
             self.assertEqual(rc, 0)
             self.assertIn(__version__, out)
 
+    def test_every_command_accepts_a_leading_double_dash(self) -> None:
+        self.write("skills/demo-skill/SKILL.md")
+        cases = (
+            ["status"], ["list"], ["list", "skill"], ["ui"],
+            ["disable", "skill", "demo-skill", "--dry-run"],
+            ["enable", "skill", "demo-skill", "--dry-run"],
+            ["install-shims", "--dry-run"],
+        )
+        for argv in cases:
+            plain = self.run_cli(*argv, "--json")
+            dashed = self.run_cli(f"--{argv[0]}", *argv[1:], "--json")
+            self.assertEqual(plain, dashed, argv)
+        # global flags before the command do not hide it
+        self.assertEqual(self.run_cli("--json", "--status")[:2], self.run_cli("--json", "status")[:2])
+        self.assertEqual(self.run_cli("--harness=codex", "--list"),
+                         self.run_cli("--harness=codex", "list"))
+        self.assertEqual(self.run_cli("--pick", "--json"), self.run_cli("pick", "--json"))
+
+    def test_help_and_version_without_dashes(self) -> None:
+        for word in ("help", "version"):
+            self.assertEqual(self.run_cli(word), self.run_cli(f"--{word}"))
+        self.assertIn(__version__, self.run_cli("version")[1])
+        self.assertIn("usage:", self.run_cli("help")[1])
+
+    def test_bare_words_after_the_command_stay_names(self) -> None:
+        self.write("skills/help/SKILL.md")
+        self.assertEqual(self.run_cli("disable", "skill", "help")[0], 0)
+        self.assertEqual(self.run_cli("enable", "skill", "help")[0], 0)
+
     def test_multiple_names_and_harness_position(self) -> None:
         (self.tmp / ".codex" / "skills").mkdir(parents=True)
         for n in ("a", "b"):
