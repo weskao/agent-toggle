@@ -376,7 +376,7 @@ does not care which ran.
 
 All OS branching lives in `fs.py`; the rest of the code calls `fs.*`. CI runs
 the suite on all three OSes from phase 1 even though Windows/Linux harness
-tables are only filled in at phase 4 — the file-mechanism code is identical
+tables are only filled in at phase 5 — the file-mechanism code is identical
 and should be proven early.
 
 ---
@@ -405,7 +405,9 @@ and should be proven early.
 ## 7. Public-release readiness (phase 0, ship-blocking)
 
 - [ ] Remove every personal path: README install flow becomes
-      `uv tool install agent-toggle` (or `pipx`), with a `git clone` + `pip install -e .` fallback.
+      `uv tool install git+<repo-url>` (or `pipx install git+<repo-url>`),
+      with a `git clone` + `pip install -e .` fallback. No PyPI release
+      until phase 4.
 - [ ] `LICENSE` (MIT), `pyproject.toml` (name `agent-toggle`, console script,
       `requires-python >= 3.10`, zero runtime dependencies, optional
       `[windows]` extra).
@@ -430,15 +432,18 @@ Each phase ends with its acceptance criteria met on CI, not by inspection.
 
 | phase | content | acceptance |
 |---|---|---|
-| **0 — public readiness** | §7 | fresh macOS user installs with one command, runs `status`, `disable skill x`, `enable skill x`; no personal data in repo; CI green on 3 OSes |
+| **0 — public readiness** | §7 | fresh macOS user installs from the git repo with one command, runs `status`, `disable skill x`, `enable skill x`; no personal data in repo; CI green on 3 OSes |
 | **1 — cost + structure** | package split (§5.1), `--json`, lock, exit codes, `cost` command + picker column, `rule` type, grok MCP via TOML backend, OpenCode adapter with alias detection, plugins in picker, `--dry-run`, 0600 backups | `cost` sorts a fixture home correctly; alias fixture reports "also affects"; v2 state migrates; shims use `--json` |
 | **2 — profiles + scope** | profiles (§5.7), `--project`, flag mechanism (openclaw skills/plugins, opencode mcp), `undo`, `enable --all`, `doctor` | profile round-trip on fixtures; project-scope disable prints the git warning; flag toggles leave the rest of the JSON byte-identical except the flag |
 | **3 — remaining harnesses** | copilot (skills, agents, mcp-config.json), vibe (skills), devin (explicit N/A), agy (table row; adapter once layout observed) | each has a fixture home and passes the shared conformance test |
-| **4 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI | full suite green on Windows runner including picker fallback; documented harness homes per OS |
+| **4 — PyPI release** | publish `agent-toggle` to PyPI (trusted publishing from a tag via GitHub Actions), README install switches to `uv tool install agent-toggle` | tagged release installs from PyPI on a clean macOS runner and passes the phase-0 smoke test |
+| **5 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI | full suite green on Windows runner including picker fallback; documented harness homes per OS |
 
 Order rationale: cost visibility is the feature that serves the stated goal,
 so it is phase 1, before any new harness. Profiles make the saving
-repeatable, so they precede the long tail of harnesses. OS ports come last
+repeatable, so they precede the long tail of harnesses. PyPI waits until the CLI
+surface has settled, because a published name and version are hard to take
+back. OS ports come last
 because the mechanism code is OS-neutral and CI proves that from phase 0.
 
 ---
@@ -477,6 +482,7 @@ because the mechanism code is OS-neutral and CI proves that from phase 0.
 | 2026-10-02 | Survey all 8 harnesses now | OpenCode only; architecture only | grounded table found two freebies (grok MCP, openclaw/opencode native flags) and one trap (opencode aliasing) |
 | 2026-10-02 | MIT + PyPI | Apache-2.0; clone only | standard for dev tooling; `uv tool install` is cross-OS with no packaging work |
 | 2026-10-02 | Declarative table + 3 protocols | class per harness; entry-point plugins | 8 classes would be near-identical; nobody has asked for third-party adapters |
+| 2026-10-02 | PyPI moved from phase 0 to phase 4; OS ports to phase 5 | PyPI in phase 0 | install from git is enough for early users; publish once the CLI and state schema stop changing |
 | 2026-10-02 | Phase-0 OSS hygiene section | minimal; none | the project is going public; these items block the first external user |
 
 ## 11. Open questions (need a real install to answer)
@@ -488,4 +494,4 @@ because the mechanism code is OS-neutral and CI proves that from phase 0.
 3. Copilot `installed-plugins/` entry format once a plugin is installed
    (directory was empty on the surveyed machine).
 4. Windows harness home paths per harness — each harness documents its own;
-   fill §5.11 from docs at phase 4, not from guesses.
+   fill §5.11 from docs at phase 5, not from guesses.
