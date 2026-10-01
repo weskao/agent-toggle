@@ -40,21 +40,24 @@ toggle.
 
 ---
 
-## 2. Current state (as of this document)
+## 2. Current state (phase 0 + phase 1 landed on `phase-1`)
 
-Single-file Python (`agent_toggle.py`, ~860 lines) plus a curses picker
-(`ui.py`) and one skill shim copied into each harness by `install.sh`.
-35 stdlib-only tests.
+A stdlib-only Python package (`agent_toggle/`, console script `agent-toggle`,
+thin `agent_toggle.py` wrapper for checkouts) plus a curses picker and one
+skill shim written into each harness by `agent-toggle install-shims`
+(`install.sh` is a wrapper). Stdlib `unittest` suite; CI matrix pending the
+first push.
 
 | area | state |
 |---|---|
-| harnesses | claude, codex, grok, openclaw — declared in one `HARNESSES` dict |
-| types | skill, agent, command (move to `*-disabled/`), plugin (claude CLI), mcp (remove + verbatim backup) |
-| safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; park dirs checked for gitignore; symlinks and broken links handled |
-| state | `~/.agent-toggle/state.json` (atomic write), `log.jsonl`, `mcp-backups/`, `companions/` |
-| MCP scopes | Claude user + local scope (project path recorded); claude.ai connectors parked per project |
-| UI | curses picker: filter, tick, apply in batch; plugins excluded |
-| AI access | `SKILL.md` shim with the repo path baked in by `install.sh` |
+| harnesses | claude, codex, grok, opencode, openclaw — one `Harness` record each in `harnesses.py` |
+| types | skill, agent, command, rule (move to `*-disabled/`), plugin (claude CLI only), mcp (remove + verbatim backup) |
+| safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; park dirs checked for gitignore; symlinks and broken links handled; `0600` state/backups, lock per batch |
+| state | `~/.agent-toggle/state.json` (schema v3, atomic write), `log.jsonl`, `mcp-backups/`, `companions/`, `lock` |
+| MCP scopes | Claude user + local scope (project path recorded); codex and grok through the TOML backend; claude.ai connectors parked per existing project (`disabledMcpServers`) |
+| cost | `cost` command and picker column (chars / 4 estimate) |
+| UI | curses picker: cost column, sort, harness/type filters, `/` text filter, plugins included, `--dry-run` |
+| AI access | `SKILL.md` shim using `--json`, written by `install-shims` |
 
 ### What is strong and must be kept
 
@@ -65,7 +68,7 @@ Single-file Python (`agent_toggle.py`, ~860 lines) plus a curses picker
 - Central state; no sidecar files.
 - Loud failure for unsupported pairs.
 
-### Gaps against the goal
+### Gaps against the goal (as surveyed before phase 0; the first rows are now closed)
 
 | gap | why it matters |
 |---|---|
@@ -209,6 +212,11 @@ class Harness:
     aliases_from: tuple[str, ...] = ()           # config keys that may redirect a dir (opencode skills.paths)
 ```
 
+`aliases_from` is currently **metadata only**: the code never reads it. OpenCode's
+`skills.paths` redirect is resolved by `opencode_skill_dirs()` in
+`harnesses.py`, and alias detection itself is path-based (`dir_view()` resolves
+every candidate dir and groups the harnesses that land on the same real path).
+
 Adding Copilot is one record: `dirs={"skill": ("skills",), "agent": ("agents",)}`,
 `mechanisms={"skill": "move", "agent": "move", "mcp": "remove_backup"}`,
 `mcp=McpSpec("json", "mcp-config.json", ["mcpServers"])`,
@@ -271,6 +279,18 @@ second waits up to 5 s then fails loudly.
 }
 ```
 
+`shared_with` and `harness` semantics: for a directory shared by several
+harnesses (§4, finding 1) there is ONE entry, and its `harness` is the
+**owner**, the harness whose home really holds the directory. The entry is
+keyed `<owner>:<type>:<name>` whichever harness the request came through, and
+`shared_with` lists the *other* harnesses that resolve to the same real path.
+Only owner-keyed alias entries carry it (written at disable time; entries
+without sharers omit the field). `disable` / `enable` result rows report
+`shared_with` relative to the requesting harness, plus `owner`. `list` and
+`cost` rows are filed under the owner and report the stored `shared_with`
+(never `owner`; `[]` when unshared). `enable` through an alias finds the
+owner's entry.
+
 `store.py` migrates v2 → v3 on first load (adds `mechanism` from the
 presence of `backup`/`native`/`parked_at`). Migrations are forward-only and
 tested with a v2 fixture.
@@ -294,8 +314,11 @@ documented as ±25 %):
 | plugin | sum of its bundled items, read from `installPath` |
 
 Output carries a `basis` string per row ("description 412 chars", "6 tools ×
-300 flat") so the number is explainable, and `cost --json` lets an external
-measured total be compared. No tokenizer dependency; if a harness ships a
+300 flat") so the number is explainable. In `--json` the basis is the row's
+`detail` (there is no separate `basis` field); item rows add `enabled`,
+`tokens`, `would_save`, `chars`, `shared_with`, and the final `total` row
+carries `total_tokens`, `saved_tokens` and `formula` (the estimator rules as
+data), so an external measured total can be compared. No tokenizer dependency; if a harness ships a
 token counter later, a `CostEstimator` implementation can wrap it.
 
 ### 5.7 Profiles (phase 2)
@@ -360,8 +383,12 @@ help. Picker additions, all within stdlib curses:
 
 - cost column and `s` to sort by cost; harness and type filter chips
   (`h`/`t` cycle);
-- plugin rows from `claude plugin list --json` and from flag backends;
-- `p` to apply a profile; `?` for keys; `--dry-run` shows the plan and exits.
+- plugin rows from `claude plugin list --json` (landed in phase 1; flag
+  backends follow in phase 2; `ui --dry-run` skips them, it never shells out);
+- `/` starts typing a text filter; `s`, `h`, `t`, `?` are commands only while
+  the filter is empty, so a filter beginning with one of them needs the leading
+  `/` (landed in phase 1). `?` shows the keys;
+- `p` to apply a profile (phase 2); `--dry-run` shows the plan and exits.
 
 Windows: `pip install agent-toggle[windows]` pulls `windows-curses`; without
 it `ui/menu.py` provides a numbered-menu fallback (filter prompt → numbered
@@ -397,7 +424,7 @@ and should be proven early.
 | **Concurrency** | Lock file as in §5.4. Agents and humans do run the tool simultaneously. |
 | **Sync jobs** | Detect `.synced-from-*` markers in a live dir and warn that a sync may re-create parked items; recommend parking in the *source* harness. |
 | **Harness drift** | Harness config formats change between versions. Each table row records the harness version it was verified against; `doctor` compares the live layout against the row (expected dirs/keys present) and reports "layout changed" instead of failing deep inside an operation. Fixture homes in tests freeze the verified layout. |
-| **Dry run** | `--dry-run` on disable/enable/profile apply prints the plan (moves, flags, backups, shared-path warnings) and exits 0 without touching anything. Cheap and the first thing a cautious public user looks for. |
+| **Dry run** | `--dry-run` on disable/enable/profile apply prints the plan (moves, flags, backups, shared-path warnings) and writes nothing; it exits 0, or 1 when the plan contains a failing item, exactly as the real run would. Cheap and the first thing a cautious public user looks for. `disable` / `enable` plan rows have action `would-<verb>`; every plan row has status `planned`. |
 | **Undo** | `undo` reverses the last logged batch using `log.jsonl`; `enable --all [--harness H]` restores everything. |
 | **Stale state** | `status` already reports untracked parked items and live twins; add the inverse — state entries whose `parked_at` no longer exists — with the fix command. |
 | **Name collisions** | A name may exist as both a skill and a command; the type is always explicit, and `cost`/picker rows show type. No "guess the type" convenience. |
@@ -442,18 +469,18 @@ statement above and a supported-versions line.
 
 ## 7. Public-release readiness (phase 0, ship-blocking)
 
-- [ ] Remove every personal path: README install flow becomes
+- [x] Remove every personal path: README install flow becomes
       `uv tool install git+<repo-url>` (or `pipx install git+<repo-url>`),
       with a `git clone` + `pip install -e .` fallback. No PyPI release
       until phase 4.
-- [ ] `LICENSE` (MIT), `pyproject.toml` (name `agent-toggle`, console script,
+- [x] `LICENSE` (MIT), `pyproject.toml` (name `agent-toggle`, console script,
       `requires-python >= 3.10`, zero runtime dependencies, optional
       `[windows]` extra).
-- [ ] `install.sh` → `agent-toggle install-shims` subcommand (works on every
+- [x] `install.sh` → `agent-toggle install-shims` subcommand (works on every
       OS; the shell script stays as a thin wrapper for one release).
-- [ ] CI: GitHub Actions matrix macOS/Linux/Windows × Python 3.10/3.13 running
+- [x] CI: GitHub Actions matrix macOS/Linux/Windows × Python 3.10/3.13 running
       the test suite; lint with `ruff` (dev-only dependency).
-- [ ] `SECURITY.md` (backups hold auth material; never sync or cloud-share
+- [x] `SECURITY.md` (backups hold auth material; never sync or cloud-share
       `~/.agent-toggle`; reporting channel),
       `CONTRIBUTING.md` (adding a harness row + fixture + verifying version),
       `CHANGELOG.md` (Keep a Changelog), issue templates (bug: harness +
@@ -461,9 +488,9 @@ statement above and a supported-versions line.
 - [ ] Name and path containment (§6.1 row 1): `validate_name()` plus an
       inside-the-harness-dir check on every resolved item, with a test that
       `..`, absolute and leading-`-` names are refused.
-- [ ] No real user data anywhere: fixtures use synthetic names; docs use `~`
+- [x] No real user data anywhere: fixtures use synthetic names; docs use `~`
       and `<name>` placeholders; tests never touch the real home.
-- [ ] Versioning: SemVer; state schema version bumps are minor releases with
+- [x] Versioning: SemVer; state schema version bumps are minor releases with
       an automatic migration; CLI flag removals are major.
 
 ---
@@ -474,8 +501,8 @@ Each phase ends with its acceptance criteria met on CI, not by inspection.
 
 Phase status (tick a phase only once its acceptance criteria hold):
 
-- [ ] Phase 0 — public readiness
-- [ ] Phase 1 — cost + structure
+- [x] Phase 0 — public readiness (local gate green; CI pending first push)
+- [x] Phase 1 — cost + structure (local gate green; CI pending first push)
 - [ ] Phase 2 — profiles + scope
 - [ ] Phase 3 — remaining harnesses
 - [ ] Phase 4 — PyPI release
@@ -523,6 +550,33 @@ runs this pattern in production:
 - README gets a "CI notifications" section listing the two
   `gh secret set TELEGRAM_BOT_TOKEN` / `gh secret set TELEGRAM_CHAT_ID`
   commands. Secrets never appear in the workflow file or the docs.
+
+### 8.2 Known gaps (non-critical, found at the phase 0 + 1 gate)
+
+- **Name and path containment is not done** (§6.1 row 1, the unticked §7
+  item): `resolve_item` only maps `:` to `/`; there is no `validate_name()` and
+  no inside-the-harness-dir check yet.
+- `run_cli` in `backends/plugin_cli.py` uses a fixed 120 s timeout for every
+  `claude plugin ...` call.
+- A plugin can show twice in the picker when it is parked under a name that
+  differs from the `name@marketplace` id `claude plugin list` reports.
+- Picker typing mode (after `/`) has no on-screen cue; the header only shows the
+  typed text.
+- `skills.paths` entries `~`, `$HOME/...` and the `opencode.jsonc` file are not
+  expanded / read; only `opencode.json` with absolute, `~/` or relative paths.
+- `install-shims` writes the shim into `opencode/skills` even when `skills.paths`
+  redirects OpenCode's skills elsewhere.
+- The `.synced-from-*` warning repeats once per harness that views the same
+  directory.
+- `aliases_from` on the harness record is metadata only (§5.2).
+- Grok's MCP location (`~/.grok/config.toml`) is assumed from the survey, not
+  verified on a live install; OpenCode's no-`skills.paths` default is assumed
+  to be its own `skills/` (§11 q2).
+- `claude.ai` connectors are toggled through each *existing* project's
+  `disabledMcpServers`; a project opened for the first time later starts without
+  the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
+  Repo `.mcp.json` (project scope) and codex plugins are not toggleable; project
+  scope arrives with `--project` in phase 2.
 
 ---
 

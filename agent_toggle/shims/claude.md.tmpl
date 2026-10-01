@@ -15,8 +15,9 @@ agent-toggle <command> --json
 python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> --json   # if agent-toggle is not on PATH
 ```
 
-Commands: `status` (run first), `list [type]`, `disable <type> <name>...`,
-`enable <type> <name>...`, `migrate`; add `--harness claude|codex|grok|opencode|openclaw`
+Commands: `status` (run first), `list [type]`, `cost [--type T]` (startup token
+estimates, biggest first), `disable <type> <name>...`, `enable <type> <name>...`,
+`migrate`; add `--harness claude|codex|grok|opencode|openclaw`
 (default `claude`) and `--dry-run` to preview. `<type>` = `skill` / `agent` /
 `command` / `rule` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
 A row with `shared_with` means another harness reads the same directory (OpenCode

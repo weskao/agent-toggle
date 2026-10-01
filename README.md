@@ -1,7 +1,8 @@
 # agent-toggle
 
 Temporarily disable and restore AI-agent resources — skills, agents, commands,
-plugins, MCP servers — across Claude Code, Codex, Grok CLI and OpenClaw.
+rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode and
+OpenClaw — and show what each one costs at session start.
 
 **Nothing is ever deleted.** Everything is parked and recorded, and `enable`
 puts it back where it came from.
@@ -19,8 +20,23 @@ puts it back where it came from.
 ## Install
 
 ```sh
-git clone <this repo> agent-toggle
-cd agent-toggle && ./install.sh        # same as: python3 agent_toggle.py install-shims
+uv tool install git+<repo-url>         # or: pipx install git+<repo-url>
+agent-toggle --version
+```
+
+From a checkout, either install it editable or run it in place:
+
+```sh
+git clone <repo-url> agent-toggle
+cd agent-toggle
+pip install -e .                       # puts the `agent-toggle` console script on PATH
+python3 agent_toggle.py status         # no install needed; same CLI
+```
+
+Python 3.10+, no runtime dependencies. Then write the skill shim:
+
+```sh
+agent-toggle install-shims             # or: ./install.sh, a thin wrapper over it
 ```
 
 `install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
@@ -32,14 +48,15 @@ plan. The tool itself stays in one place.
 ## Usage
 
 ```sh
-python3 agent_toggle.py <command> [args]
+agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [args]
 ```
 
 | command | what it does |
 |---|---|
-| `ui` | interactive picker — type to filter, arrows to move, Tab to tick |
-| `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items and stale live twins |
+| `ui` | interactive picker — cost column, sort, filters; `--dry-run` shows the plan for what you stage and changes nothing |
+| `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs |
 | `list [type]` | what is currently disabled |
+| `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
 | `install-shims` | write the skill shim into every installed harness (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan) |
@@ -50,68 +67,95 @@ python3 agent_toggle.py <command> [args]
 
 Flags accepted by every command, before or after the subcommand:
 
-- `--harness claude|codex|grok|openclaw` picks the target (default `claude`;
-  on `list` / `status` it filters when given).
+- `--harness claude|codex|grok|opencode|openclaw` picks the target (default
+  `claude`; on `list` / `status` / `cost` it filters when given).
 - `--json` prints exactly one JSON document and nothing else on stdout:
   `{"ok", "command", "results": [{harness, type, name, action, status, detail, ...}],
   "warnings", "needs_new_session"}`. Errors -- including unexpected ones, as
   `{ExceptionType}: {message}` -- always emit it, with `"ok": false`.
-  Exception: `--help` / `--version` print plain text even with `--json`.
+  Exception: `--help` / `--version` print plain text even with `--json`, and
+  `ui` is interactive so it rejects `--json` (exit 2).
 - `--version` prints the version.
 - `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
   unexpected errors; otherwise they are a single `error:` line.
 
-`--dry-run` (`disable` / `enable`) computes the plan -- moves, companions,
-backups, MCP edits, warnings -- and writes nothing: no state, log, lock or
-backup, and no chmod; it never shells out to `claude`. Result rows say
-`would-disable` / `would-enable`. Read-only commands (`list`, `status`) also
-change nothing on disk -- `status` warns about a `state.json` or backup looser
-than `0600` instead of fixing it.
+Extra row fields: `list` rows carry `at`, `mechanism`, `companions`; `cost` rows
+carry `enabled`, `tokens`, `would_save`, `chars`, and the final `total` row
+carries `total_tokens`, `saved_tokens`, `formula`. Rows for a
+directory shared with another harness (see below) carry `shared_with`, the other
+harnesses that read it: `disable` / `enable` rows relative to the harness you
+asked, plus `owner`, the harness whose park dir and state entry hold the item;
+`list` and `cost` rows are filed under the owner (`shared_with` is `[]` when
+unshared).
+
+`--dry-run` (`disable` / `enable` / `install-shims` / `ui`) computes the plan --
+moves, companions, backups, MCP edits, warnings -- and writes nothing: no state,
+log, lock or backup, and no chmod; it never shells out to `claude`. `disable` /
+`enable` result rows have action `would-disable` / `would-enable`; every plan
+row has status `planned`. Read-only commands (`list`, `status`, `cost`) also
+change nothing on disk -- `status` warns about a `state.json` or
+backup looser than `0600` instead of fixing it. A dry run whose plan contains a
+failing item exits `1`, like the real run would.
 
 | exit code | meaning |
 |:-:|---|
 | `0` | ok |
 | `1` | partial failure (some items failed), or an unexpected error |
-| `2` | usage error |
+| `2` | usage error, including an unknown harness or type |
 | `3` | locked by another run |
 | `4` | unsupported harness/type pair, or harness not installed |
 
 ```sh
-agent_toggle.py disable skill   academic-plotting matplotlib
-agent_toggle.py disable command orch:batch          # nested commands/orch/batch.md
-agent_toggle.py disable agent   kubernetes-architect
-agent_toggle.py disable mcp     telegram-mcp
-agent_toggle.py disable skill   foo --harness codex
-agent_toggle.py enable  mcp     telegram-mcp
+agent-toggle disable skill   demo-skill other-skill
+agent-toggle disable command demo:batch             # nested commands/demo/batch.md
+agent-toggle disable agent   demo-agent
+agent-toggle disable mcp     example-mcp
+agent-toggle disable skill   demo-skill --harness codex
+agent-toggle enable  mcp     example-mcp
+agent-toggle cost --type skill --json
 ```
 
-A colon addresses nesting: `orch:batch` is `commands/orch/batch.md`.
+A colon addresses nesting: `demo:batch` is `commands/demo/batch.md`.
 
 ## Interactive picker
 
 ```sh
-agent_toggle.py ui
+agent-toggle ui
 ```
 
 ```
  filter: telegram█
-  [x] claude   command telegram-summary
- *[ ] claude   skill   telegram-display
-  [x] claude   skill   telegram-group-send
-  [ ] claude   mcp     telegram-mcp
+ *[x]    (92)  claude   command telegram-summary
+  [ ]    (61)  claude   skill   telegram-display
+  [x]      48   claude   skill   telegram-group-send
+  [x]      20   claude   mcp     telegram-example
 
- 4 shown  |  1 change(s) staged -- Enter to apply
- ↑↓ move  Tab tick/untick  Enter apply  Esc cancel  type to filter
+ 4 shown  |  ~68 tok  |  harness:all type:all sort:name  |  1 staged -- Enter to apply
+ Tab tick  Enter apply  Esc cancel  s sort  h/t filter  ? keys  / type to filter
 ```
+
+The number column is the estimated startup tokens (chars / 4, about +-25 %);
+a parked row shows `(N)`, what restoring it would load. Plugins appear as rows
+too (via `claude plugin list --json`; skipped under `ui --dry-run`, which never
+shells out).
 
 | key | action |
 |---|---|
-| any printable character | appends to the filter (terms are ANDed, case-insensitive) |
+| `s` | cycle sort: name, cost (biggest first) |
+| `h` | cycle the harness filter |
+| `t` | cycle the type filter |
+| `?` | show the key list |
+| `/` | start typing a filter |
+| any other printable character | appends to the filter (terms are ANDed, case-insensitive) |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `↑` `↓` / `Ctrl-P` `Ctrl-N` | move; `PgUp`/`PgDn` jump a screen |
 | `Tab` | tick / untick the highlighted row |
-| `Enter` | apply every staged change |
+| `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel — nothing is applied |
+
+`s`, `h`, `t` and `?` are commands while the filter is empty. Press `/` first
+to type a filter that begins with one of them (the example above is typed
+`/telegram`); once the filter is non-empty, every letter just types.
 
 The checkbox shows the **enabled** state: `[x]` is live, `[ ]` is parked. A
 `*` marks a row you changed.
@@ -121,22 +165,44 @@ torn down, and only then do the real operations run — so their output (which
 companion files moved, which were kept because they are shared) is readable
 instead of fighting curses for the terminal.
 
-Built on stdlib `curses`, so there is nothing to install. Plugins are not in
-the picker: enumerating them needs a `claude plugin list` subprocess whose
-output format is not contracted, so they stay a CLI operation.
+Built on stdlib `curses`, so there is nothing to install on macOS and Linux
+(on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
 
 ## What each harness supports
 
 | harness | home | skill | agent | command | rule | plugin | mcp |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
 | claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
-| codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | ✓ | ✓ `config.toml` |
-| grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
+| codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | — | ✓ `config.toml` |
+| grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` (assumed) |
+| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | — |
 | openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — | — (sqlite) |
+
+Only `claude` plugins are toggleable (through `claude plugin enable/disable`).
+Codex has no plugin CLI this tool can drive: `disable plugin x --harness codex`
+exits `4`, which is why the matrix leaves it unchecked.
+
+The grok MCP location (`~/.grok/config.toml`, same `[mcp_servers.<name>]`
+tables as codex) is **assumed** from the design survey, not verified against a
+live install; treat grok MCP as experimental until confirmed.
 
 Unsupported pairs fail loudly. OpenClaw keeps MCP servers in
 `state/openclaw.sqlite`, not a file this tool can safely slice, so it refuses
 rather than guessing.
+
+### Shared directories
+
+OpenCode may read skills from another harness's directory through
+`opencode.json` → `skills.paths` (absolute, `~/`-prefixed or relative-to-the-
+opencode-dir entries; a bare `~` or `$HOME/...` is not expanded, and
+`opencode.jsonc` is not read). Such a directory is **one** item, filed under
+its owner (the harness whose home really holds it): it is
+parked once, tracked once, and every row reports `shared_with`, the other
+harnesses it also affects. `status` prints `shared dir with: ...`.
+
+If the live directory carries `.synced-from-*` markers, a sync job may
+re-create what you parked; `status` warns about it. Park in the source harness
+instead. The warning is printed once per harness that views the directory.
 
 ## Companion files
 
@@ -177,7 +243,7 @@ Both scopes stored in `~/.claude.json` are togglable, and the scope round-trips:
 | user | top-level `mcpServers` | ✓ |
 | local | `projects/<dir>/mcpServers` | ✓ — project path saved with the backup |
 | project | the repo's own `.mcp.json` | — committed config, not ours to move |
-| claude.ai connector | your account | — turn off at claude.ai → Settings → Connectors |
+| claude.ai connector | your account | ✓ — recorded in each *existing* project's `disabledMcpServers`; a project first opened later needs the toggle re-run |
 
 `claude mcp remove -s local` only sees the project it runs in, so the project
 path is recorded at disable time and the restore runs back in that directory.
@@ -222,13 +288,15 @@ Both sides are resolved first.
 
 ## Design and roadmap
 
-Architecture, harness survey, cost model, and the phased roadmap toward a
-public multi-OS release live in `docs/DESIGN.md`.
+Architecture, harness survey, cost model, known gaps and the phased roadmap
+toward a public multi-OS release live in `docs/DESIGN.md`. Release notes are in
+`CHANGELOG.md`.
 
 ## Tests
 
 ```sh
 python3 -m unittest discover -s tests -v
+ruff check .
 ```
 
 stdlib `unittest`, no fixtures, no network. Every test runs against a
