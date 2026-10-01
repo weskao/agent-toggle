@@ -64,6 +64,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                  f"fix: echo '{parked.name}/' >> {home}/.gitignore")
 
     for name in names:
+        fs.refresh_lock()
         key = f"{harness}:{type_}:{name}"
         if action == "disable":
             src = resolve_item(live, name)
@@ -131,6 +132,7 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
         return len(names)
     fails = 0
     for name in names:
+        fs.refresh_lock()
         if dry_run:
             if claude_bin():
                 _ok(out, dry_run, harness, "plugin", action, name, "")
@@ -171,13 +173,14 @@ def toggle_mcp(action: str, names: list[str], state: dict,
 
     backup_dir = fs.backup_dir()
     if not dry_run:
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        fs.private_dir(backup_dir)
     fails = 0
 
     def fail(name: str, msg: str) -> int:
         return _fail(out, dry_run, harness, "mcp", action, name, msg)
 
     for name in names:
+        fs.refresh_lock()
         key = f"{harness}:mcp:{name}"
 
         if backend == "claude-json" and name in claudeai_connector_names():
@@ -220,12 +223,13 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     fails += fail(name, str(e))
                     continue
                 if found is None:
-                    ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
-                    hint = ("account-level claude.ai connector -- disable it at "
-                            "claude.ai (Settings -> Connectors)"
-                            if ok and "claude.ai config" in cfg
-                            else "not in ~/.claude.json (user or local scope) -- "
-                                 "project scope lives in the repo's own .mcp.json")
+                    hint = ("not in ~/.claude.json (user or local scope) -- "
+                            "project scope lives in the repo's own .mcp.json")
+                    if not dry_run:      # a dry run never shells out to claude
+                        ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
+                        if ok and "claude.ai config" in cfg:
+                            hint = ("account-level claude.ai connector -- disable it "
+                                    "at claude.ai (Settings -> Connectors)")
                     fails += fail(name, hint)
                     continue
                 raw, scope, project = found

@@ -49,17 +49,24 @@ Flags accepted by every command, before or after the subcommand:
   on `list` / `status` it filters when given).
 - `--json` prints exactly one JSON document and nothing else on stdout:
   `{"ok", "command", "results": [{harness, type, name, action, status, detail, ...}],
-  "warnings", "needs_new_session"}`. Errors still emit it, with `"ok": false`.
+  "warnings", "needs_new_session"}`. Errors -- including unexpected ones, as
+  `{ExceptionType}: {message}` -- always emit it, with `"ok": false`.
+  Exception: `--help` / `--version` print plain text even with `--json`.
 - `--version` prints the version.
+- `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
+  unexpected errors; otherwise they are a single `error:` line.
 
 `--dry-run` (`disable` / `enable`) computes the plan -- moves, companions,
 backups, MCP edits, warnings -- and writes nothing: no state, log, lock or
-backup. Result rows say `would-disable` / `would-enable`.
+backup, and no chmod; it never shells out to `claude`. Result rows say
+`would-disable` / `would-enable`. Read-only commands (`list`, `status`) also
+change nothing on disk -- `status` warns about a `state.json` or backup looser
+than `0600` instead of fixing it.
 
 | exit code | meaning |
 |:-:|---|
 | `0` | ok |
-| `1` | partial failure (some items failed) |
+| `1` | partial failure (some items failed), or an unexpected error |
 | `2` | usage error |
 | `3` | locked by another run |
 | `4` | unsupported harness/type pair, or harness not installed |
@@ -174,15 +181,15 @@ picks the winner — guessing would restore it into the wrong project.
 
 ## Where state lives
 
-All of it in `~/.agent-toggle/`, never as marker files next to the targets —
+All of it in `~/.agent-toggle/` (mode `0700`), never as marker files next to the targets —
 your `git status` in your own project must not change because of our
 bookkeeping.
 
 | file | contents |
 |---|---|
 | `state.json` | current disabled list (schema v3; atomic write, mode `0600`) |
-| `lock` | held by `disable` / `enable` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min) |
-| `log.jsonl` | one line per operation |
+| `lock` | held by `disable` / `enable` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item) |
+| `log.jsonl` | one line per operation (mode `0600`) |
 | `mcp-backups/` | `<harness>__<server>.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
 

@@ -28,7 +28,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import os
 import sys
+import traceback
 from pathlib import Path
 
 from . import __version__, fs, store
@@ -64,6 +66,10 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     legacy = None
     out.say(f"state   {fs.state_file()}  ({len(state['disabled'])} disabled)")
     out.say(f"log     {fs.log_file()}")
+    loose = [p for p in (fs.state_file(), *fs.backup_dir().glob("*.json"))
+             if fs.too_open(p, 0o077)]
+    for p in loose:
+        out.say(f"WARNING {p} is looser than 0600 -- fix: chmod 600 {p}", warn=True)
     if fs.too_open(fs.state_dir()):
         out.say(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
                 f"auth headers; fix: chmod 700 {fs.state_dir()}", warn=True)
@@ -161,8 +167,10 @@ def cmd_ui(state: dict, out: Result) -> None:
         return
     with fs.lock():
         state = load_state()          # re-read: the picker's copy may be stale
-        apply_changes(changes, state, out)
-        save_state(state)
+        try:
+            apply_changes(changes, state, out)
+        finally:
+            save_state(state)         # keep what already moved even if a later item crashed
     if any(r.type == "mcp" for r in changes):
         out.say("\nMCP changed -- open a NEW session for it to take effect.")
 
@@ -222,6 +230,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="target harness (default: claude)")
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                         help="print exactly one JSON document instead of text")
+    common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
+                        help="print a traceback on unexpected errors")
     common.add_argument("--version", action="version", default=argparse.SUPPRESS,
                         version=f"agent-toggle {__version__}")
     p = _Parser(prog="agent-toggle", parents=[common],
@@ -276,5 +286,10 @@ def main(argv: list[str] | None = None) -> int:
         rc = e.code
     except SystemExit as e:             # argparse --help / --version
         return e.code or 0
+    except Exception as e:              # never a bare traceback; --json stays one document
+        out.error(f"{type(e).__name__}: {e}")
+        if os.environ.get("AGENT_TOGGLE_DEBUG") == "1" or {"-v", "--verbose"} & set(argv):
+            traceback.print_exc()
+        rc = 1
     out.render()
     return rc

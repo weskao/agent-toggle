@@ -6,7 +6,9 @@ import hashlib
 import io
 import json
 import os
+import unittest
 from pathlib import Path
+from unittest import mock
 
 from base import SandboxCase
 
@@ -259,3 +261,84 @@ class SpellingTest(CliCase):
         rc, out, err = self.run_cli("disable", "skill", "demo-skill", "--dry-run")
         self.assertIn("x skill demo-skill: not found", out)
         self.assertEqual(rc, 1)
+
+
+class UnexpectedErrorTest(CliCase):
+    """Any failure still yields exactly one JSON document and rc 1, never a traceback."""
+
+    def assert_one_error_doc(self, *argv: str) -> dict:
+        rc, out, err = self.run_cli(*argv, "--json")
+        self.assertEqual(rc, 1, (out, err))
+        env = json.loads(out)                        # the WHOLE stdout is one document
+        self.assertFalse(env["ok"])
+        self.assertEqual(env["results"][-1]["status"], "error")
+        self.assertNotIn("Traceback", out + err)
+        return env
+
+    def bad_state(self, data: bytes) -> None:
+        fs.state_dir().mkdir(parents=True, exist_ok=True)
+        fs.state_file().write_bytes(data)
+
+    def test_state_top_level_not_an_object(self) -> None:
+        self.bad_state(b"[]")
+        self.assert_one_error_doc("list")
+
+    def test_state_invalid_utf8(self) -> None:
+        self.bad_state(b"\xff\xfe{")
+        self.assert_one_error_doc("list")
+
+    def test_state_version_not_an_int(self) -> None:
+        self.bad_state(b'{"version": "3", "disabled": {}}')
+        env = self.assert_one_error_doc("status")
+        self.assertIn("version", env["results"][-1]["detail"])
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "needs POSIX modes and a non-root user")
+    def test_unreadable_codex_config(self) -> None:
+        codex = self.tmp / ".codex"
+        codex.mkdir()
+        cfg = codex / "config.toml"
+        cfg.write_text('[mcp_servers.example-mcp]\ncommand = "x"\n')
+        cfg.chmod(0)
+        self.addCleanup(cfg.chmod, 0o600)
+        env = self.assert_one_error_doc("disable", "mcp", "example-mcp", "--harness", "codex")
+        self.assertIn("PermissionError", env["results"][-1]["detail"])
+
+    def test_text_mode_is_one_line_unless_verbose(self) -> None:
+        self.bad_state(b"[]")
+        rc, out, err = self.run_cli("list")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(len(err.strip().splitlines()), 1)
+        with mock.patch.object(cli, "cmd_list", side_effect=RuntimeError("boom")):
+            self.bad_state(b'{"version": 3, "disabled": {}}')
+            rc, _, err = self.run_cli("list")
+            self.assertEqual((rc, err.strip()), (1, "error: RuntimeError: boom"))
+            rc, _, err = self.run_cli("list", "-v")
+            self.assertIn("Traceback", err)
+
+    def test_ui_apply_failure_still_saves_state(self) -> None:
+        try:
+            from agent_toggle.ui import picker
+        except ImportError:
+            self.skipTest("curses unavailable")
+
+        def half_done(changes, state, out=None):
+            state["disabled"]["claude:skill:demo-skill"] = {"type": "skill", "name": "demo-skill"}
+            raise RuntimeError("second item crashed")
+
+        with mock.patch.object(picker, "pick", return_value=[object()]), \
+                mock.patch.object(cli, "apply_changes", half_done):
+            rc, _, err = self.run_cli("ui")
+        self.assertEqual(rc, 1)
+        self.assertIn("claude:skill:demo-skill", json.loads(fs.state_file().read_text())["disabled"])
+
+
+class DryRunNoShellOutTest(CliCase):
+    def test_unknown_mcp_dry_run_never_calls_claude_mcp_get(self) -> None:
+        self.claude_json({"mcpServers": {}})
+        self.cli_rc = 0
+        rc, env = self.run_json("disable", "mcp", "ghost-mcp", "--dry-run")
+        self.assertEqual((rc, env["results"][0]["status"]), (1, "error"))
+        self.assertEqual(self.cli_calls, [])
+        self.run_json("disable", "mcp", "ghost-mcp")           # a real run still asks
+        self.assertEqual(self.cli_calls[0][0][:2], ["mcp", "get"])

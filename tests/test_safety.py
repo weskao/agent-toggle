@@ -6,6 +6,7 @@ import os
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from base import SandboxCase
 
@@ -51,6 +52,52 @@ class LockTest(SandboxCase):
         os.utime(fs.lock_file(), (old, old))
         with fs.lock():
             self.assertEqual(fs.lock_file().read_text(), str(os.getpid()))
+
+    def test_takeover_never_steals_a_lock_a_rival_just_refreshed(self) -> None:
+        fs.state_dir().mkdir(parents=True)
+        fs.lock_file().write_text("999999")
+        old = time.time() - 11 * 60
+        os.utime(fs.lock_file(), (old, old))
+        real_rename = os.rename
+
+        def rival_wins_the_race(src, dst):
+            fs.lock_file().write_text("424242")          # rival replaces the stale lock
+            real_rename(src, dst)                        # ...and we move THEIR fresh one
+
+        with mock.patch.object(fs.os, "rename", rival_wins_the_race):
+            with self.assertRaises(fs.Locked):
+                with fs.lock():
+                    self.fail("proceeded despite a live rival lock")
+        self.assertEqual(fs.lock_file().read_text(), "424242")     # put back
+        self.assertEqual(list(fs.state_dir().glob("lock.stale.*")), [])
+
+    @unittest.skipIf(not POSIX, "PID liveness is POSIX only")
+    def test_stale_lock_of_a_live_pid_is_not_taken_over(self) -> None:
+        fs.state_dir().mkdir(parents=True)
+        fs.lock_file().write_text(str(os.getpid()))      # a running process
+        old = time.time() - 11 * 60
+        os.utime(fs.lock_file(), (old, old))
+        with self.assertRaises(fs.Locked):
+            with fs.lock():
+                pass
+        self.assertEqual(fs.lock_file().read_text(), str(os.getpid()))
+
+    def test_batch_refreshes_the_lock_mtime(self) -> None:
+        self.write("skills/demo-skill/SKILL.md")
+        with fs.lock():
+            old = time.time() - 9 * 60
+            os.utime(fs.lock_file(), (old, old))
+            mechanisms.toggle_dir_type("disable", "skill", ["demo-skill"],
+                                       {"version": 3, "disabled": {}}, "claude", self.home)
+            self.assertGreater(fs.lock_file().stat().st_mtime, time.time() - 60)
+
+    def test_refresh_ignores_a_lock_we_do_not_own(self) -> None:
+        fs.state_dir().mkdir(parents=True)
+        fs.lock_file().write_text("999999")
+        old = time.time() - 9 * 60
+        os.utime(fs.lock_file(), (old, old))
+        fs.refresh_lock()
+        self.assertLess(fs.lock_file().stat().st_mtime, time.time() - 60)
 
     def test_cli_exits_3_when_locked(self) -> None:
         self.write("skills/demo-skill/SKILL.md")
@@ -103,6 +150,50 @@ class PrivateModeTest(SandboxCase):
         self.assertTrue(fs.too_open(fs.state_dir()))
         fs.state_dir().chmod(0o700)
         self.assertFalse(fs.too_open(fs.state_dir()))
+
+
+@unittest.skipIf(not POSIX, "POSIX modes")
+class PrivateDirTest(SandboxCase):
+    def test_state_backup_dirs_and_log_are_private_under_open_umask(self) -> None:
+        self.addCleanup(os.umask, os.umask(0))
+        raw = {"type": "http", "headers": {"Authorization": "Bearer test-token-000"}}
+        saved = mechanisms.claude_mcp_config
+        self.addCleanup(setattr, mechanisms, "claude_mcp_config", saved)
+        mechanisms.claude_mcp_config = lambda name: (raw, "user", None)
+        self.cli_rc = 0
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp"]), 0)
+        for d in (fs.state_dir(), fs.backup_dir()):
+            self.assertEqual(mode(d), 0o700, d)
+        self.assertEqual(mode(fs.log_file()), 0o600)
+
+
+@unittest.skipIf(not POSIX, "POSIX modes")
+class ReadOnlyNeverChmodsTest(SandboxCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("skills/demo-skill/SKILL.md")
+        store.save_state({"version": 3, "disabled": {}})
+        fs.backup_dir().mkdir()
+        self.bp = fs.backup_dir() / "claude__example-mcp.json"
+        self.bp.write_text("{}")
+        for p in (fs.state_file(), self.bp):
+            p.chmod(0o644)
+
+    def test_list_status_and_dry_run_leave_modes_alone(self) -> None:
+        for argv in (["list"], ["status"], ["disable", "skill", "demo-skill", "--dry-run"]):
+            cli.main(argv)
+            self.assertEqual(mode(fs.state_file()), 0o644, argv)
+            self.assertEqual(mode(self.bp), 0o644, argv)
+
+    def test_status_warns_about_loose_files(self) -> None:
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli.main(["status"])
+        text = buf.getvalue()
+        self.assertIn(f"{fs.state_file()} is looser than 0600", text)
+        self.assertIn(f"{self.bp} is looser than 0600", text)
 
 
 class SchemaV3Test(SandboxCase):

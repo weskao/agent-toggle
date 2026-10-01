@@ -68,11 +68,50 @@ class Locked(Exception):
     """Another agent-toggle run holds the lock (the CLI maps this to exit 3)."""
 
 
+def private_dir(path: Path) -> Path:
+    """mkdir the state dir and (one level below it) `path`, both mode 0700."""
+    sd = state_dir()
+    sd.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path != sd:
+        path.mkdir(mode=0o700, exist_ok=True)
+    return path
+
+
+def _holder_alive(path: Path) -> bool:
+    """True if the PID recorded in the lock belongs to a running process.
+    Unknown (non-POSIX, unreadable / empty file) counts as not alive."""
+    if os.name == "nt":
+        return False
+    try:
+        pid = int(path.read_text().strip())
+        if pid <= 0:
+            return False
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                      # exists, owned by someone else
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def refresh_lock() -> None:
+    """Bump the mtime of a lock WE hold, so a batch longer than LOCK_STALE is
+    not mistaken for a crashed run. No-op when we do not hold it."""
+    path = lock_file()
+    try:
+        if path.read_text() == str(os.getpid()):
+            os.utime(path)
+    except OSError:
+        pass
+
+
 @contextlib.contextmanager
 def lock():
     """Hold <state_dir>/lock (O_EXCL create, PID inside) for a whole batch."""
     path = lock_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    private_dir(state_dir())
     deadline = time.monotonic() + LOCK_WAIT
     while True:
         try:
@@ -80,11 +119,22 @@ def lock():
             break
         except FileExistsError:
             try:
-                if time.time() - path.stat().st_mtime > LOCK_STALE:
-                    # rename, not unlink: only one racing taker wins the rename,
-                    # and nobody can delete a lock a rival just created.
+                if (time.time() - path.stat().st_mtime > LOCK_STALE
+                        and not _holder_alive(path)):
+                    # Takeover is stat-then-rename, so a rival may replace the
+                    # lock in between: rename can then move THEIR fresh lock.
+                    # Re-stat what we actually moved and put it back if so.
+                    # ponytail: the lock path is briefly absent during put-back;
+                    # fine for a CLI, use flock/O_TMPFILE if contention matters.
                     stale = path.with_name(f"lock.stale.{os.getpid()}")
                     os.rename(path, stale)
+                    if time.time() - stale.stat().st_mtime <= LOCK_STALE:
+                        try:
+                            os.link(stale, path)     # fails if a third run took it
+                            stale.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        raise Locked(f"{path} is held by another agent-toggle run")
                     stale.unlink(missing_ok=True)
                     continue
             except FileNotFoundError:
@@ -131,10 +181,11 @@ def tighten(path: Path) -> None:
         pass
 
 
-def too_open(path: Path) -> bool:
-    """True if group/world can read `path` (always False where modes don't apply)."""
+def too_open(path: Path, mask: int = 0o044) -> bool:
+    """True if `path` has any of the `mask` bits set (default: group/world read);
+    always False where modes don't apply."""
     try:
-        return os.name != "nt" and bool(path.stat().st_mode & 0o044)
+        return os.name != "nt" and bool(path.stat().st_mode & mask)
     except OSError:
         return False
 

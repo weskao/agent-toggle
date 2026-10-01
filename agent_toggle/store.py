@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -45,30 +46,39 @@ def load_state(write_back: bool = True) -> dict:
     state_file = fs.state_file()
     if not state_file.exists():
         return {"version": VERSION, "disabled": {}}
-    fs.tighten(state_file)
-    for bp in fs.backup_dir().glob("*.json"):
-        fs.tighten(bp)
+    if write_back:                       # read-only runs never chmod; status only warns
+        fs.tighten(state_file)
+        for bp in fs.backup_dir().glob("*.json"):
+            fs.tighten(bp)
     try:
-        state = json.loads(state_file.read_text())
-    except (json.JSONDecodeError, OSError) as e:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError) as e:
         die(f"state file unreadable ({state_file}): {e}")
+    if not isinstance(state, dict):
+        die(f"state file malformed ({state_file}): top level must be an object")
+    version = state.get("version", 0)
+    if not isinstance(version, int) or isinstance(version, bool):
+        die(f"state file malformed ({state_file}): version must be an integer")
+    if not isinstance(state.get("disabled", {}), dict):
+        die(f"state file malformed ({state_file}): disabled must be an object")
     if upgrade(state) and write_back:
         save_state(state)
     return state
 
 
 def save_state(state: dict) -> None:
-    fs.state_dir().mkdir(parents=True, exist_ok=True)
+    fs.private_dir(fs.state_dir())
     fs.atomic_write(fs.state_file(), json.dumps(state, indent=2, ensure_ascii=False))
 
 
 def log(action: str, type_: str, name: str, result: str, detail: str = "") -> None:
-    fs.state_dir().mkdir(parents=True, exist_ok=True)
+    fs.private_dir(fs.state_dir())
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "action": action,
            "type": type_, "name": name, "result": result}
     if detail:
         rec["detail"] = detail
-    with fs.log_file().open("a", encoding="utf-8") as fh:
+    fd = os.open(fs.log_file(), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
@@ -84,7 +94,7 @@ def migrate(state: dict) -> int:
     except (OSError, json.JSONDecodeError) as e:
         die(f"legacy state unreadable: {e}")
 
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    fs.private_dir(backup_dir)
     added = 0
     for okey, entry in old.get("disabled", {}).items():
         new = dict(entry, harness="claude")
