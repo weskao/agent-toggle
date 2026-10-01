@@ -34,7 +34,8 @@ Success criteria for the public release:
    harness directories; all bookkeeping is in `~/.agent-toggle/`.
 
 Non-goals: deleting or installing resources, syncing resources between
-harnesses, editing a harness's own settings beyond the fields needed to
+harnesses, syncing state between machines or through any account/cloud
+service, editing a harness's own settings beyond the fields needed to
 toggle.
 
 ---
@@ -107,6 +108,9 @@ Two honest caveats the cost model must carry:
 - The tool can only estimate static text. Measured numbers come from the
   harness itself; the estimator exposes `--json` so a measured total can be
   compared against the estimate, and documents its formula.
+- Harness prompt caching lowers the *price* of the static block after the
+  first turn, not its context-window footprint. `cost` reports tokens, not
+  dollars.
 
 ---
 
@@ -307,7 +311,11 @@ agent-toggle profile list
 
 Stored as `~/.agent-toggle/profiles/<name>.json`. Items unknown to the
 machine (profile shared from elsewhere) are reported and skipped, never
-invented. Per-project auto-switch is deliberately **not** in scope until
+invented. Profiles are the only portable artifact and double as the
+import/export format: `profile save <name> --out <file>` and
+`profile apply <file.json>` accept a path, so a profile can live in a
+dotfiles repo. Nothing else is exportable: `state.json` holds machine-local
+absolute paths; `mcp-backups/` holds auth material. Per-project auto-switch is deliberately **not** in scope until
 `profile apply` has been used for a while; it would require a hook per
 harness and a definition of "project" that differs per harness.
 
@@ -396,9 +404,39 @@ and should be proven early.
 | **Exit codes** | `0` ok, `1` partial failure, `2` usage error, `3` locked, `4` unsupported pair. Shims branch on them. |
 | **Shell completion** | argparse + `shtab`-style static completion files generated at release time; no runtime dependency. |
 | **Telemetry / update checks** | None. A tool that trims context should not phone home. |
+| **Cache** | None. `cost` reads ~200 frontmatter blocks (chars ÷ 4) — milliseconds. The only slow call is `claude plugin list --json`, run once per invocation. Add a cache only after a measured `cost` run exceeds ~1 s; then key it by file mtime, one entry per path. |
+| **Import / export** | Profiles are the format (§5.7). No `export` bundle of `~/.agent-toggle/`: state is machine-local, backups hold secrets. Bug reports attach `status --json` (§7). |
+| **Multi-machine sync** | Non-goal (§1). No server, no account, no phone-home (see Telemetry). Same set on two machines → commit `~/.agent-toggle/profiles/` to dotfiles or symlink the directory. `state.json`, `log.jsonl`, `mcp-backups/` are machine-local and must never be synced; `SECURITY.md` says so and warns against placing `~/.agent-toggle` in a cloud-synced folder. |
 | **i18n** | English output only; the shim descriptions keep the zh-TW trigger phrases because they drive skill matching, not UI text. |
 | **Logging** | `-v` prints every path decision (today's companion report style); default stays terse; `--json` is never mixed with text. |
 | **Documentation** | README = install + 10-line usage; `docs/DESIGN.md` (this file); `docs/harnesses.md` = the survey table kept current; `CONTRIBUTING.md` = "how to add a harness in one table row" with the fixture-home recipe. |
+
+### 6.1 Security model
+
+Scope: a same-user, local tool. It defends against **untrusted input** (names
+from the CLI, an agent or a profile file; resource contents; a tampered
+`state.json`) and against **accidental exposure** (secrets, supply chain). It
+does not defend against malware running as the same user or against root;
+that actor can already edit every file the tool touches.
+
+Assets: MCP auth material in backups, the integrity of the user's harness
+directories, and the promise that a disable never loses data.
+
+| # | threat | control | status |
+|---|---|---|---|
+| 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | **gap**: `resolve_item` only maps `:` to `/` and no containment check was found. Fix before phase 0 closes |
+| 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | planned; schema-version check exists |
+| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | modes and warning done; output audit planned |
+| 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | planned: shim text, rule warning |
+| 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | argv form done; validation lands with phase 5 |
+| 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | planned; verification is a phase 2 acceptance item |
+| 7 | **Races and links** | one lock per batch; `safe_move` on one filesystem; refuse a park dir reached through a symlinked parent; same-user attackers are out of scope | lock and `safe_move` done |
+| 8 | **Supply chain** | zero runtime dependencies; PyPI trusted publishing (OIDC, no stored token); GitHub Actions pinned by commit SHA and kept current by Dependabot; workflows default to `contents: read` and only the publish job gets `id-token: write`; README pins installs to a tag, `git+<repo-url>@vX.Y.Z` | planned for phases 0, 4 and 6 |
+| 9 | **Installer overwrites**: `install-shims` writes into harness dirs | writes only its own shim files under `$HOME`-relative paths and refuses to overwrite a file that lacks the shim marker | planned; confirm against the current `install-shims` |
+
+Disclosure: `SECURITY.md` already covers what is stored, file modes and
+private reporting through GitHub advisories. Extend it with the scope
+statement above and a supported-versions line.
 
 ---
 
@@ -415,10 +453,14 @@ and should be proven early.
       OS; the shell script stays as a thin wrapper for one release).
 - [ ] CI: GitHub Actions matrix macOS/Linux/Windows × Python 3.10/3.13 running
       the test suite; lint with `ruff` (dev-only dependency).
-- [ ] `SECURITY.md` (backups hold auth material; reporting channel),
+- [ ] `SECURITY.md` (backups hold auth material; never sync or cloud-share
+      `~/.agent-toggle`; reporting channel),
       `CONTRIBUTING.md` (adding a harness row + fixture + verifying version),
       `CHANGELOG.md` (Keep a Changelog), issue templates (bug: harness +
       version + `status --json` output; harness request: layout survey).
+- [ ] Name and path containment (§6.1 row 1): `validate_name()` plus an
+      inside-the-harness-dir check on every resolved item, with a test that
+      `..`, absolute and leading-`-` names are refused.
 - [ ] No real user data anywhere: fixtures use synthetic names; docs use `~`
       and `<name>` placeholders; tests never touch the real home.
 - [ ] Versioning: SemVer; state schema version bumps are minor releases with
@@ -444,10 +486,10 @@ Phase status (tick a phase only once its acceptance criteria hold):
 |---|---|---|
 | **0 — public readiness** | §7 | fresh macOS user installs from the git repo with one command, runs `status`, `disable skill x`, `enable skill x`; no personal data in repo; CI green on 3 OSes |
 | **1 — cost + structure** | package split (§5.1), `--json`, lock, exit codes, `cost` command + picker column, `rule` type, grok MCP via TOML backend, OpenCode adapter with alias detection, plugins in picker, `--dry-run`, 0600 backups | `cost` sorts a fixture home correctly; alias fixture reports "also affects"; v2 state migrates; shims use `--json` |
-| **2 — profiles + scope** | profiles (§5.7), `--project`, flag mechanism (openclaw skills/plugins, opencode mcp), `undo`, `enable --all`, `doctor` | profile round-trip on fixtures; project-scope disable prints the git warning; flag toggles leave the rest of the JSON byte-identical except the flag |
+| **2 — profiles + scope** | profiles (§5.7), `--project`, flag mechanism (openclaw skills/plugins, opencode mcp), `undo`, `enable --all`, `doctor` | profile round-trip on fixtures; project-scope disable prints the git warning; flag toggles leave the rest of the JSON byte-identical except the flag; a profile or `state.json` entry with `..` or an out-of-root path is refused; a post-write parse check rolls back a broken edit |
 | **3 — remaining harnesses** | copilot (skills, agents, mcp-config.json), vibe (skills), devin (explicit N/A), agy (table row; adapter once layout observed) | each has a fixture home and passes the shared conformance test |
-| **4 — PyPI release** | publish `agent-toggle` to PyPI (trusted publishing from a tag via GitHub Actions), README install switches to `uv tool install agent-toggle` | tagged release installs from PyPI on a clean macOS runner and passes the phase-0 smoke test |
-| **5 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI | full suite green on Windows runner including picker fallback; documented harness homes per OS |
+| **4 — PyPI release** | publish `agent-toggle` to PyPI (trusted publishing from a tag via GitHub Actions), README install switches to `uv tool install agent-toggle` | tagged release installs from PyPI on a clean macOS runner and passes the phase-0 smoke test; the publish job uses OIDC with no stored PyPI token; all workflow actions are pinned by SHA |
+| **5 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI; plugin ids with shell metacharacters are refused on the Windows runner | full suite green on Windows runner including picker fallback; documented harness homes per OS |
 | **6 — CI hardening + Telegram alerts** | §8.1: bring `.github/workflows/ci.yml` up to the aicp CI pattern — `permissions: contents: read`, per-ref `concurrency` with cancel-in-progress, `PYTHONUTF8=1`, job `timeout-minutes`, `fail-fast: false`, and a `notify-telegram` job; README "CI notifications" section with the two `gh secret set` commands | a forced test failure on a push sends one Telegram message naming repo, branch, short SHA and the run URL; with the secrets unset the notify job exits 0 with a `::notice::`; PRs never notify; no token or chat id appears in the repo |
 
 Order rationale: cost visibility is the feature that serves the stated goal,
@@ -521,6 +563,8 @@ runs this pattern in production:
 | 2026-10-02 | PyPI moved from phase 0 to phase 4; OS ports to phase 5 | PyPI in phase 0 | install from git is enough for early users; publish once the CLI and state schema stop changing |
 | 2026-10-02 | Phase 6: CI hardening + Telegram failure alerts, modelled on aicp | alerts in phase 0; no alerts | basic CI already ships in phase 0; failure alerts are only worth wiring once outside pushes exist, and aicp's job is a proven template |
 | 2026-10-02 | Phase-0 OSS hygiene section | minimal; none | the project is going public; these items block the first external user |
+| 2026-10-02 | Explicit security model (§6.1): same-user local scope; validate every name at the boundary; profiles never carry paths; no subprocess shell; trusted publishing | ad hoc per-feature checks; defending against same-user malware | the tool moves files and holds secrets and is driven by AI agents that read untrusted text; a written model makes each control testable, and same-user malware could already edit every file involved |
+| 2026-10-02 | No cache, no export/import command, no account sync; profiles are the portable unit | mtime-keyed cost cache; `export`/`import` bundle; hosted sync of `~/.agent-toggle` | cost is ms-scale file reads; state is machine-local and backups hold secrets; sync contradicts "never phone home" and dotfiles + git already solve it |
 
 ## 11. Open questions (need a real install to answer)
 
