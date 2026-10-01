@@ -430,6 +430,15 @@ and should be proven early.
 
 Each phase ends with its acceptance criteria met on CI, not by inspection.
 
+Phase status (tick a phase only once its acceptance criteria hold):
+
+- [ ] Phase 0 — public readiness
+- [ ] Phase 1 — cost + structure
+- [ ] Phase 2 — profiles + scope
+- [ ] Phase 3 — remaining harnesses
+- [ ] Phase 4 — PyPI release
+- [ ] Phase 5 — Linux + Windows
+
 | phase | content | acceptance |
 |---|---|---|
 | **0 — public readiness** | §7 | fresh macOS user installs from the git repo with one command, runs `status`, `disable skill x`, `enable skill x`; no personal data in repo; CI green on 3 OSes |
