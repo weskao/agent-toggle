@@ -17,7 +17,8 @@ TEXT_SUFFIXES = {".md", ".sh", ".py", ".js", ".mjs", ".cjs", ".ts", ".json",
                  ".yaml", ".yml", ".toml", ".txt", ".zsh", ".bash"}
 # Directories never worth walking when deciding if a companion is shared.
 PRUNE = {".git", "node_modules", "cache", "__pycache__", "dist", "build",
-         "skills-disabled", "agents-disabled", "commands-disabled", "venv"}
+         "skills-disabled", "agents-disabled", "commands-disabled", "rules-disabled",
+         "prompts-disabled", "venv"}
 
 
 # ------------------------------------------------------------------- paths

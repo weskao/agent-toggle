@@ -139,8 +139,8 @@ class ExitCodeTest(CliCase):
         self.assertTrue((self.home / "skills/demo-skill").is_dir())
 
     def test_4_unsupported_pair_and_missing_harness(self) -> None:
-        (self.tmp / ".grok").mkdir()
-        self.assertEqual(self.run_cli("disable", "mcp", "x", "--harness", "grok")[0], 4)
+        (self.tmp / ".openclaw").mkdir()
+        self.assertEqual(self.run_cli("disable", "mcp", "x", "--harness", "openclaw")[0], 4)
         self.assertEqual(self.run_cli("disable", "skill", "x", "--harness", "codex")[0], 4)
         rc, env = self.run_json("disable", "skill", "x", "--harness", "codex")
         self.assertEqual((rc, env["ok"]), (4, False))

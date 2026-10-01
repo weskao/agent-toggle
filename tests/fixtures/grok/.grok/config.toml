@@ -1,0 +1,8 @@
+[mcp_servers.other-mcp]
+command = "other"
+
+[mcp_servers.example-mcp]
+url = "https://example.invalid/mcp"
+
+[mcp_servers.example-mcp.headers]
+Authorization = "Bearer test-token-000"

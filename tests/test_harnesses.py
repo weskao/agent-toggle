@@ -9,10 +9,10 @@ from agent_toggle import harnesses as hz
 from agent_toggle.harnesses import build
 
 TODAY = {
-    ("claude", t) for t in ("skill", "agent", "command", "plugin", "mcp")
+    ("claude", t) for t in ("skill", "agent", "command", "rule", "plugin", "mcp")
 } | {
     ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
-} | {("grok", "skill"), ("openclaw", "skill"), ("openclaw", "agent")}
+} | {("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent")}
 
 
 class HarnessTableTest(SandboxCase):
@@ -35,11 +35,18 @@ class HarnessTableTest(SandboxCase):
                 if mech == "move":
                     self.assertTrue(h.dirs.get(t), f"{n}:{t} claims move but has no dirs")
 
+    def test_rule_is_claude_only_and_codex_probes_prompts(self) -> None:
+        t = build(self.tmp)
+        self.assertEqual([n for n, h in t.items() if "rule" in h.types], ["claude"])
+        self.assertEqual(t["claude"].dirs["rule"], ("rules",))
+        self.assertEqual(t["codex"].dirs["command"], ("commands", "prompts"))
+
     def test_homes_and_mcp_backends(self) -> None:
         t = build(self.tmp)
         self.assertEqual(t["claude"].home, self.tmp / ".claude")
         self.assertEqual(t["claude"].backend, "claude-json")
         self.assertEqual(t["codex"].backend, "toml")
+        self.assertEqual(t["grok"].mcp.file, self.tmp / ".grok" / "config.toml")
         self.assertIsNone(t["openclaw"].mcp)
 
     def test_harnesses_honours_sandbox_home(self) -> None:

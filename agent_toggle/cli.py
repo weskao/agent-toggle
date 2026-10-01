@@ -1,6 +1,6 @@
 """Temporarily disable / re-enable AI-agent resources across harnesses.
 
-Skills, agents, commands, plugins and MCP servers can all be parked and put
+Skills, agents, commands, rules, plugins and MCP servers can all be parked and put
 back. Nothing is ever deleted.
 
 Supported harnesses: claude (Claude Code), codex, grok, openclaw.
@@ -20,7 +20,7 @@ Usage:
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
 
-    <type> = skill | agent | command | plugin | mcp
+    <type> = skill | agent | command | rule | plugin | mcp
     --json prints exactly one JSON document; exit codes: 0 ok, 1 partial
     failure, 2 usage error, 3 locked, 4 unsupported pair / harness missing.
 """

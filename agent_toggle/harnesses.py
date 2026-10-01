@@ -9,7 +9,7 @@ from typing import Mapping
 from . import fs
 from .output import die
 
-TYPES = ("skill", "agent", "command", "plugin", "mcp")
+TYPES = ("skill", "agent", "command", "rule", "plugin", "mcp")
 
 # The on-disk SHAPE (directory vs .md file) is probed, not declared:
 # harnesses disagree and the probe is both shorter and more correct than a
@@ -52,20 +52,26 @@ class Harness:
 
 def build(home: Path) -> dict[str, Harness]:
     """The table for a given user home."""
-    claude, codex = home / ".claude", home / ".codex"
+    claude, codex, grok = home / ".claude", home / ".codex", home / ".grok"
     return {h.name: h for h in (
         Harness("claude", claude,
-                dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",)},
+                dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",),
+                      "rule": ("rules",)},
                 mechanisms={"skill": "move", "agent": "move", "command": "move",
-                            "plugin": "native_cli", "mcp": "remove_backup"},
+                            "rule": "move", "plugin": "native_cli", "mcp": "remove_backup"},
                 mcp=McpSpec("claude-json", home / ".claude.json", ("mcpServers",))),
         Harness("codex", codex,
-                dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",)},
+                dirs={"skill": ("skills",), "agent": ("agents",),
+                      "command": ("commands", "prompts")},
                 mechanisms={"skill": "move", "agent": "move", "command": "move",
                             "plugin": "native_cli", "mcp": "remove_backup"},
                 mcp=McpSpec("toml", codex / "config.toml", ("mcp_servers",))),
-        Harness("grok", home / ".grok",
-                dirs={"skill": ("skills",)}, mechanisms={"skill": "move"}),
+        # DESIGN §4 survey: grok keeps `[mcp_servers.<name>]` blocks in config.toml,
+        # the same shape as codex, so the existing TOML backend serves it.
+        Harness("grok", grok,
+                dirs={"skill": ("skills",)},
+                mechanisms={"skill": "move", "mcp": "remove_backup"},
+                mcp=McpSpec("toml", grok / "config.toml", ("mcp_servers",))),
         Harness("openclaw", home / ".openclaw",
                 dirs={"skill": ("skills",), "agent": ("agents",)},
                 mechanisms={"skill": "move", "agent": "move"}),

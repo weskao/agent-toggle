@@ -45,4 +45,7 @@ def codex_mcp_add(config: Path, block: str) -> None:
     text = config.read_text() if config.exists() else ""
     if text and not text.endswith("\n"):
         text += "\n"
-    config.write_text(text + ("\n" if text else "") + block.rstrip("\n") + "\n")
+    # Removal leaves the blank line that separated the block from its neighbour;
+    # not adding a second one makes disable -> enable byte-identical for a last block.
+    sep = "" if not text or text.endswith("\n\n") else "\n"
+    config.write_text(text + sep + block.rstrip("\n") + "\n")

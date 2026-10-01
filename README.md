@@ -45,7 +45,8 @@ python3 agent_toggle.py <command> [args]
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan) |
 | `migrate` | import an older `~/.claude-toggle/` state |
 
-`<type>` = `skill` / `agent` / `command` / `plugin` / `mcp`.
+`<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
+`rule` is claude-only (`~/.claude/rules/*.md`, parked in `rules-disabled/`).
 
 Flags accepted by every command, before or after the subcommand:
 
@@ -126,12 +127,12 @@ output format is not contracted, so they stay a CLI operation.
 
 ## What each harness supports
 
-| harness | home | skill | agent | command | plugin | mcp |
-|---|---|:-:|:-:|:-:|:-:|:-:|
-| claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
-| codex | `~/.codex` | ✓ | ✓ | ✓ | ✓ | ✓ `config.toml` |
-| grok | `~/.grok` | ✓ | — | — | — | — |
-| openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — (sqlite) |
+| harness | home | skill | agent | command | rule | plugin | mcp |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
+| codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | ✓ | ✓ `config.toml` |
+| grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
+| openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — | — (sqlite) |
 
 Unsupported pairs fail loudly. OpenClaw keeps MCP servers in
 `state/openclaw.sqlite`, not a file this tool can safely slice, so it refuses

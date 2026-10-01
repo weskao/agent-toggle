@@ -15,9 +15,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 class HarnessGateTest(SandboxCase):
     def test_unsupported_pair_is_refused(self) -> None:
-        (self.tmp / ".grok").mkdir()     # installed, so the type gate is what refuses
+        (self.tmp / ".openclaw").mkdir()     # installed, so the type gate is what refuses
         # unsupported type is refused as "unsupported" (4)
-        self.assertEqual(cli.main(["disable", "mcp", "whatever", "--harness", "grok"]), 4)
+        self.assertEqual(cli.main(["disable", "mcp", "whatever", "--harness", "openclaw"]), 4)
         # unknown harness is a usage error (2)
         self.assertEqual(cli.main(["disable", "skill", "x", "--harness", "nope"]), 2)
 

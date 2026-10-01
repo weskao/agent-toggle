@@ -1,0 +1,9 @@
+[mcp_servers.other-mcp]
+command = "other"
+
+[mcp_servers.example-mcp]
+command = "example"
+args = ["--demo"]
+
+[mcp_servers.example-mcp.env]
+TOKEN = "Bearer test-token-000"
