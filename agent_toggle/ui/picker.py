@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Interactive terminal picker for agent-toggle.
 
 Built on curses (stdlib) so there is nothing to install. The checkbox shows
@@ -16,6 +15,8 @@ import curses
 import json
 import re
 from pathlib import Path
+
+from .. import fs
 
 MCP_TOML_RE = re.compile(r"^\[mcp_servers\.([^.\]]+)\]\s*$", re.M)
 
@@ -61,7 +62,7 @@ def live_names(base: Path, type_: str) -> list[str]:
 def live_mcp(home: Path, backend: str | None) -> list[str]:
     if backend == "claude-json":
         try:
-            cfg = json.loads((Path.home() / ".claude.json").read_text())
+            cfg = json.loads(fs.claude_json().read_text())
         except (OSError, json.JSONDecodeError):
             return []
         # Local-scope servers are nested per project; without them the picker
