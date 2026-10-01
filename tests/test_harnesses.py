@@ -44,3 +44,25 @@ class HarnessTableTest(SandboxCase):
 
     def test_harnesses_honours_sandbox_home(self) -> None:
         self.assertEqual(hz.harnesses()["codex"].home, self.tmp / ".codex")
+
+
+class MultiCandidateDirsTest(SandboxCase):
+    """dirs[type] may list several subdirs (e.g. commands + prompts); each is probed."""
+
+    def test_disable_and_enable_use_the_subdir_that_holds_the_item(self) -> None:
+        from agent_toggle import mechanisms
+        from agent_toggle.harnesses import Harness
+        two = Harness("claude", self.home,
+                      dirs={"command": ("commands", "prompts")},
+                      mechanisms={"command": "move"})
+        self.write("prompts/hello.md")
+        state = {"version": 3, "disabled": {}}
+        orig = mechanisms.harnesses
+        mechanisms.harnesses = lambda: {"claude": two}
+        self.addCleanup(setattr, mechanisms, "harnesses", orig)
+        self.assertEqual(
+            mechanisms.toggle_dir_type("disable", "command", ["hello"], state, "claude", self.home), 0)
+        self.assertTrue((self.home / "prompts-disabled" / "hello.md").is_file())
+        self.assertEqual(
+            mechanisms.toggle_dir_type("enable", "command", ["hello"], state, "claude", self.home), 0)
+        self.assertTrue((self.home / "prompts" / "hello.md").is_file())
