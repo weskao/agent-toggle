@@ -1,0 +1,56 @@
+name: Harness request
+description: Ask for support for a new AI coding harness
+labels: [harness]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in what you can observe on a real install. Use `~`-relative
+        paths and write "none" where the harness has no such resource.
+  - type: input
+    id: harness
+    attributes:
+      label: Harness name and version
+    validations:
+      required: true
+  - type: input
+    id: home
+    attributes:
+      label: Home directory
+      placeholder: "~/.example-harness"
+    validations:
+      required: true
+  - type: input
+    id: skills
+    attributes:
+      label: Skills location
+      placeholder: "skills/<name>/SKILL.md"
+  - type: input
+    id: agents
+    attributes:
+      label: Agents location
+      placeholder: "agents/*.md"
+  - type: input
+    id: commands
+    attributes:
+      label: Commands location
+      placeholder: "commands/**/*.md"
+  - type: input
+    id: rules
+    attributes:
+      label: Rules location
+      placeholder: "rules/*.md"
+  - type: input
+    id: plugins
+    attributes:
+      label: Plugins (directory, config key, or CLI)
+  - type: input
+    id: mcp_config
+    attributes:
+      label: MCP config (file and key or table)
+      placeholder: "config.json -> mcpServers"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Native enable/disable flags, config formats, sync markers, machine-managed files, aliasing with other harnesses.
