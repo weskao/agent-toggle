@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 from base import SandboxCase
 
@@ -12,7 +13,8 @@ TODAY = {
     ("claude", t) for t in ("skill", "agent", "command", "rule", "plugin", "mcp")
 } | {
     ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
-} | {("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent")}
+} | {("opencode", "skill"), ("opencode", "command"),
+     ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent")}
 
 
 class HarnessTableTest(SandboxCase):
@@ -48,6 +50,12 @@ class HarnessTableTest(SandboxCase):
         self.assertEqual(t["codex"].backend, "toml")
         self.assertEqual(t["grok"].mcp.file, self.tmp / ".grok" / "config.toml")
         self.assertIsNone(t["openclaw"].mcp)
+
+    def test_shim_lists_every_type_and_harness(self) -> None:
+        shim = (Path(hz.__file__).parent / "shims" / "claude.md.tmpl").read_text(encoding="utf-8")
+        for t in hz.TYPES:
+            self.assertIn(f"`{t}`", shim)
+        self.assertIn("--harness " + "|".join(build(self.tmp)), shim)
 
     def test_harnesses_honours_sandbox_home(self) -> None:
         self.assertEqual(hz.harnesses()["codex"].home, self.tmp / ".codex")

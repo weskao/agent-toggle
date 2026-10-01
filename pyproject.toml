@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-toggle"
 dynamic = ["version"]
-description = "Temporarily disable / re-enable AI-agent skills, agents, commands, plugins and MCP servers across harnesses"
+description = "Temporarily disable / re-enable AI-agent skills, agents, commands, rules, plugins and MCP servers across harnesses (Claude Code, Codex, Grok, OpenCode, OpenClaw)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"

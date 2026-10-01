@@ -18,7 +18,7 @@ TEXT_SUFFIXES = {".md", ".sh", ".py", ".js", ".mjs", ".cjs", ".ts", ".json",
 # Directories never worth walking when deciding if a companion is shared.
 PRUNE = {".git", "node_modules", "cache", "__pycache__", "dist", "build",
          "skills-disabled", "agents-disabled", "commands-disabled", "rules-disabled",
-         "prompts-disabled", "venv"}
+         "prompts-disabled", "command-disabled", "venv"}
 
 
 # ------------------------------------------------------------------- paths
@@ -237,6 +237,14 @@ def prune_empty(start: Path, stop: Path) -> None:
         except OSError:
             return
         cur = cur.parent
+
+
+def sync_markers(d: Path) -> list[str]:
+    """Names of `.synced-from-*` markers in `d`: a sync job may re-create parked items."""
+    try:
+        return sorted(p.name for p in d.glob(".synced-from-*"))
+    except OSError:
+        return []
 
 
 def gitignored(path: Path, repo: Path) -> bool:

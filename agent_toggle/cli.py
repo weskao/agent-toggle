@@ -3,7 +3,7 @@
 Skills, agents, commands, rules, plugins and MCP servers can all be parked and put
 back. Nothing is ever deleted.
 
-Supported harnesses: claude (Claude Code), codex, grok, openclaw.
+Supported harnesses: claude (Claude Code), codex, grok, opencode, openclaw.
 Not every harness has every resource type; unsupported pairs fail loudly
 instead of silently doing nothing.
 
@@ -38,7 +38,7 @@ from . import __version__, fs, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
-from .mechanisms import toggle_dir_type, toggle_mcp, toggle_plugin
+from .mechanisms import dir_view, toggle_dir_type, toggle_mcp, toggle_plugin
 from .output import CliError, Result, die
 from .store import load_state, save_state
 
@@ -47,17 +47,19 @@ def cmd_list(type_filter: str | None, state: dict, out: Result,
              harness: str | None = None) -> None:
     items = [v for v in state["disabled"].values()
              if (not type_filter or v["type"] == type_filter)
-             and (not harness or v.get("harness") == harness)]
+             and (not harness or harness in (v.get("harness"), *v.get("shared_with", ())))]
     if not items:
         out.say("nothing disabled")
         return
     for v in sorted(items, key=lambda x: (x.get("harness", ""), x["type"], x["name"])):
         extra = f"  +{len(v['companions'])} files" if v.get("companions") else ""
+        extra += f"  shared with {', '.join(v['shared_with'])}" if v.get("shared_with") else ""
         out.say(f"  {v.get('harness', '?'):<9} {v['type']:<8} {v['name']:<36} "
                 f"since {v['at'][:10]}{extra}")
         out.row(v.get("harness"), v["type"], v["name"], "list", "disabled",
                 f"since {v['at'][:10]}", show=False, at=v["at"],
-                mechanism=v.get("mechanism"), companions=len(v.get("companions") or []))
+                mechanism=v.get("mechanism"), companions=len(v.get("companions") or []),
+                shared_with=v.get("shared_with") or [])
     out.say(f"\n{len(items)} disabled")
 
 
@@ -84,7 +86,8 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     out.row(None, None, None, "status", "ok", "", show=False,
             state_file=str(fs.state_file()), log_file=str(fs.log_file()),
             disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy)
-    for hname, h in harnesses().items():
+    table = harnesses()
+    for hname, h in table.items():
         if only and hname != only:
             continue
         home, backend = h.home, h.backend
@@ -100,14 +103,22 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
         for t in bits:
             if t not in h.dirs:
                 continue
+            # any harness's entry: a shared dir's items are tracked under its owner
             tracked = {e["parked_at"] for e in state["disabled"].values()
-                       if e.get("harness") == hname and e.get("type") == t}
+                       if e.get("type") == t and e.get("parked_at")}
             items: list[Path] = []
             untracked: list[Path] = []
             twins: list[str] = []
             ign = True
+            shared: set[str] = set()
             for sub in h.dirs[t]:
-                parked = home / f"{sub}-disabled"
+                view = dir_view(table, hname, t, home, sub)
+                parked = view.parked
+                shared.update(set(view.sharers) - {hname})
+                if markers := fs.sync_markers(view.live):
+                    out.say(f"                   ! {view.live} carries {', '.join(markers)} -- a "
+                            f"sync job may re-create parked items; park in the source harness",
+                            warn=True)
                 # Skills are directories; agents and commands are files that may
                 # sit one level down. Counting rglob("*") for skills would report
                 # every file inside every skill.
@@ -118,7 +129,8 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                 else:
                     found = [p for p in parked.rglob("*") if p.is_file()]
                 items += found
-                ign = ign and gitignored(parked, home)
+                ign = ign and gitignored(
+                    parked, home if view.owner == hname else table[view.owner].home)
                 u, tw = parked_drift(found, parked, home / sub, tracked)
                 untracked += u
                 twins += tw
@@ -129,8 +141,11 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                         + (f", {len(twins)} also live: {', '.join(twins)}"
                            " -- stale copies; `disable` of these names will refuse" if twins else ""),
                         warn=True)
-            info[t] = {"parked": len(items), "gitignored": ign,
-                       "untracked": len(untracked), "live_twins": twins}
+            if shared:
+                out.say(f"                   shared dir with: {', '.join(sorted(shared))} "
+                        f"(disable here also affects them)")
+            info[t] = {"parked": len(items), "gitignored": ign, "untracked": len(untracked),
+                       "live_twins": twins, "shared_with": sorted(shared)}
         out.row(hname, None, None, "status", "installed", "", show=False,
                 home=str(home), types=bits, mcp=backend, parked=info)
 
@@ -246,7 +261,8 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                        if "__AGENT_TOGGLE_ROOT__" not in ln)
     table = harnesses()
     park = sorted({f"{sub}-disabled" for h in table.values()
-                   for subs in h.dirs.values() for sub in subs})
+                   for subs in h.dirs.values() for sub in subs
+                   if not Path(sub).is_absolute()})     # skills.paths redirects live elsewhere
     verb = "would install" if args.dry_run else "installed"
     installed = 0
     for hname, h in table.items():

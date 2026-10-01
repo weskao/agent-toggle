@@ -42,7 +42,7 @@ class InstallShimsCase(SandboxCase):
         self.assertEqual({r["harness"] for r in env["results"] if r["status"] == "ok"},
                          {"claude", "codex"})
         self.assertEqual({r["harness"] for r in env["results"] if r["status"] == "skipped"},
-                         {"grok", "openclaw"})
+                         {"grok", "opencode", "openclaw"})
         text = shim(self.tmp / ".claude").read_text()
         self.assertIn("--json", text)
         self.assertNotIn("__AGENT_TOGGLE_ROOT__", text)

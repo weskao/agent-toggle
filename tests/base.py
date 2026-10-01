@@ -26,6 +26,9 @@ class SandboxCase(unittest.TestCase):
         for var in ("HOME", "USERPROFILE"):
             self.addCleanup(self._restore_env, var, os.environ.get(var))
             os.environ[var] = str(self.tmp)
+        # opencode's home follows XDG_CONFIG_HOME; never let the real one leak in
+        self.addCleanup(self._restore_env, "XDG_CONFIG_HOME", os.environ.get("XDG_CONFIG_HOME"))
+        os.environ.pop("XDG_CONFIG_HOME", None)
 
         self.home = self.tmp / ".claude"
         for sub in ("skills", "agents", "commands", "scripts"):

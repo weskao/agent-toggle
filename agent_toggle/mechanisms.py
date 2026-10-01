@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from . import fs
 from .backends.mcp_json import (
@@ -50,14 +51,34 @@ def resolve_item(base: Path, name: str) -> Path | None:
     return None
 
 
-def _probe(home: Path, subs: tuple[str, ...], name: str,
-           suffix: str) -> tuple[str, Path | None]:
-    """First candidate subdir (`<sub><suffix>`) holding `name`; (subs[0], None) if none."""
-    for sub in subs:
-        found = resolve_item(home / (sub + suffix), name)
-        if found:
-            return sub, found
-    return subs[0], None
+class DirView(NamedTuple):
+    """One candidate dir as the harness that physically owns it sees it."""
+    owner: str            # harness whose state entry / park dir this item belongs to
+    live: Path            # the dir, spelled by the owner (never a symlink if avoidable)
+    parked: Path          # sibling `<live>-disabled`
+    sharers: list[str]    # every harness whose dir resolves to the same real path
+
+
+def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> DirView:
+    """Dedupe by real path: two harnesses whose dirs resolve to the same place share ONE
+    park dir and ONE state entry, owned by the harness whose home really holds it
+    (else the first non-symlink spelling, else the first in table order)."""
+    mine = home / sub
+    real = mine.resolve()
+    found = [(harness, mine)]
+    for hn, h in table.items():
+        for s in h.dirs.get(type_, ()):
+            d = (home if hn == harness else h.home) / s
+            if (hn, d) != (harness, mine) and d.resolve() == real:
+                found.append((hn, d))
+    order = list(table)                 # table order, so the owner never depends on who asks
+    found.sort(key=lambda f: order.index(f[0]) if f[0] in order else len(order))
+    plain = [(hn, d) for hn, d in found if not d.is_symlink()]
+    owner, live = next(((hn, d) for hn, d in plain
+                        if hn in table and real.is_relative_to(table[hn].home.resolve())),
+                       plain[0] if plain else found[0])
+    return DirView(owner, live, live.parent / f"{live.name}-disabled",
+                   sorted({hn for hn, _ in found}))
 
 
 def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
@@ -65,70 +86,86 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                     dry_run: bool = False) -> int:
     """Park / restore skills, agents, commands. dry_run plans and writes nothing."""
     out = out or Result()
-    subs = harnesses()[harness].dirs[type_]     # candidate subdirs, probed in order
+    table = harnesses()
+    views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
     fails = 0
 
     if action == "disable":
-        for sub in subs:
-            parked = home / f"{sub}-disabled"
-            if not gitignored(parked, home):
-                out.warn(f"{parked} is NOT gitignored -- disabling will dirty `git status`. "
-                         f"fix: echo '{parked.name}/' >> {home}/.gitignore")
+        for v in views:
+            ohome = home if v.owner == harness else table[v.owner].home
+            if not gitignored(v.parked, ohome):
+                out.warn(f"{v.parked} is NOT gitignored -- disabling will dirty `git status`. "
+                         f"fix: echo '{v.parked.name}/' >> {ohome}/.gitignore")
+            if markers := fs.sync_markers(v.live):
+                out.warn(f"{v.live} carries {', '.join(markers)} -- a sync job may re-create "
+                         f"parked items; park in the source harness instead")
 
     for name in names:
         fs.refresh_lock()
-        key = f"{harness}:{type_}:{name}"
         if action == "disable":
-            sub, src = _probe(home, subs, name, "")
-            live, parked = home / sub, home / f"{sub}-disabled"
+            v, src = next(((v, p) for v in views if (p := resolve_item(v.live, name))),
+                          (views[0], None))
             if src is None:
                 fails += _fail(out, dry_run, harness, type_, action, name,
-                               "not found under " + " or ".join(str(home / s_) for s_ in subs))
+                               "not found under " + " or ".join(str(v.live) for v in views))
                 continue
+            key = f"{v.owner}:{type_}:{name}"
+            others = [h for h in v.sharers if h != harness]        # relative to this request
+            ohome = home if v.owner == harness else table[v.owner].home
             # Preserve nesting: commands/orch/batch.md parks as orch/batch.md,
             # so two different <group>/mcp.md cannot collide at the park root.
-            rel = src.relative_to(live)
+            rel = src.relative_to(v.live)
             try:
-                target = move(src, (parked / rel).parent, dry_run)
+                target = move(src, (v.parked / rel).parent, dry_run)
             except (OSError, FileNotFoundError, FileExistsError, NotADirectoryError) as e:
                 fails += _fail(out, dry_run, harness, type_, action, name, str(e))
                 continue
-            row = _ok(out, dry_run, harness, type_, action, name, "disabled",
-                      parked_at=str(target))
-            companions = park_companions(target, home, key.replace(":", "_"), out,
+            row = _ok(out, dry_run, harness, type_, action, name, _shared_text(
+                      "disabled", v.owner, harness, others), parked_at=str(target),
+                      **({"shared_with": others, "owner": v.owner} if others else {}))
+            companions = park_companions(target, ohome, key.replace(":", "_"), out,
                                          dry_run, src if dry_run else None)
             row["companions"] = companions
             if not dry_run:
                 state["disabled"][key] = {
-                    "mechanism": "move", "harness": harness, "type": type_, "name": name,
+                    "mechanism": "move", "harness": v.owner, "type": type_, "name": name,
                     "parked_at": str(target), "origin": str(src),
                     "companions": companions,
+                    **({"shared_with": [h for h in v.sharers if h != v.owner]}
+                       if len(v.sharers) > 1 else {}),
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
                 log(action, type_, name, "ok", harness)
         else:
+            # The entry lives under the owning harness; a request through an alias
+            # (or a pre-alias entry under the requested harness) finds the same one.
+            keys = dict.fromkeys([f"{v.owner}:{type_}:{name}" for v in views]
+                                 + [f"{harness}:{type_}:{name}"])
+            key = next((k for k in keys if k in state["disabled"]), next(iter(keys)))
             entry = state["disabled"].get(key)
-            sub, src = _probe(home, subs, name, "-disabled")
             if entry:
                 src = Path(entry["parked_at"])
-                sub = next((s_ for s_ in subs
-                            if src.is_relative_to(home / f"{s_}-disabled")), sub)
-            live, parked = home / sub, home / f"{sub}-disabled"
+                v = next((v for v in views if src.is_relative_to(v.parked)), views[0])
+            else:
+                v, src = next(((v, p) for v in views if (p := resolve_item(v.parked, name))),
+                              (views[0], None))
             if src is None or not (src.exists() or src.is_symlink()):
                 fails += _fail(out, dry_run, harness, type_, action, name,
                                "nothing parked to restore")
                 continue
+            others = [h for h in v.sharers if h != harness]
             dest_parent = (Path(entry["origin"]).parent if entry
-                           else (live / src.relative_to(parked)).parent)
+                           else (v.live / src.relative_to(v.parked)).parent)
             try:
                 target = move(src, dest_parent, dry_run)
             except (OSError, FileExistsError, NotADirectoryError) as e:
                 fails += _fail(out, dry_run, harness, type_, action, name, str(e))
                 continue
             if not dry_run:
-                prune_empty(src.parent, parked)
-            _ok(out, dry_run, harness, type_, action, name, "enabled",
-                restored_to=str(target))
+                prune_empty(src.parent, v.parked)
+            _ok(out, dry_run, harness, type_, action, name,
+                _shared_text("enabled", v.owner, harness, others), restored_to=str(target),
+                **({"shared_with": others, "owner": v.owner} if others else {}))
             if entry:
                 restore_companions(entry, out, dry_run)
                 if not dry_run:
@@ -136,6 +173,13 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             if not dry_run:
                 log(action, type_, name, "ok", harness)
     return fails
+
+
+def _shared_text(verb: str, owner: str, harness: str, others: list[str]) -> str:
+    if not others:
+        return verb
+    where = f"parked under {owner}; " if owner != harness else ""
+    return f"{verb} (shared dir: {where}also affects {', '.join(others)})"
 
 
 def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
