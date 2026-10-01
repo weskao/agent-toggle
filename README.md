@@ -160,9 +160,10 @@ bookkeeping.
 
 | file | contents |
 |---|---|
-| `state.json` | current disabled list (atomic write) |
+| `state.json` | current disabled list (schema v3; atomic write, mode `0600`) |
+| `lock` | held by `disable` / `enable` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min) |
 | `log.jsonl` | one line per operation |
-| `mcp-backups/` | `<harness>__<server>.json` |
+| `mcp-backups/` | `<harness>__<server>.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
 
 ## Two guardrails, both earned

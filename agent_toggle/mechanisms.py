@@ -62,7 +62,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             print(f"  v {type_} {name} disabled")
             companions = park_companions(target, home, key.replace(":", "_"))
             state["disabled"][key] = {
-                "harness": harness, "type": type_, "name": name,
+                "mechanism": "move", "harness": harness, "type": type_, "name": name,
                 "parked_at": str(target), "origin": str(src),
                 "companions": companions,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -109,7 +109,8 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str) -> i
         key = f"{harness}:plugin:{name}"
         if action == "disable":
             state["disabled"][key] = {
-                "harness": harness, "type": "plugin", "name": name, "native": True,
+                "mechanism": "native_cli", "harness": harness, "type": "plugin",
+                "name": name, "native": True,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
         else:
@@ -142,8 +143,8 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             n = len(detail)
             if action == "disable":
                 state["disabled"][key] = {
-                    "harness": harness, "type": "mcp", "name": name,
-                    "connector": True,
+                    "mechanism": "flag", "harness": harness, "type": "mcp",
+                    "name": name, "connector": True,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
                 print(f"  v mcp {name} disabled across {n} project(s) "
@@ -180,7 +181,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     fails += 1
                     continue
                 raw, scope, project = found
-                bp.write_text(json.dumps(raw, indent=2, ensure_ascii=False))
+                fs.atomic_write(bp, json.dumps(raw, indent=2, ensure_ascii=False))
                 ok, out = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
                                   cwd=project)
                 if not ok:
@@ -195,11 +196,11 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     print(f"  x mcp {name}: no [mcp_servers.{name}] in {config}")
                     fails += 1
                     continue
-                bp.write_text(json.dumps({"toml": block}, ensure_ascii=False, indent=2))
+                fs.atomic_write(bp, json.dumps({"toml": block}, ensure_ascii=False, indent=2))
 
             state["disabled"][key] = {
-                "harness": harness, "type": "mcp", "name": name,
-                "backend": backend, "backup": str(bp),
+                "mechanism": "remove_backup", "harness": harness, "type": "mcp",
+                "name": name, "backend": backend, "backup": str(bp),
                 "scope": scope, "project": project,
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }

@@ -53,6 +53,9 @@ def cmd_status(state: dict) -> int:
     legacy_state_dir = fs.legacy_state_dir()
     print(f"state   {fs.state_file()}  ({len(state['disabled'])} disabled)")
     print(f"log     {fs.log_file()}")
+    if fs.too_open(fs.state_dir()):
+        print(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
+              f"auth headers; fix: chmod 700 {fs.state_dir()}")
     print(f"claude  {claude_bin() or 'NOT FOUND -- plugin/mcp actions will fail'}")
     if legacy_state_dir.exists():
         done = any(k.startswith("claude:") for k in state["disabled"])
@@ -130,14 +133,24 @@ def cmd_ui(state: dict) -> int:
     if not changes:
         print("no changes")
         return 0
-    fails = apply_changes(changes, state)
-    save_state(state)
+    with fs.lock():
+        state = load_state()          # re-read: the picker's copy may be stale
+        fails = apply_changes(changes, state)
+        save_state(state)
     if any(r.type == "mcp" for r in changes):
         print("\nMCP changed -- open a NEW session for it to take effect.")
     return 1 if fails else 0
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except fs.Locked as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+
+
+def _main(argv: list[str] | None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if not argv:
@@ -153,21 +166,22 @@ def main(argv: list[str] | None = None) -> int:
         argv = argv[:i] + argv[i + 2:]
 
     cmd, rest = argv[0], argv[1:]
-    state = load_state()
 
     if cmd in ("ui", "pick"):
-        return cmd_ui(state)
+        return cmd_ui(load_state(write_back=False))
     if cmd == "status":
-        return cmd_status(state)
+        return cmd_status(load_state(write_back=False))
     if cmd == "migrate":
-        rc = store.migrate(state)
-        save_state(state)
+        with fs.lock():
+            state = load_state()
+            rc = store.migrate(state)
+            save_state(state)
         return rc
     if cmd == "list":
         tf = rest[0] if rest else None
         if tf and tf not in TYPES:
             die(f"unknown type {tf!r} (expected: {', '.join(TYPES)})")
-        return cmd_list(tf, state)
+        return cmd_list(tf, load_state(write_back=False))
     if cmd not in ("disable", "enable"):
         die(f"unknown command {cmd!r} (expected: disable, enable, list, status, migrate)")
     if len(rest) < 2:
@@ -183,12 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     if type_ not in supported:
         die(f"{harness} has no {type_} support (it has: {', '.join(supported)})")
 
-    if type_ in SUBDIRS:
-        fails = toggle_dir_type(cmd, type_, names, state, harness, home)
-    elif type_ == "plugin":
-        fails = toggle_plugin(cmd, names, state, harness)
-    else:
-        fails = toggle_mcp(cmd, names, state, harness, home, backend)
-
-    save_state(state)
+    with fs.lock():
+        state = load_state()
+        if type_ in SUBDIRS:
+            fails = toggle_dir_type(cmd, type_, names, state, harness, home)
+        elif type_ == "plugin":
+            fails = toggle_plugin(cmd, names, state, harness)
+        else:
+            fails = toggle_mcp(cmd, names, state, harness, home, backend)
+        save_state(state)
     return 1 if fails else 0

@@ -6,9 +6,11 @@ module constants.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 TEXT_SUFFIXES = {".md", ".sh", ".py", ".js", ".mjs", ".cjs", ".ts", ".json",
@@ -50,6 +52,91 @@ def legacy_state_dir() -> Path:
 
 def claude_json() -> Path:
     return home() / ".claude.json"
+
+
+def lock_file() -> Path:
+    return state_dir() / "lock"
+
+
+# ------------------------------------------------- lock + private atomic write
+
+LOCK_WAIT = 5.0           # seconds a second run waits before giving up
+LOCK_STALE = 600.0        # a lock older than this is a crashed run's leftover
+
+
+class Locked(Exception):
+    """Another agent-toggle run holds the lock (the CLI maps this to exit 3)."""
+
+
+@contextlib.contextmanager
+def lock():
+    """Hold <state_dir>/lock (O_EXCL create, PID inside) for a whole batch."""
+    path = lock_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - path.stat().st_mtime > LOCK_STALE:
+                    # rename, not unlink: only one racing taker wins the rename,
+                    # and nobody can delete a lock a rival just created.
+                    stale = path.with_name(f"lock.stale.{os.getpid()}")
+                    os.rename(path, stale)
+                    stale.unlink(missing_ok=True)
+                    continue
+            except FileNotFoundError:
+                continue                 # released / taken over by a rival
+            if time.monotonic() >= deadline:
+                raise Locked(f"{path} is held by another agent-toggle run "
+                             f"(waited {LOCK_WAIT:g}s)") from None
+            time.sleep(0.05)
+    pid = str(os.getpid())
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(pid)
+        yield
+    finally:
+        try:                             # only remove a lock that is still ours
+            if path.read_text() == pid:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
+    """Write `text` to `path` via a same-dir tmp file created with `mode`."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)          # leftover from a crashed run with our PID
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def tighten(path: Path) -> None:
+    """chmod 0600 when group/world can read it. Best effort."""
+    try:
+        if path.is_file() and path.stat().st_mode & 0o077:
+            path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def too_open(path: Path) -> bool:
+    """True if group/world can read `path` (always False where modes don't apply)."""
+    try:
+        return os.name != "nt" and bool(path.stat().st_mode & 0o044)
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------ the safe move
