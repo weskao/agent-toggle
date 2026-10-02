@@ -15,7 +15,7 @@ TODAY = {
     ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
 } | {("opencode", "skill"), ("opencode", "command"),
      ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent"),
-     ("openclaw", "plugin"), ("opencode", "mcp")}
+     ("openclaw", "plugin"), ("opencode", "mcp"), ("vibe", "skill")}
 
 
 class HarnessTableTest(SandboxCase):

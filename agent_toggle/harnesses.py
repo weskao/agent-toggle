@@ -126,6 +126,17 @@ def build(home: Path) -> dict[str, Harness]:
                 flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
                        "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
                 editable=frozenset({"openclaw.json"})),
+        # DESIGN s4: vibe keeps skills/<name>/SKILL.md; no MCP config found.
+        Harness("vibe", home / ".vibe",
+                dirs={"skill": ("skills",)},
+                mechanisms={"skill": "move"}),
+        # DESIGN s4: nothing togglable locally (resources are cloud-side). An
+        # explicit not-applicable row: no dirs, no mechanisms, so every type
+        # exits 4 through the ops dispatch.
+        Harness("devin", home / ".devin", dirs={}, mechanisms={}),
+        # DESIGN s11 q1: skills layout unobserved, so types=() and NO adapter yet
+        # (`status` lists it as "found, nothing supported yet").
+        Harness("agy", home / ".antigravity", dirs={}, mechanisms={}),
     )}
 
 
