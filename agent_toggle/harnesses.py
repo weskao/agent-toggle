@@ -139,7 +139,9 @@ PROJECT_TYPES = ("skill", "agent", "command", "rule")
 
 def project_view(project: Path | str) -> Harness:
     """The claude-shaped row for `--project <dir>` (DESIGN s5.5): home=<dir>/.claude,
-    dir types only. Refuses (CliError) a dir that is missing (4), has no .claude (4),
+    the dir types plus `mcp` (the repo's own <dir>/.mcp.json, strict JSON, edited
+    directly). Refuses (CliError) a dir that is missing (4), has neither .claude
+    nor .mcp.json (4),
     is a root / $HOME / an ancestor of $HOME / inside our state dir or a user harness
     home, or whose .claude resolves outside it (2):
     a project view must never address user-scope files."""
@@ -153,14 +155,15 @@ def project_view(project: Path | str) -> Harness:
         if p.is_relative_to(root.resolve()):     # user-scope files under a project key
             die(f"--project {p} is inside {root} -- not a project", 2)
     claude = p / ".claude"
-    if not claude.is_dir():
-        die(f"--project {p} has no .claude directory", 4)
-    if not claude.resolve().is_relative_to(p):
+    if not claude.is_dir() and not (p / ".mcp.json").is_file():
+        die(f"--project {p} has no .claude directory or .mcp.json", 4)
+    if os.path.lexists(claude) and not claude.resolve().is_relative_to(p):
         die(f"--project {p}: .claude resolves outside the project ({claude.resolve()})", 2)
     return Harness("claude", claude,
                    dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",),
                          "rule": ("rules",)},
-                   mechanisms=dict.fromkeys(PROJECT_TYPES, "move"), project=p)
+                   mechanisms={**dict.fromkeys(PROJECT_TYPES, "move"), "mcp": "remove_backup"},
+                   mcp=McpSpec("project-json", p / ".mcp.json", ("mcpServers",)), project=p)
 
 
 def harness_of(name: str) -> Harness:

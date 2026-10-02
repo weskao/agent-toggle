@@ -11,7 +11,13 @@ from typing import NamedTuple
 
 from . import fs
 from .harnesses import harnesses, project_view
-from .mechanisms import fail_row, toggle_dir_type, toggle_mcp, toggle_plugin
+from .mechanisms import (
+    fail_row,
+    toggle_dir_type,
+    toggle_mcp,
+    toggle_plugin,
+    toggle_project_mcp,
+)
 from .output import CliError, Result
 from .store import BATCH, load_state, save_state
 
@@ -56,6 +62,9 @@ def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: st
                                      dry_run, batch=batch, table=table)
         elif mech == "native_cli" or (mech == "flag" and type_ == "plugin"):
             fails += toggle_plugin(action, names, state, harness, out, dry_run, batch=batch)
+        elif mech == "remove_backup" and h.project:      # the repo's own .mcp.json
+            fails += toggle_project_mcp(action, names, state, harness, out, dry_run, table,
+                                        batch=batch)
         elif mech == "remove_backup" or (mech == "flag" and type_ == "mcp"):
             fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out,
                                 dry_run, batch=batch)

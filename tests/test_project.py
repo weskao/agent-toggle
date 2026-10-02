@@ -123,7 +123,7 @@ class ProjectDisableTest(ProjectCase):
 
     def test_unusable_project_dirs(self) -> None:
         self.assertEqual(self.p("disable", "skill", "x", "--harness", "codex")[0], 4)
-        self.assertEqual(self.p("disable", "mcp", "x")[0], 4)            # dir types only
+        self.assertEqual(self.p("disable", "plugin", "x")[0], 4)         # no plugin in project scope
         self.assertEqual(self.p("disable", "skill", "x", project=self.tmp / "nope")[0], 4)
         (self.tmp / "bare").mkdir()
         self.assertEqual(self.p("disable", "skill", "x", project=self.tmp / "bare")[0], 4)
@@ -298,6 +298,211 @@ def _other_filesystem_dir() -> Path | None:
                 and os.stat(cand).st_dev != base:
             return Path(cand)
     return None
+
+
+class ProjectMcpTest(ProjectCase):
+    """`--project` .mcp.json entries: remove_backup, a direct JSON edit, no claude CLI."""
+
+    SERVERS = {"example-mcp": {"url": "https://example.com/mcp",
+                               "headers": {"Authorization": "Bearer test-token-000"}},
+               "other-mcp": {"command": "demo", "args": ["--é"]}}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.mcpfile = self.proj / ".mcp.json"
+        self.text = json.dumps({"mcpServers": self.SERVERS}, indent=2, ensure_ascii=False) + "\n"
+        self.mcpfile.write_text(self.text, encoding="utf-8")
+        self.mkey = store.make_key("claude", "mcp", "example-mcp", project=self.proj)
+
+    def servers(self) -> dict:
+        return json.loads(self.mcpfile.read_text(encoding="utf-8"))["mcpServers"]
+
+    def test_round_trip_restores_the_entry_and_the_file_bytes(self) -> None:
+        before = file_bytes(self.proj)
+        rc, env = self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(rc, 0, env)
+        self.assertEqual(self.cli_calls, [])                       # never shells out
+        self.assertEqual(list(self.servers()), ["other-mcp"])
+        entry = self.state()[self.mkey]
+        self.assertEqual((entry["mechanism"], entry["project"]),
+                         ("remove_backup", str(self.proj.resolve())))
+        self.assertEqual(self.mkey, f"claude@{self.digest}:mcp:example-mcp")
+        bp = Path(entry["backup"])
+        self.assertTrue(bp.name.startswith(self.digest + "__"))
+        self.assertTrue(bp.is_relative_to(fs.backup_dir()))
+        self.assertIn(f"{self.mcpfile.resolve()} is a tracked change in git status",
+                      " ".join(env["warnings"]))
+        self.assertEqual(self.state().keys(), {self.mkey})
+        rc, env = self.p("enable", "mcp", "example-mcp")
+        self.assertEqual(rc, 0, env)
+        self.assertEqual(file_bytes(self.proj), before)
+        self.assertEqual(self.servers()["example-mcp"], self.SERVERS["example-mcp"])
+        self.assertEqual(self.state(), {})
+        self.assertEqual(self.cli_calls, [])
+
+    def test_enable_merges_when_the_file_changed_meanwhile(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        self.mcpfile.write_text(json.dumps({"mcpServers": {"other-mcp": {"x": 1}}, "k": 2}),
+                                encoding="utf-8")
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.servers(), {"other-mcp": {"x": 1},
+                                          "example-mcp": self.SERVERS["example-mcp"]})
+        self.assertEqual(json.loads(self.mcpfile.read_text(encoding="utf-8"))["k"], 2)
+
+    def test_enable_refuses_to_clobber_a_re_added_server(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        self.mcpfile.write_text(self.text, encoding="utf-8")
+        rc, env = self.p("enable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("already", env["results"][0]["detail"])
+        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), self.text)
+        self.assertIn(self.mkey, self.state())
+
+    @unittest.skipIf(os.name == "nt", "modes")
+    def test_backup_is_private_and_the_edit_keeps_the_file_mode(self) -> None:
+        self.mcpfile.chmod(0o640)
+        self.p("disable", "mcp", "example-mcp")
+        bp = Path(self.state()[self.mkey]["backup"])
+        self.assertEqual(bp.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.mcpfile.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(json.loads(bp.read_text(encoding="utf-8"))["project_json"]["entry"],
+                         self.SERVERS["example-mcp"])
+
+    def test_dry_run_writes_nothing(self) -> None:
+        before = snapshot(self.tmp)
+        rc, env = self.p("disable", "mcp", "example-mcp", "--dry-run")
+        self.assertEqual((rc, env["results"][0]["status"]), (0, "planned"))
+        self.assertEqual(snapshot(self.tmp), before)
+        self.assertEqual(self.cli_calls, [])
+        self.p("disable", "mcp", "example-mcp")
+        before = snapshot(self.tmp)
+        self.assertEqual(self.p("enable", "mcp", "example-mcp", "--dry-run")[0], 0)
+        self.assertEqual(snapshot(self.tmp), before)
+
+    def test_rollback_on_a_forced_verify_failure(self) -> None:
+        with mock.patch.object(fs, "json_verify", lambda expected=None: self._boom):
+            rc, env = self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("rolled back", env["results"][0]["detail"])
+        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), self.text)
+        self.assertEqual(self.state(), {})
+        self.assertEqual(list(fs.backup_dir().glob("*")), [])      # no orphan backup
+
+    @staticmethod
+    def _boom(before: str, after: str) -> str:
+        raise ValueError("forced")
+
+    def test_non_strict_json_is_refused(self) -> None:
+        for bad in ('{"mcpServers": {"example-mcp": {},}}', '// c\n{"mcpServers": {}}',
+                    '\ufeff{"mcpServers": {"example-mcp": {}}}',
+                    '{"mcpServers": {"example-mcp": {}, "example-mcp": {}}}',
+                    '{"servers": {}}', '[]'):
+            self.mcpfile.write_text(bad, encoding="utf-8")
+            rc, env = self.p("disable", "mcp", "example-mcp")
+            self.assertEqual(rc, 1, bad)
+            self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), bad)
+        self.assertEqual(self.state(), {})
+
+    def test_missing_file_or_server_is_an_error_row(self) -> None:
+        self.assertEqual(self.p("disable", "mcp", "nope-mcp")[0], 1)
+        self.mcpfile.unlink()
+        rc, env = self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("not found", env["results"][0]["detail"])
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_symlinked_mcp_json_is_never_written_through(self) -> None:
+        target = self.tmp / "elsewhere.json"
+        target.write_text(self.text, encoding="utf-8")
+        self.mcpfile.unlink()
+        self.mcpfile.symlink_to(target)
+        rc, env = self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("symlink", env["results"][0]["detail"])
+        self.assertEqual(target.read_text(encoding="utf-8"), self.text)
+
+    def test_user_scope_mcp_state_is_never_touched(self) -> None:
+        self.claude_json({"mcpServers": {"example-mcp": {"url": "https://user.example.com"}}})
+        self.cli_rc = 0
+        self.assertEqual(self.run_json("disable", "mcp", "example-mcp")[0], 0)
+        user_entry = self.state()["claude:mcp:example-mcp"]
+        n_calls = len(self.cli_calls)
+        self.assertEqual(self.p("disable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.state()["claude:mcp:example-mcp"], user_entry)
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.state().keys(), {"claude:mcp:example-mcp"})
+        self.assertEqual(len(self.cli_calls), n_calls)             # project ops: no CLI
+        self.assertEqual(list(self.servers()), ["example-mcp", "other-mcp"])
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 1)  # user entry unreachable
+
+    def test_tampered_entries_are_refused(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        state = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        entry = state["disabled"][self.mkey]
+        for field, value in (("backup", str(self.proj / "evil.json")),
+                             ("backup", str(fs.backup_dir() / "claude__other.json")),
+                             ("project", str(self.tmp / "work"))):
+            tampered = {**state, "disabled": {self.mkey: {**entry, field: value}}}
+            fs.state_file().write_text(json.dumps(tampered), encoding="utf-8")
+            rc, env = self.p("enable", "mcp", "example-mcp")
+            self.assertEqual(rc, 1, (field, value))
+            self.assertIn("refused", env["results"][0]["detail"])
+        self.assertEqual(list(self.servers()), ["other-mcp"])
+
+    def test_undo_enable_all_and_profile_cover_project_mcp(self) -> None:
+        before = file_bytes(self.proj)
+        with mock.patch.object(store, "BATCH", "b1"):
+            self.run_json("disable", "mcp", "example-mcp", "--project", str(self.proj))
+        self.assertEqual(self.run_json("undo")[0], 0)
+        self.assertEqual(file_bytes(self.proj), before)
+        self.assertEqual(self.run_json("undo")[0], 0)              # undo of undo re-parks
+        self.assertEqual(list(self.state()), [self.mkey])
+        rc, env = self.run_json("enable", "--all")
+        self.assertEqual(rc, 0, env)
+        self.assertEqual(file_bytes(self.proj), before)
+        self.assertEqual(self.p("profile", "save", "pm")[0], 0)
+        doc = json.loads((fs.profiles_dir() / "pm.json").read_text(encoding="utf-8"))
+        self.assertIn({"harness": "claude", "type": "mcp", "name": "example-mcp", "live": True},
+                      doc["items"])
+        self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(self.p("profile", "apply", "pm")[0], 0)
+        self.assertEqual(file_bytes(self.proj), before)
+
+    def test_a_project_entry_cannot_be_replayed_under_a_user_key(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        state = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        entry = state["disabled"].pop(self.mkey)
+        del entry["project"]
+        state["disabled"]["claude:mcp:example-mcp"] = entry
+        fs.state_file().write_text(json.dumps(state), encoding="utf-8")
+        self.cli_rc = 0
+        rc, env = self.run_json("enable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("refused", env["results"][0]["detail"])
+        self.assertEqual(self.cli_calls, [])
+
+    def test_hostile_names_never_reach_profiles(self) -> None:
+        self.mcpfile.write_text(json.dumps({"mcpServers": {"a/b": {}, "-x": {}, "ok-mcp": {}}}),
+                                encoding="utf-8")
+        self.assertEqual(self.p("profile", "save", "h")[0], 0)
+        doc = json.loads((fs.profiles_dir() / "h.json").read_text(encoding="utf-8"))
+        self.assertEqual([i["name"] for i in doc["items"] if i["type"] == "mcp"], ["ok-mcp"])
+
+    def test_a_file_edited_between_plan_and_write_is_not_overwritten(self) -> None:
+        from agent_toggle.backends import mcp_json
+        raw, before, after = mcp_json.project_mcp_remove(self.mcpfile, "example-mcp")
+        self.mcpfile.write_text('{"mcpServers": {"edited": {}}}', encoding="utf-8")
+        with self.assertRaises(fs.WriteError):
+            mcp_json.write_project_mcp(self.mcpfile, after, before)
+        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), '{"mcpServers": {"edited": {}}}')
+
+    def test_project_with_only_an_mcp_json_is_usable(self) -> None:
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        (bare / ".mcp.json").write_text(self.text, encoding="utf-8")
+        self.assertEqual(self.p("disable", "mcp", "example-mcp", project=bare)[0], 0)
+        self.assertEqual(self.p("enable", "mcp", "example-mcp", project=bare)[0], 0)
+        self.assertEqual((bare / ".mcp.json").read_text(encoding="utf-8"), self.text)
 
 
 class CrossFilesystemTest(ProjectCase):

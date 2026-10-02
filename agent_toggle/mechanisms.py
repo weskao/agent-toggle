@@ -11,16 +11,21 @@ from typing import NamedTuple
 from . import fs
 from .backends.flag_json import FlagError, FlagMissing, read_flag, set_flag
 from .backends.mcp_json import (
+    ProjectMcpError,
     claude_mcp_config,
     claudeai_connector_names,
+    project_mcp_remove,
+    project_mcp_restore,
+    read_project_mcp,
     toggle_claudeai_connector,
+    write_project_mcp,
 )
 from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
 from .backends.plugin_cli import claude_bin, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses
-from .output import Result, die
+from .output import CliError, Result, die
 from .store import BATCH, check_entry, log, make_key, project_digest
 
 
@@ -64,6 +69,8 @@ def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> 
     for f in need:
         if not isinstance(entry.get(f), str) or not entry.get(f):
             return f"missing {f}"
+    if entry.get("backend") == "project-json" and "@" not in head:
+        return "project .mcp.json entry under a user-scope key"
     if entry.get("backend") == "claude-json" and entry.get("scope") in ("user", "local"):
         if entry["scope"] == "local":
             # `project` here is the claude local-scope cwd, not a --project scope
@@ -134,6 +141,14 @@ def validate_name(name: str) -> None:
         die(f"invalid name {name!r}: use plain names, `a:b` for nesting", 2)
 
 
+def _valid_name(name: str) -> bool:
+    try:
+        validate_name(name)
+    except CliError:
+        return False
+    return True
+
+
 def resolve_item(base: Path, name: str) -> Path | None:
     """Find a resource on disk. `a:b` addresses a nested `a/b`.
 
@@ -183,6 +198,12 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
             if isinstance(pdata, dict):
                 names.update(pdata.get("mcpServers") or {})
         return sorted(names)
+    if backend == "project-json":        # home is <project>/.claude; repo text, so filter names
+        try:
+            names = read_project_mcp(home.parent / ".mcp.json")[1]["mcpServers"]
+        except ProjectMcpError:
+            return []
+        return sorted(n for n in names if n.isprintable() and _valid_name(n))
     if backend == "toml":
         config = home / "config.toml"
         if not config.is_file():
@@ -581,7 +602,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     continue
                 if found is None:
                     hint = ("not in ~/.claude.json (user or local scope) -- "
-                            "project scope lives in the repo's own .mcp.json")
+                            "a repo's own .mcp.json needs --project <dir>")
                     if not dry_run:      # a dry run never shells out to claude
                         ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
                         if ok and "claude.ai config" in cfg:
@@ -674,4 +695,100 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
                 "restored (open a NEW session for it to load)", backup=str(path))
+    return fails
+
+
+def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
+                       out: Result, dry_run: bool, table: dict, *, batch: str = BATCH) -> int:
+    """`--project <dir>` MCP servers: remove_backup on the repo's own <dir>/.mcp.json.
+
+    A direct, verified JSON edit (fs.checked_write, rolled back on any failure) with
+    NO claude CLI call. disable saves the raw entry, and the exact before/after file
+    text, in a private backup under fs.backup_dir() (never inside the project);
+    enable puts the file back byte for byte when it is still as we left it, else
+    merges the entry in. State keys carry the project digest, so a project entry
+    never meets the user-scope `claude:mcp:<name>` one (nor claude `local` scope).
+    """
+    project = table[harness].project
+    pstr, file, digest = str(project), project / ".mcp.json", project_digest(project)
+    fails = 0
+
+    def fail(name: str, msg: str) -> int:
+        return fail_row(out, dry_run, harness, "mcp", action, name, msg, batch=batch,
+                        project=pstr)
+
+    for name in names:
+        fs.refresh_lock()
+        key = make_key(harness, "mcp", name, project=project)
+        entry = state["disabled"].get(key)
+        bp = fs.backup_dir() / f"{digest}__{harness}__{name.replace('/', '_')}.json"
+        if action == "disable":
+            try:
+                raw, before, after = project_mcp_remove(file, name)
+            except ProjectMcpError as e:
+                fails += fail(name, str(e))
+                continue
+            if entry:
+                fails += fail(name, "already disabled in state -- enable it first")
+                continue
+            if not dry_run:
+                fs.private_dir(fs.backup_dir())
+                fs.atomic_write(bp, json.dumps(
+                    {"project_json": {"entry": raw, "before": before, "after": after}},
+                    ensure_ascii=False, indent=2))
+                try:
+                    write_project_mcp(file, after, before)
+                except fs.WriteError as e:          # file rolled back; drop the backup
+                    if "restore failed" not in str(e):   # else it holds the only good copy
+                        bp.unlink(missing_ok=True)
+                    fails += fail(name, str(e))
+                    continue
+                state["disabled"][key] = {
+                    "mechanism": "remove_backup", "harness": harness, "type": "mcp",
+                    "name": name, "backend": "project-json", "backup": str(bp),
+                    "scope": "project", "project": pstr,
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch,
+                    project=pstr, scope="project")
+            _ok(out, dry_run, harness, "mcp", action, name,
+                f"removed from {file} (config saved to {bp})", project=pstr, backup=str(bp))
+            out.warn(f"{file} {'would be' if dry_run else 'is'} a tracked change in git status; "
+                     f"restore with: agent-toggle enable mcp {name} --project {project}")
+            continue
+        # enable
+        if not entry:
+            fails += fail(name, f"{name} is not disabled in project {pstr}")
+            continue
+        refused = _refusal(entry, table, key, ("backup",))
+        if not refused and Path(entry["backup"]).name.split("__")[0] != digest:
+            refused = "refused: backup belongs to another project"
+        if refused:
+            fails += fail(name, refused)
+            continue
+        try:
+            payload = json.loads(Path(entry["backup"]).read_text(encoding="utf-8"))["project_json"]
+            if not (isinstance(payload["entry"], dict) and isinstance(payload["before"], str)
+                    and isinstance(payload["after"], str)):
+                raise TypeError("bad field")
+        except OSError:
+            fails += fail(name, f"backup missing at {entry['backup']}")
+            continue
+        except (ValueError, KeyError, TypeError):
+            fails += fail(name, f"refused: backup {entry['backup']} is not a project .mcp.json backup")
+            continue
+        try:
+            current, text = project_mcp_restore(file, name, payload)
+            if not dry_run:
+                write_project_mcp(file, text, current)
+        except (ProjectMcpError, fs.WriteError) as e:
+            fails += fail(name, str(e))
+            continue
+        if not dry_run:
+            state["disabled"].pop(key, None)
+            log(action, "mcp", name, "ok", harness=harness, batch=batch, project=pstr,
+                scope="project")
+        _ok(out, dry_run, harness, "mcp", action, name,
+            "restored (open a NEW session for it to load)", project=pstr,
+            backup=entry["backup"])
     return fails

@@ -122,6 +122,39 @@ class ClaudeJsonScopeTest(SandboxCase):
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+class ProjectMcpJsonTest(SandboxCase):
+    """The project .mcp.json helpers plan edits in the file's own layout."""
+
+    def put(self, text: str) -> Path:
+        p = self.tmp / ".mcp.json"
+        p.write_bytes(text.encode("utf-8"))
+        return p
+
+    def test_remove_and_restore_keep_tabs_crlf_and_final_newline(self) -> None:
+        text = '{\r\n\t"mcpServers": {\r\n\t\t"a-mcp": {"url": "u"},\r\n\t\t"b-mcp": {}\r\n\t}\r\n}\r\n'
+        f = self.put(text)
+        raw, before, after = mcp_json.project_mcp_remove(f, "a-mcp")
+        self.assertEqual((raw, before), ({"url": "u"}, text))
+        self.assertEqual(json.loads(after), {"mcpServers": {"b-mcp": {}}})
+        self.assertTrue(after.endswith("}\r\n") and "\n\t" in after)
+        self.assertNotIn("\n", after.replace("\r\n", ""))
+        payload = {"entry": raw, "before": before, "after": after}
+        f.write_bytes(after.encode("utf-8"))
+        self.assertEqual(mcp_json.project_mcp_restore(f, "a-mcp", payload), (after, text))
+
+    def test_refusals(self) -> None:
+        for bad in ('{"mcpServers": {"a": 1,}}', '{"mcpServers": {"a": 1, "a": 2}}', "[]",
+                    '{"mcpServers": []}', '\ufeff{"mcpServers": {}}', '{"mcpServers": {"a": NaN}}',
+                    '{"mcpServers": {"a": 1e400}}', '{"mcpServers": {"a": "\\ud800"}}',
+                    "[" * 100000):
+            with self.assertRaises(mcp_json.ProjectMcpError, msg=bad):
+                mcp_json.read_project_mcp(self.put(bad))
+        with self.assertRaises(mcp_json.ProjectMcpError):
+            mcp_json.read_project_mcp(self.tmp / "missing.json")
+        with self.assertRaises(mcp_json.ProjectMcpError):
+            mcp_json.project_mcp_remove(self.put('{"mcpServers": {}}'), "a-mcp")
+
+
 class FlagJsonTest(SandboxCase):
     """flag_json flips ONE true/false token; every other byte must survive."""
 

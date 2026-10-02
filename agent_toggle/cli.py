@@ -18,7 +18,7 @@ Usage:
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable --all [--harness H] [--dry-run]   # restore everything
     agent_toggle.py undo [--dry-run]           # reverse the last logged batch
-    agent_toggle.py disable|enable <type> <name>... --project <dir>   # a repo's .claude/
+    agent_toggle.py disable|enable <type> <name>... --project <dir>   # a repo's .claude/ + .mcp.json
     agent_toggle.py enable --all --project <dir> | profile save|apply|diff ... --project <dir>
     agent_toggle.py list [<type>] [--project D] # what is currently disabled
     agent_toggle.py status                     # health check
@@ -363,8 +363,8 @@ class _Parser(argparse.ArgumentParser):
         die(message, 2)
 
 
-PROJECT_HELP = ("project scope: <dir>/.claude (claude dir types; `.` = cwd); parks under "
-                "~/.agent-toggle/parked, never inside the project")
+PROJECT_HELP = ("project scope: <dir>/.claude (claude dir types; `.` = cwd) and <dir>/.mcp.json "
+                "(mcp); parks under ~/.agent-toggle/parked, never inside the project")
 
 
 def build_parser() -> argparse.ArgumentParser:
