@@ -65,16 +65,24 @@ def _file_row(out: Result, hname, type_, name, file: Path, kind: str, why: str, 
         _row(out, hname, type_, name, "error", f"{lead}{file} " + (why or "is not valid JSON"))
 
 
-def _json_at(out: Result, hname, type_, name, file: Path, path, lead: str, jsonc_ok: bool = True):
-    """The value at `path` in a strict-JSON `file`, or None after emitting the row."""
+def _json_at(out: Result, hname, type_, name, file: Path, path, lead: str, jsonc_ok: bool = True,
+             absent_ok: bool = False):
+    """The value at `path` in a strict-JSON `file`, or None after emitting the row.
+    `absent_ok` (layout checks): a missing file / key is `absent`, not an error --
+    a harness that never configured it is fine; a recorded state entry is not."""
     data, kind, why = _read_json(file)
+    if kind == "missing" and absent_ok:
+        _row(out, hname, type_, name, "absent", f"{file} does not exist (nothing to check)")
+        return None
     if kind != "ok":
         _file_row(out, hname, type_, name, file, kind, why, lead, jsonc_ok)
         return None
     found, value = _walk(data, path)
     if found:
         return value
-    _row(out, hname, type_, name, "error", f"{lead}{'.'.join(path)} not found in {file}")
+    _row(out, hname, type_, name, "absent" if absent_ok else "error",
+         f"{'.'.join(path)} not in {file} (nothing to check)" if absent_ok
+         else f"{lead}{'.'.join(path)} not found in {file}")
     return None
 
 
@@ -95,34 +103,38 @@ def _check_layout(out: Result, h: Harness, table: dict) -> None:
         if spec.backend == "toml":
             toml = fs._tomllib()
             if toml is None:
-                state = "unverified" if spec.file.is_file() else "error"
+                state = "unverified" if spec.file.is_file() else "absent"
                 _row(out, h.name, "mcp", None, state, f"{spec.file}: no tomllib, not parsed"
-                     if state == "unverified" else f"{lead}{spec.file} is missing")
+                     if state == "unverified" else f"{spec.file} does not exist (nothing to check)")
             else:
                 try:
                     data = toml.loads(spec.file.read_text(encoding="utf-8"))
                 except FileNotFoundError:
-                    _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} is missing")
+                    _row(out, h.name, "mcp", None, "absent",
+                         f"{spec.file} does not exist (nothing to check)")
                 except (OSError, ValueError) as e:
                     _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} does not parse ({e})")
                 else:
                     if not _walk(data, spec.key_path)[0]:
-                        _row(out, h.name, "mcp", None, "error",
-                             f"{lead}[{'.'.join(spec.key_path)}] not found in {spec.file}")
+                        _row(out, h.name, "mcp", None, "absent",
+                             f"[{'.'.join(spec.key_path)}] not in {spec.file} (nothing to check)")
         else:
-            _json_at(out, h.name, "mcp", None, spec.file, spec.key_path, lead, jsonc_ok=False)
+            _json_at(out, h.name, "mcp", None, spec.file, spec.key_path, lead, jsonc_ok=False,
+                     absent_ok=True)
     loaded: dict[str, tuple] = {}        # one read + one row per flag file, not per flag type
     for type_, (rel, pointer) in h.flags.items():
         prefix = pointer[:pointer.index("<name>")] if "<name>" in pointer else pointer[:-1]
         file = h.home / rel
         if rel not in loaded:
             loaded[rel] = _read_json(file)
-            if loaded[rel][1] != "ok":
+            if loaded[rel][1] == "missing":
+                _row(out, h.name, type_, None, "absent", f"{file} does not exist (nothing to check)")
+            elif loaded[rel][1] != "ok":
                 _file_row(out, h.name, type_, None, file, *loaded[rel][1:], "layout changed: ")
         data, kind, _ = loaded[rel]
         if kind == "ok" and not _walk(data, prefix)[0]:
-            _row(out, h.name, type_, None, "error",
-                 f"layout changed: {'.'.join(prefix)} not found in {file}")
+            _row(out, h.name, type_, None, "absent",
+                 f"{'.'.join(prefix)} not in {file} (nothing to check)")
     if not any(r["status"] == "error" for r in out.rows[start:]):
         _row(out, h.name, None, None, "ok", "layout matches the table row")
 
@@ -219,6 +231,8 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
         if d.name.startswith("."):
             continue
         if d.name not in digests:
+            if not any(p.is_symlink() or not p.is_dir() for p in d.rglob("*")):
+                continue                # only empty dirs: what a project enable leaves behind
             _row(out, None, None, d.name, "warn", f"{d} holds parked project items with no state "
                  f"entry; fix: move what you want back by hand, then delete the dir")
             continue

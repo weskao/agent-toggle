@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import unittest
+from unittest import mock
 
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
@@ -70,13 +71,30 @@ class LayoutTest(DoctorCase):
         (bad,) = self.rows(rows, "error", harness="codex", type="mcp")
         self.assertIn("layout changed", bad["detail"])
 
-    def test_missing_mcp_key_is_layout_changed(self) -> None:
+    def test_missing_mcp_key_is_absent_not_a_failure(self) -> None:
         (self.tmp / ".claude.json").write_text('{"theme": "dark"}', encoding="utf-8")
         rc, rows = self.doctor()
-        self.assertEqual(rc, 1)
-        (bad,) = self.rows(rows, "error", harness="claude", type="mcp")
-        self.assertIn("layout changed", bad["detail"])
-        self.assertIn("mcpServers", bad["detail"])
+        self.assertEqual(rc, 0, rows)
+        (note,) = self.rows(rows, "absent", harness="claude", type="mcp")
+        self.assertIn("mcpServers", note["detail"])
+
+    def test_missing_mcp_files_are_absent_not_a_failure(self) -> None:
+        (self.tmp / ".claude.json").unlink(missing_ok=True)
+        (self.tmp / ".codex" / "config.toml").unlink()
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 0, rows)
+        self.assertEqual({r["harness"] for r in self.rows(rows, "absent", type="mcp")},
+                         {"claude", "codex"})
+
+    def test_missing_toml_without_tomllib_is_absent_present_is_unverified(self) -> None:
+        cfg = self.tmp / ".codex" / "config.toml"
+        with mock.patch.object(fs, "_tomllib", lambda: None):
+            self.assertEqual(self.rows(self.doctor("--harness", "codex")[1], "unverified",
+                                       harness="codex", type="mcp")[0]["status"], "unverified")
+            cfg.unlink()
+            rc, rows = self.doctor("--harness", "codex")
+        self.assertEqual(rc, 0, rows)
+        self.assertEqual(len(self.rows(rows, "absent", harness="codex", type="mcp")), 1)
 
     def test_broken_openclaw_json_is_layout_changed(self) -> None:
         self.claw.write_text('{"skills": {"entries": ', encoding="utf-8")
@@ -85,12 +103,32 @@ class LayoutTest(DoctorCase):
         bad = self.rows(rows, "error", harness="openclaw")
         self.assertTrue(bad and all("layout changed" in r["detail"] for r in bad), rows)
 
-    def test_missing_flag_prefix_is_layout_changed(self) -> None:
+    def test_missing_flag_prefix_is_absent_not_a_failure(self) -> None:
         self.oc.write_text('{"servers": {}}', encoding="utf-8")
         rc, rows = self.doctor()
+        self.assertEqual(rc, 0, rows)
+        (note,) = self.rows(rows, "absent", harness="opencode", type="mcp")
+        self.assertIn("mcp", note["detail"])
+
+    def test_missing_flag_file_is_absent_not_a_failure(self) -> None:
+        self.claw.unlink()
+        rc, rows = self.doctor("--harness", "openclaw")
+        self.assertEqual(rc, 0, rows)
+        self.assertTrue(self.rows(rows, "absent", harness="openclaw"))
+
+    def test_recorded_flag_whose_file_vanished_stays_an_error(self) -> None:
+        self.assertEqual(self.run_cli("disable", "skill", "demo-skill", "--harness", "openclaw")[0], 0)
+        self.claw.unlink()
+        rc, rows = self.doctor("--harness", "openclaw")
         self.assertEqual(rc, 1)
-        (bad,) = self.rows(rows, "error", harness="opencode", type="mcp")
-        self.assertIn("layout changed", bad["detail"])
+        self.assertTrue(self.rows(rows, "error", harness="openclaw", type="skill", name="demo-skill"))
+
+    def test_recorded_flag_whose_pointer_vanished_stays_an_error(self) -> None:
+        self.assertEqual(self.run_cli("disable", "skill", "demo-skill", "--harness", "openclaw")[0], 0)
+        self.claw.write_text('{"skills": {"entries": {}}}', encoding="utf-8")
+        rc, rows = self.doctor("--harness", "openclaw")
+        self.assertEqual(rc, 1)
+        self.assertTrue(self.rows(rows, "error", harness="openclaw", type="skill", name="demo-skill"))
 
     def test_one_row_per_broken_shared_flag_file(self) -> None:
         self.claw.write_text('{"skills": ', encoding="utf-8")
@@ -195,9 +233,21 @@ class StateTest(DoctorCase):
         self.assertIn("project dir gone", bad[0]["detail"])
         self.assertTrue((fs.parked_dir() / store.project_digest(proj)).exists())  # never deleted
 
+    def test_empty_park_dir_left_by_a_project_enable_is_silent(self) -> None:
+        proj = self.tmp / "work" / "app"
+        (proj / ".claude" / "skills" / "demo-skill").mkdir(parents=True)
+        (proj / ".claude" / "skills" / "demo-skill" / "SKILL.md").write_text("x", encoding="utf-8")
+        for verb in ("disable", "enable"):
+            self.assertEqual(self.run_cli(verb, "skill", "demo-skill", "--project", str(proj))[0], 0)
+        self.assertTrue((fs.parked_dir() / store.project_digest(proj)).is_dir())   # the leftover
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 0, rows)
+        self.assertEqual(self.rows(rows, "warn"), [])
+
     def test_orphans_are_reported_not_deleted(self) -> None:
         orphan = fs.parked_dir() / "deadbeef" / "skills-disabled" / "old-skill"
         orphan.mkdir(parents=True)
+        (orphan / "SKILL.md").write_text("x", encoding="utf-8")
         stray = self.home / "skills-disabled" / "stray-skill"
         stray.mkdir(parents=True)
         fs.backup_dir().mkdir(parents=True)
