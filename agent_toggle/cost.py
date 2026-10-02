@@ -137,12 +137,12 @@ def mcp_tool_counts(h) -> dict[str, int]:
     """name -> tool count for the live servers whose config lists their tools."""
     if h.backend == "toml":
         try:
-            return dict(Counter(TOOL_SECTION.findall((h.home / "config.toml").read_text())))
+            return dict(Counter(TOOL_SECTION.findall((h.home / "config.toml").read_text(encoding="utf-8"))))
         except OSError:
             return {}
     if h.backend == "claude-json":
         try:
-            cfg = json.loads(fs.claude_json().read_text())
+            cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
         servers = dict(cfg.get("mcpServers") or {})

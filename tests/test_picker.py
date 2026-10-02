@@ -37,7 +37,7 @@ class PickerTest(SandboxCase):
             '[mcp_servers.alpha]\ncommand = "a"\n'
             "[mcp_servers.alpha.tools.x]\nenabled = true\n"
             '[mcp_servers.beta]\ncommand = "b"\n[other]\nk = 1\n'
-        )
+        , encoding="utf-8")
         names = mechanisms.live_mcp(self.home, "toml")
         # toml servers listed once each
         self.assertEqual(names, ["alpha", "beta"])

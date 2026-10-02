@@ -37,22 +37,22 @@ class TomlTest(SandboxCase):
     def test_toml_mcp_roundtrip(self) -> None:
         cfg = self.home / "config.toml"
         cfg.write_text('[general]\nx = 1\n\n[mcp_servers.tg]\ncommand = "tg"\n'
-                       '[mcp_servers.tg.tools.send]\nenabled = true\n')
+                       '[mcp_servers.tg.tools.send]\nenabled = true\n', encoding="utf-8")
         block = mcp_toml.codex_mcp_remove(cfg, "tg")
         # removal drops the server from config
-        self.assertNotIn("mcp_servers.tg", cfg.read_text())
+        self.assertNotIn("mcp_servers.tg", cfg.read_text(encoding="utf-8"))
         # removal keeps unrelated tables
-        self.assertIn("[general]", cfg.read_text())
+        self.assertIn("[general]", cfg.read_text(encoding="utf-8"))
         mcp_toml.codex_mcp_add(cfg, block)
         # re-add restores the server
-        self.assertIn("[mcp_servers.tg]", cfg.read_text())
+        self.assertIn("[mcp_servers.tg]", cfg.read_text(encoding="utf-8"))
         # re-add restores sub-tables
-        self.assertIn("tg.tools.send", cfg.read_text())
+        self.assertIn("tg.tools.send", cfg.read_text(encoding="utf-8"))
 
 
 class ClaudeJsonScopeTest(SandboxCase):
     def claude_json(self, payload: dict) -> None:
-        fs.claude_json().write_text(json.dumps(payload))
+        fs.claude_json().write_text(json.dumps(payload), encoding="utf-8")
 
     def test_mcp_lookup_reports_scope_and_project(self) -> None:
         self.claude_json({
@@ -88,7 +88,7 @@ class ClaudeJsonScopeTest(SandboxCase):
         """Entries parked before scope tracking have no scope field."""
         fs.backup_dir().mkdir(parents=True)
         bp = fs.backup_dir() / "claude__legacy.json"
-        bp.write_text('{"command": "x"}')
+        bp.write_text('{"command": "x"}', encoding="utf-8")
         self.cli_rc = 0
         state = {"version": 2, "disabled": {"claude:mcp:legacy": {
             "harness": "claude", "type": "mcp", "name": "legacy",

@@ -21,14 +21,14 @@ class DirTypeTest(SandboxCase):
         # nested command parked with its parent dir
         self.assertTrue((self.home / "commands-disabled/orch/batch.md").is_file())
         # sibling with same basename untouched
-        self.assertEqual((self.home / "commands/other/batch.md").read_text(), "other")
+        self.assertEqual((self.home / "commands/other/batch.md").read_text(encoding="utf-8"), "other")
         # origin recorded
         origin = state["disabled"]["claude:command:orch:batch"]["origin"]
         self.assertEqual(Path(origin).parts[-3:], ("commands", "orch", "batch.md"))
 
         mech.toggle_dir_type("enable", "command", ["orch:batch"], state, "claude", self.home)
         # nested command restored to its original path
-        self.assertEqual((self.home / "commands/orch/batch.md").read_text(), "batch")
+        self.assertEqual((self.home / "commands/orch/batch.md").read_text(encoding="utf-8"), "batch")
         # state entry cleared
         self.assertFalse(state["disabled"])
         # empty park subdir pruned

@@ -56,5 +56,5 @@ class SandboxCase(unittest.TestCase):
     def write(self, rel: str, text: str = "x") -> Path:
         p = self.home / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
         return p

@@ -84,7 +84,7 @@ def _holder_alive(path: Path) -> bool:
     if os.name == "nt":
         return False
     try:
-        pid = int(path.read_text().strip())
+        pid = int(path.read_text(encoding="utf-8").strip())
         if pid <= 0:
             return False
         os.kill(pid, 0)
@@ -102,7 +102,7 @@ def refresh_lock() -> None:
     not mistaken for a crashed run. No-op when we do not hold it."""
     path = lock_file()
     try:
-        if path.read_text() == str(os.getpid()):
+        if path.read_text(encoding="utf-8") == str(os.getpid()):
             os.utime(path)
     except OSError:
         pass
@@ -146,12 +146,12 @@ def lock():
             time.sleep(0.05)
     pid = str(os.getpid())
     try:
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(pid)
         yield
     finally:
         try:                             # only remove a lock that is still ours
-            if path.read_text() == pid:
+            if path.read_text(encoding="utf-8") == pid:
                 path.unlink(missing_ok=True)
         except OSError:
             pass

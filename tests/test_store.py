@@ -14,11 +14,11 @@ class MigrateTest(SandboxCase):
         legacy = fs.legacy_state_dir()
         (legacy / "mcp-backups").mkdir(parents=True)
         backup = legacy / "mcp-backups/example-mcp.json"
-        backup.write_text('{"type": "http", "url": "http://127.0.0.1:8765/mcp"}')
+        backup.write_text('{"type": "http", "url": "http://127.0.0.1:8765/mcp"}', encoding="utf-8")
         (legacy / "state.json").write_text(json.dumps({"version": 1, "disabled": {
             "mcp:example-mcp": {"type": "mcp", "name": "example-mcp",
                                 "backup": str(backup), "at": "2026-09-19T00:00:00+0800"},
-        }}))
+        }}), encoding="utf-8")
         state = {"version": 2, "disabled": {}}
         store.migrate(state)
 

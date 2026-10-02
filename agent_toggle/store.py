@@ -90,7 +90,7 @@ def migrate(state: dict) -> int:
         print(f"nothing to migrate ({old_file} not found)")
         return 0
     try:
-        old = json.loads(old_file.read_text())
+        old = json.loads(old_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         die(f"legacy state unreadable: {e}")
 

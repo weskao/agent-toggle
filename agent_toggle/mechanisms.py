@@ -89,7 +89,7 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
     """Names of the MCP servers currently configured for one harness."""
     if backend == "claude-json":
         try:
-            cfg = json.loads(fs.claude_json().read_text())
+            cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return []
         # Local-scope servers are nested per project; without them the picker
@@ -105,7 +105,7 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
             return []
         try:
             # Same text-level approach as the write path: no TOML parser needed.
-            return sorted(set(MCP_TOML_RE.findall(config.read_text())))
+            return sorted(set(MCP_TOML_RE.findall(config.read_text(encoding="utf-8"))))
         except OSError:
             return []
     return []
@@ -394,7 +394,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             if not path.is_file():
                 fails += fail(name, f"backup missing at {path}")
                 continue
-            payload = path.read_text()
+            payload = path.read_text(encoding="utf-8")
             if (entry or {}).get("backend", backend) == "toml":
                 if not dry_run:
                     codex_mcp_add(home / "config.toml", json.loads(payload)["toml"])
