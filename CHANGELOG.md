@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Copilot adapter: skills, agents and MCP servers (`~/.copilot/mcp-config.json`,
+  through a user-scope strict-JSON backend); `config.json` is never edited and
+  plugins are not yet supported.
+- Vibe adapter (skills), a Devin row (explicit not applicable: no toggleable
+  resources) and an Antigravity (`agy`) table row only; its adapter waits until
+  the layout is observed (DESIGN section 11 q1).
 - `cost` command: estimated startup tokens per item (chars / 4, about +-25 %),
   biggest first, with a cost column in the picker; `cost --json` carries the
   formula and a total row.
@@ -59,6 +65,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- MCP entries whose `tools` is `["*"]` now get the flat token estimate on every
+  backend instead of counting as one tool.
 - A dry run whose plan contains a failing item exits `1`, not `0`.
 - Usage errors, an unknown harness and an unknown type now exit `2` (were `1`).
 - The root `agent_toggle.py` is now a thin wrapper over the `agent_toggle/`
@@ -72,6 +80,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   result, batch, project, scope, detail}`; rows written by older versions have
   no `batch` and cannot be undone.
 - `enable` takes `--all` in place of `<type> <name>...`.
+
+### Notes
+
+- Disabling a copilot MCP server re-serialises the whole `mcp-config.json`
+  (formatting is normalised); the backup holds the pre-disable file text at mode
+  `0600`.
 
 ### Fixed
 

@@ -10,13 +10,13 @@ on CI, and tick the matching box in `docs/DESIGN.md` §7/§8 in the same commit.
 
 ### Phase 3 — remaining harnesses
 
-- [ ] copilot: skills, agents, `mcp-config.json`
-- [ ] vibe: skills
-- [ ] devin: explicit "not applicable" row (no toggleable resources)
-- [ ] agy: table row now; adapter once its layout is observed (open question 1)
-- [ ] each harness has a fixture home under `tests/fixtures/<harness>/` and passes
+- [x] copilot: skills, agents, `mcp-config.json`
+- [x] vibe: skills
+- [x] devin: explicit "not applicable" row (no toggleable resources)
+- [x] agy: table row now; adapter once its layout is observed (open question 1)
+- [x] each harness has a fixture home under `tests/fixtures/<harness>/` and passes
       `tests/test_conformance.py`
-- [ ] README support matrix, `CHANGELOG.md`, shim type/harness list updated
+- [x] README support matrix, `CHANGELOG.md`, shim type/harness list updated
       (`tests/test_install.py` pins the shim list to the table)
 
 ### Phase 3.5 — colorful CLI
