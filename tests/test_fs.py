@@ -151,6 +151,14 @@ class CheckedWriteTest(SandboxCase):
             fs.checked_write(self.cfg, '{"a": 9}\n', interrupted)
         self.assertEqual(self.cfg.read_bytes(), b'{"a": 1}\n')
 
+    def test_a_failed_first_write_is_not_reported_as_a_failed_restore(self) -> None:
+        with mock.patch.object(fs, "_replace_bytes", side_effect=PermissionError("read-only dir")):
+            with self.assertRaises(fs.WriteError) as cm:
+                fs.checked_write(self.cfg, '{"a": 2}\n', fs.json_verify())
+        self.assertNotIn("restore failed", str(cm.exception))
+        self.assertIn("rolled back", str(cm.exception))
+        self.assertEqual(self.cfg.read_bytes(), b'{"a": 1}\n')
+
     def test_verify_sees_before_and_after(self) -> None:
         seen = []
         fs.checked_write(self.cfg, "{}", lambda b, a: seen.append((b, a)) or "")

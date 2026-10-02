@@ -248,7 +248,9 @@ def checked_write(path: Path, text: str, verify) -> str:
         return verify("" if old is None else old.decode("utf-8", errors="replace"), after)
     except BaseException as e:           # Ctrl-C mid-verify must not leave the write
         try:
-            if old is None:
+            if _untouched(path, old, old_mode):
+                pass                     # failed before os.replace: nothing to put back
+            elif old is None:
                 path.unlink(missing_ok=True)
             else:
                 _replace_bytes(path, old, old_mode)
@@ -257,6 +259,16 @@ def checked_write(path: Path, text: str, verify) -> str:
         if not isinstance(e, Exception):
             raise
         raise WriteError(f"{path}: write rolled back ({type(e).__name__}: {e})") from e
+
+
+def _untouched(path: Path, old: bytes | None, old_mode: int) -> bool:
+    """True if `path` still holds exactly its pre-write bytes and mode (or is still absent)."""
+    try:
+        return path.read_bytes() == old and path.stat().st_mode & 0o7777 == old_mode
+    except FileNotFoundError:
+        return old is None
+    except OSError:
+        return False
 
 
 def json_verify(expected: str | None = None):
