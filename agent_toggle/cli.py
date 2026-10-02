@@ -39,7 +39,7 @@ from . import __version__, cost, fs, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
-from .mechanisms import dir_view, toggle_dir_type, toggle_mcp, toggle_plugin
+from .mechanisms import dir_view, toggle_dir_type, toggle_mcp, toggle_plugin, validate_name
 from .output import CliError, Result, die
 from .store import load_state, save_state
 
@@ -235,6 +235,8 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
 
 def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     action, type_, names, harness = args.command, args.type, args.names, args.harness
+    for name in names:
+        validate_name(name)
     h = harness_of(harness)
     home, supported = h.home, h.types
     if not home.is_dir():

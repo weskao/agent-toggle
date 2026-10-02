@@ -43,4 +43,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Names with `..`, an absolute path, an empty part or a leading `-` are refused
+  (exit 2), and an item whose parent resolves outside the harness dir is never
+  touched, so `disable skill ../../x` can no longer move files outside it.
 - Restoring a codex MCP server no longer doubles the blank line before it.

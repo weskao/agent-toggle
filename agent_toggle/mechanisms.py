@@ -19,7 +19,7 @@ from .backends.plugin_cli import claude_bin, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses
-from .output import Result
+from .output import Result, die
 from .store import log
 
 
@@ -42,12 +42,25 @@ def _ok(out: Result, dry_run: bool, harness: str, type_: str, action: str, name:
     return out.row(harness, type_, name, action, "ok", text, **extra)
 
 
+def validate_name(name: str) -> None:
+    """Refuse names that could address anything outside the harness dir (exit 2)."""
+    parts = name.split(":")
+    if (not name or Path(name).is_absolute() or "/" in name or "\\" in name
+            or any(p in ("", ".", "..") or p.startswith("-") for p in parts)):
+        die(f"invalid name {name!r}: use plain names, `a:b` for nesting", 2)
+
+
 def resolve_item(base: Path, name: str) -> Path | None:
-    """Find a resource on disk. `a:b` addresses a nested `a/b`."""
+    """Find a resource on disk. `a:b` addresses a nested `a/b`.
+
+    The item itself may be a symlink (it is moved as a link), but its parent
+    must resolve inside `base`, so no name can reach outside the harness dir.
+    """
     rel = name.replace(":", "/")
+    root = base.resolve()
     for suffix in PROBE_SUFFIXES:
         p = base / (rel + suffix)
-        if p.exists() or p.is_symlink():
+        if (p.exists() or p.is_symlink()) and p.parent.resolve().is_relative_to(root):
             return p
     return None
 

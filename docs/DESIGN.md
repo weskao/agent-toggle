@@ -451,7 +451,7 @@ directories, and the promise that a disable never loses data.
 
 | # | threat | control | status |
 |---|---|---|---|
-| 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | **gap**: `resolve_item` only maps `:` to `/` and no containment check was found. Fix before phase 0 closes |
+| 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
 | 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | planned; schema-version check exists |
 | 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | modes and warning done; output audit planned |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | planned: shim text, rule warning |
@@ -485,7 +485,7 @@ statement above and a supported-versions line.
       `CONTRIBUTING.md` (adding a harness row + fixture + verifying version),
       `CHANGELOG.md` (Keep a Changelog), issue templates (bug: harness +
       version + `status --json` output; harness request: layout survey).
-- [ ] Name and path containment (§6.1 row 1): `validate_name()` plus an
+- [x] Name and path containment (§6.1 row 1): `validate_name()` plus an
       inside-the-harness-dir check on every resolved item, with a test that
       `..`, absolute and leading-`-` names are refused.
 - [x] No real user data anywhere: fixtures use synthetic names; docs use `~`
@@ -553,9 +553,6 @@ runs this pattern in production:
 
 ### 8.2 Known gaps (non-critical, found at the phase 0 + 1 gate)
 
-- **Name and path containment is not done** (§6.1 row 1, the unticked §7
-  item): `resolve_item` only maps `:` to `/`; there is no `validate_name()` and
-  no inside-the-harness-dir check yet.
 - `run_cli` in `backends/plugin_cli.py` uses a fixed 120 s timeout for every
   `claude plugin ...` call.
 - A plugin can show twice in the picker when it is parked under a name that
