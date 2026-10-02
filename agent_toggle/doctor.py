@@ -17,6 +17,8 @@ from .mechanisms import _refusal, dir_view
 from .output import CliError, Result
 from .store import load_state
 
+STYLE = {"ok": "green", "error": "red", "warn": "yellow",
+         "absent": "dim", "note": "dim", "unverified": "dim"}
 TAG = {"ok": "v", "absent": "-", "note": "i", "unverified": "?", "warn": "!", "error": "x"}
 NEED = {"move": ("parked_at", "origin"), "remove_backup": ("backup",)}
 # strings (kept) | comments | trailing commas: what makes strict JSON into JSONC
@@ -26,7 +28,7 @@ _JSONC = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
 def _row(out: Result, harness, type_, name, status: str, detail: str, **extra) -> None:
     out.row(harness, type_, name, "doctor", status, detail, show=False, **extra)
     what = " ".join(x for x in (harness, type_, name) if x)
-    out.say(f"  {TAG[status]} {what}: {detail}", warn=status == "warn")
+    out.say(f"  {TAG[status]} {what}: {detail}", warn=status == "warn", style=STYLE[status])
 
 
 def _read_json(file: Path) -> tuple[object, str, str]:

@@ -56,7 +56,7 @@ def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: st
         h = table[harness]
         mech = h.mechanisms.get(type_)
         if headers:
-            out.say(f"\n{action} {type_} on {harness}"
+            out.say(f"\n{action} {type_} on {out.paint(harness, 'cyan')}"
                     + (f" (project {h.project}):" if h.project else ":"))
         if mech == "move":
             fails += toggle_dir_type(action, type_, names, state, harness, h.home, out,
