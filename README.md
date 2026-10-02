@@ -36,7 +36,8 @@ python3 agent_toggle.py status         # no install needed; same CLI
 Python 3.10+, no runtime dependencies. Then write the skill shim:
 
 ```sh
-agent-toggle install-shims             # or: ./install.sh, a thin wrapper over it
+agent-toggle install-shims             # installed, or: ./install.sh (a thin wrapper)
+python3 agent_toggle.py install-shims  # from a checkout, no install needed
 ```
 
 `install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
