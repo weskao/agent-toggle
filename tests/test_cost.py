@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import time
 import unittest
 from unittest import mock
 
 from test_cli_surface import CliCase, snapshot
+from test_conformance import FIXTURES
 
 from agent_toggle import cost, fs
 from agent_toggle.backends import plugin_cli
@@ -155,6 +157,42 @@ class CostCommandTest(CliCase):
         rc, env = self.run_json("cost")         # base stub: the CLI exits non-zero
         self.assertEqual(rc, 0)
         self.assertTrue(any("plugin list" in w for w in env["warnings"]))
+
+
+class FlagCostTest(CliCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli_rc = 0
+        for h in ("openclaw", "opencode"):
+            shutil.copytree(FIXTURES / h, self.tmp, dirs_exist_ok=True)
+
+    def rows(self) -> dict[tuple, dict]:
+        rc, env = self.run_json("cost")
+        self.assertEqual(rc, 0, env)
+        return {(r["harness"], r["type"], r["name"]): r for r in env["results"] if r["name"]}
+
+    def test_flag_disabled_skill_costs_zero_and_would_save(self) -> None:
+        live = self.rows()["openclaw", "skill", "demo-skill"]
+        self.assertTrue(live["enabled"])
+        self.assertEqual(self.run_cli("disable", "skill", "demo-skill", "--harness", "openclaw")[0], 0)
+        off = self.rows()["openclaw", "skill", "demo-skill"]
+        self.assertEqual((off["enabled"], off["tokens"], off["would_save"]),
+                         (False, 0, live["tokens"]))
+        self.assertGreater(off["would_save"], 0)
+
+    def test_live_flag_items_are_listed_not_only_parked_ones(self) -> None:
+        rows = self.rows()
+        self.assertTrue(rows["opencode", "mcp", "example-mcp"]["enabled"])
+        self.assertTrue(rows["openclaw", "plugin", "demo-plugin"]["enabled"])
+        self.assertEqual(self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")[0], 0)
+        rows = self.rows()
+        self.assertFalse(rows["opencode", "mcp", "example-mcp"]["enabled"])
+        self.assertEqual(len([k for k in rows if k[2] == "example-mcp"]), 1)
+
+    def test_flag_set_false_by_hand_is_not_live(self) -> None:
+        cfg = self.tmp / ".config/opencode/opencode.json"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("true", "false"), encoding="utf-8")
+        self.assertFalse(self.rows()["opencode", "mcp", "example-mcp"]["enabled"])
 
 
 class PerfAndDryRunTest(CliCase):
