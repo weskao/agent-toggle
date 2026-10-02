@@ -3,9 +3,9 @@
 Skills, agents, commands, rules, plugins and MCP servers can all be parked and put
 back. Nothing is ever deleted.
 
-Supported harnesses: claude (Claude Code), codex, grok, opencode, openclaw.
-Not every harness has every resource type; unsupported pairs fail loudly
-instead of silently doing nothing.
+Supported harnesses: claude (Claude Code), codex, grok, opencode, openclaw, copilot,
+vibe, devin, agy. Not every harness has every resource type; unsupported pairs fail
+loudly instead of silently doing nothing.
 
 State lives in ONE place ($HOME/.agent-toggle/), never as sidecar files next
 to the targets -- a user's `git status` must not change because of our
