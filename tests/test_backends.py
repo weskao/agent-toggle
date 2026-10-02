@@ -34,6 +34,22 @@ class TomlTest(SandboxCase):
         # unknown server returns None
         self.assertIsNone(mcp_toml.toml_block(text, "nope"))
 
+    def test_headers_subtable_is_backed_up_and_restored_verbatim(self) -> None:
+        # a remote server's auth lives in a `.headers` sub-table (seen in a real grok config)
+        cfg = self.home / "config.toml"
+        original = (
+            '[general]\nx = 1\n\n'
+            '[mcp_servers.example-mcp]\nurl = "https://example.com/mcp"\n\n'
+            '[mcp_servers.example-mcp.headers]\nAuthorization = "Bearer test-token-000"\n\n'
+            '[other]\ny = 2\n'
+        )
+        cfg.write_text(original, encoding="utf-8")
+        block = mcp_toml.codex_mcp_remove(cfg, "example-mcp")
+        self.assertIn("Bearer test-token-000", block)
+        self.assertNotIn("Bearer", cfg.read_text(encoding="utf-8"))
+        self.assertIn("[other]", cfg.read_text(encoding="utf-8"))
+        self.assertEqual(mechanisms.MCP_TOML_RE.findall(original), ["example-mcp"])
+
     def test_toml_mcp_roundtrip(self) -> None:
         cfg = self.home / "config.toml"
         cfg.write_text('[general]\nx = 1\n\n[mcp_servers.tg]\ncommand = "tg"\n'
