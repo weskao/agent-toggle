@@ -235,12 +235,15 @@ class SpellingTest(CliCase):
 
     def test_every_command_accepts_a_leading_double_dash(self) -> None:
         self.write("skills/demo-skill/SKILL.md")
+        self.run_cli("profile", "save", "work")
         cases = (
             ["status"], ["list"], ["list", "skill"], ["ui"], ["ui", "--dry-run"],
             ["cost"], ["cost", "--type", "skill"], ["cost", "--harness", "codex"],
             ["disable", "skill", "demo-skill", "--dry-run"],
             ["enable", "skill", "demo-skill", "--dry-run"],
             ["install-shims", "--dry-run"],
+            ["profile", "list"], ["profile", "diff", "work"],
+            ["profile", "apply", "work", "--dry-run"],
         )
         for argv in cases:
             plain = self.run_cli(*argv, "--json")

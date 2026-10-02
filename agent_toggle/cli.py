@@ -19,6 +19,7 @@ Usage:
     agent_toggle.py list [<type>]              # what is currently disabled
     agent_toggle.py status                     # health check
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
+    agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
 
     <type> = skill | agent | command | rule | plugin | mcp
@@ -35,7 +36,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, fs, ops, store
+from . import __version__, cost, fs, ops, profiles, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
@@ -293,7 +294,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims")
+            "install-shims", "profile")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -356,6 +357,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
     sp.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
+    pp = sub.add_parser("profile", parents=[common],
+                        help="save / apply / diff / list named sets of live items")
+    pp.add_argument("action", help="save | apply | diff | list")
+    pp.add_argument("target", nargs="?", metavar="name|file")
+    pp.add_argument("--out", metavar="file", help="save: write the profile here instead")
+    pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
         sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
         sp.add_argument("type", choices=TYPES)
@@ -389,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_migrate(out)
         elif cmd == "install-shims":
             cmd_install_shims(args, out)
+        elif cmd == "profile":
+            profiles.cmd_profile(args, out)
         else:
             args.harness = args.harness or "claude"
             cmd_toggle(args, out)

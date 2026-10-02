@@ -16,6 +16,7 @@ behave identically (same output, same exit code):
 | `migrate` | `--migrate` |
 | `install-shims` | `--install-shims` |
 | `disable`, `enable` | `--disable`, `--enable` |
+| `profile` | `--profile` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:
