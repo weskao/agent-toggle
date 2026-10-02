@@ -12,6 +12,9 @@ from . import fs
 from .backends.flag_json import FlagError, FlagMissing, read_flag, set_flag
 from .backends.mcp_json import (
     ProjectMcpError,
+    _finite,
+    _no_dup,
+    _not_json,
     claude_mcp_config,
     claudeai_connector_names,
     project_mcp_remove,
@@ -551,18 +554,18 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                   f"(sqlite / none) -- not supported", "unsupported", batch=batch)
         return len(names)
 
-    backup_dir = fs.backup_dir()
-    if not dry_run:
-        fs.private_dir(backup_dir)
-    fails = 0
-
     def fail(name: str, msg: str) -> int:
         return fail_row(out, dry_run, harness, "mcp", action, name, msg, batch=batch)
 
     if backend not in ("claude-json", "toml"):     # fail closed: no id reaches an else branch
-        for name in names:
+        for name in names:                         # (before any directory is created)
             fail(name, f"{harness} mcp backend {backend!r} is not handled here")
         return len(names)
+
+    backup_dir = fs.backup_dir()
+    if not dry_run:
+        fs.private_dir(backup_dir)
+    fails = 0
 
     table = harnesses()
     for name in names:
@@ -894,17 +897,30 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
             if not (isinstance(payload["entry"], dict) and isinstance(payload["before"], str)
                     and isinstance(payload["after"], str)):
                 raise TypeError("bad field")
+            # `before` is written back verbatim when the file is unchanged: it must be
+            # exactly the strict-JSON config this server was removed from
+            servers = json.loads(payload["before"], object_pairs_hook=_no_dup,
+                                 parse_constant=_not_json, parse_float=_finite)["mcpServers"]
+            if servers[name] != payload["entry"]:
+                raise ValueError("before does not hold the entry")
         except OSError:
             fails += fail(name, f"backup missing at {bp}")
             continue
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, RecursionError):
             fails += fail(name, f"refused: backup {bp} is not a {harness} mcp backup")
             continue
         try:
             current, text = project_mcp_restore(file, name, payload)
             if not dry_run:
                 write_project_mcp(file, text, current)
-        except (ProjectMcpError, fs.WriteError) as e:
+        except ProjectMcpError as e:
+            msg = str(e)
+            if "backup stays in state" not in msg:      # file / mcpServers key vanished
+                msg += (f" -- restore {file.name} with an mcpServers object first; "
+                        f"the backup stays in state")
+            fails += fail(name, msg)
+            continue
+        except fs.WriteError as e:
             fails += fail(name, str(e))
             continue
         if not dry_run:

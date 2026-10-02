@@ -66,6 +66,33 @@ class EstimatorTest(CliCase):
         self.assertEqual((est["a"].tokens, est["b"].tokens), (600, 1500))
 
 
+    def test_json_backend_counts_listed_tools_and_treats_a_wildcard_as_unknown(self) -> None:
+        shutil.copytree(FIXTURES / "copilot", self.tmp, dirs_exist_ok=True)
+        cfg = self.tmp / ".copilot" / "mcp-config.json"
+        copilot = build(self.tmp)["copilot"]
+        self.assertEqual(cost.mcp_tool_counts(copilot), {})        # fixture: tools == ["*"]
+        cfg.write_text(json.dumps({"mcpServers": {
+            "a": {"tools": ["t1", "t2", "t3"]}, "b": {"tools": ["*"]}, "c": {}}}),
+            encoding="utf-8")
+        self.assertEqual(cost.mcp_tool_counts(copilot), {"a": 3})
+        cfg.write_text("{ // not strict json", encoding="utf-8")
+        self.assertEqual(cost.mcp_tool_counts(copilot), {})
+        cfg.unlink()
+        self.assertEqual(cost.mcp_tool_counts(copilot), {})
+
+    def test_entry_tools_wildcard_is_unknown_not_one(self) -> None:
+        self.assertIsNone(cost._entry_tools({"tools": ["*"]}))
+        self.assertEqual(cost._entry_tools({"tools": ["x", "*"]}), 2)
+        self.assertEqual(cost._entry_tools({"tools": ["x"]}), 1)
+
+    def test_backup_tools_reads_the_json_backend_payload(self) -> None:
+        bp = self.tmp / "b.json"
+        for entry, want in (({"tools": ["t1", "t2"]}, 2), ({"tools": ["*"]}, None), ({}, None)):
+            bp.write_text(json.dumps({"json": {"entry": entry, "before": "", "after": ""}}),
+                          encoding="utf-8")
+            self.assertEqual(cost.backup_tools({"backup": str(bp)}), want)
+
+
 class CostCommandTest(CliCase):
     def setUp(self) -> None:
         super().setUp()
