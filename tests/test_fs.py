@@ -98,7 +98,8 @@ class ContainedTest(SandboxCase):
 class CheckedWriteTest(SandboxCase):
     def setUp(self) -> None:
         super().setUp()
-        self.cfg = self.write("config.json", '{"a": 1}\n')
+        self.cfg = self.write("config.json", "")
+        self.cfg.write_bytes(b'{"a": 1}\n')    # write_text would turn \n into \r\n on Windows
         if POSIX:
             self.cfg.chmod(0o640)
 
@@ -112,7 +113,7 @@ class CheckedWriteTest(SandboxCase):
     def test_failed_verify_restores_bytes(self) -> None:
         with self.assertRaises(fs.WriteError) as cm:
             fs.checked_write(self.cfg, "{not json", fs.json_verify())
-        self.assertIn(str(self.cfg), str(cm.exception))
+        self.assertIn(self.cfg.name, str(cm.exception))   # 8.3 vs long temp path on Windows
         self.assertEqual(self.cfg.read_bytes(), b'{"a": 1}\n')
         self.assertEqual(list(self.home.glob(".config.json.*")), [])   # no tmp left
 
