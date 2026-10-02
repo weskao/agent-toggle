@@ -235,12 +235,20 @@ class SpellingTest(CliCase):
 
     def test_every_command_accepts_a_leading_double_dash(self) -> None:
         self.write("skills/demo-skill/SKILL.md")
+        self.run_cli("profile", "save", "work")
+        proj = self.tmp / "proj"
+        (proj / ".claude" / "skills" / "demo-skill").mkdir(parents=True)
         cases = (
             ["status"], ["list"], ["list", "skill"], ["ui"], ["ui", "--dry-run"],
             ["cost"], ["cost", "--type", "skill"], ["cost", "--harness", "codex"],
             ["disable", "skill", "demo-skill", "--dry-run"],
             ["enable", "skill", "demo-skill", "--dry-run"],
             ["install-shims", "--dry-run"],
+            ["profile", "list"], ["profile", "diff", "work"],
+            ["profile", "apply", "work", "--dry-run"],
+            ["undo", "--dry-run"], ["enable", "--all", "--dry-run"],
+            ["doctor"], ["doctor", "--harness", "claude"],
+            ["disable", "skill", "demo-skill", "--project", str(proj), "--dry-run"],
         )
         for argv in cases:
             plain = self.run_cli(*argv, "--json")
@@ -352,12 +360,16 @@ class UnexpectedErrorTest(CliCase):
         except ImportError:
             self.skipTest("curses unavailable")
 
-        def half_done(changes, state, out=None):
+        from agent_toggle import ops
+
+        def half_done(plan, state, out, dry_run, batch, headers):
             state["disabled"]["claude:skill:demo-skill"] = {"type": "skill", "name": "demo-skill"}
             raise RuntimeError("second item crashed")
 
-        with mock.patch.object(picker, "pick", return_value=[object()]), \
-                mock.patch.object(cli, "apply_changes", half_done):
+        row = picker.Row("claude", "skill", "demo-skill", True)
+        row.staged = False
+        with mock.patch.object(picker, "pick", return_value=[row]), \
+                mock.patch.object(ops, "_dispatch", half_done):
             rc, _, err = self.run_cli("ui")
         self.assertEqual(rc, 1)
         self.assertIn("claude:skill:demo-skill", json.loads(fs.state_file().read_text(encoding="utf-8"))["disabled"])

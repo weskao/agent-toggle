@@ -32,7 +32,7 @@ from typing import Callable
 
 from . import fs
 from .backends.plugin_cli import claude_bin, run_cli
-from .mechanisms import dir_view, live_mcp, live_names, resolve_item
+from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
 
 CHARS_PER_TOKEN = 4
 HEAD_CAP = 16 * 1024          # bytes read per frontmatter block
@@ -154,6 +154,25 @@ def mcp_tool_counts(h) -> dict[str, int]:
     return {}
 
 
+def flag_names(h, type_: str) -> list[str]:
+    """Names of the live items a flag-mechanism type keeps in the harness config: the
+    object keys under the pointer's `<name>` slot whose own flag is `true`. An entry with
+    no flag (disable would refuse: a key is never invented) or `false` by hand (enable
+    would refuse: no state entry) is not something this tool can toggle, so not listed."""
+    rel, pointer = h.flags[type_]
+    prefix = pointer[:pointer.index("<name>")] if "<name>" in pointer else pointer[:-1]
+    try:
+        node = json.loads((h.home / rel).read_text(encoding="utf-8").removeprefix("\ufeff"))
+    except (OSError, ValueError):
+        return []
+    for k in prefix:
+        node = node.get(k) if isinstance(node, dict) else None
+    if not isinstance(node, dict):
+        return []
+    return sorted(n for n, v in node.items()
+                  if isinstance(v, dict) and v.get("enabled") is True and _valid_name(n))
+
+
 def backup_tools(entry: dict) -> int | None:
     """Tool count of a parked MCP server, from its verbatim backup."""
     try:
@@ -209,8 +228,14 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
     harnesses is ONE item under its owner with the others in `shared_with`."""
     items: list[Item] = []
     seen: set[tuple[str, str, str]] = set()
+    # flag-disabled items stay in place (the config flag is off), so a live listing alone
+    # would call them enabled: the state entry is what says they are off.
+    flagged = {(e.get("harness"), e.get("type"), e.get("name"))
+               for e in state.get("disabled", {}).values()
+               if isinstance(e, dict) and e.get("mechanism") == "flag"}
 
     def add(h: str, t: str, n: str, enabled: bool, est: Estimate, shared=()) -> None:
+        enabled = enabled and (h, t, n) not in flagged
         if (h, t, n) not in seen:
             seen.add((h, t, n))
             items.append(Item(h, t, n, enabled, est[0] if enabled else 0,
@@ -229,6 +254,10 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                     for name in live_names(v.live, type_):
                         add(hname, type_, name, True,
                             file_estimate(type_, name, resolve_item(v.live, name)), shared)
+            elif type_ in h.flags:
+                for name in flag_names(h, type_):
+                    add(hname, type_, name, True, mcp_estimate(hname, None) if type_ == "mcp"
+                        else (0, None, "flag entry; size unknown"))
             elif type_ == "mcp":
                 counts = mcp_tool_counts(h)
                 for name in live_mcp(h.home, h.backend):
@@ -244,14 +273,16 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
 
     for e in state.get("disabled", {}).values():
         h, t, n = e.get("harness", "claude"), e.get("type"), e.get("name")
-        if not t or not n:
-            continue
+        if not all(isinstance(x, str) and x for x in (h, t, n)):
+            continue                      # hand-edited entry: doctor reports it
         if t == "mcp":
             est = mcp_estimate(h, backup_tools(e))
         elif t == "plugin":
             est = (0, None, "not in plugin list")
         else:
             parked = e.get("parked_at")
-            est = file_estimate(t, n, Path(parked) if parked else None)
-        add(h, t, n, False, est, e.get("shared_with") or ())
+            est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)
+        shared = e.get("shared_with")
+        add(h, t, n, False, est,
+            [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
     return items

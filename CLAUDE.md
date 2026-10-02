@@ -16,13 +16,16 @@ behave identically (same output, same exit code):
 | `migrate` | `--migrate` |
 | `install-shims` | `--install-shims` |
 | `disable`, `enable` | `--disable`, `--enable` |
+| `profile` | `--profile` |
+| `undo` | `--undo` |
+| `doctor` | `--doctor` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:
   if the first argument is `--<command>` or bare `help` / `version`, rewrite it
   to the canonical form. Do not add per-command aliases.
 - Applies to commands only. Option flags (`--json`, `--dry-run`, `--harness`,
-  `-v`) keep the `--` form: a bare `json` or `dry-run` would collide with a
+  `--project`, `--all`, `-v`) keep the `--` form: a bare `json` or `dry-run` would collide with a
   resource name such as `disable skill json`.
 - Adding a command means adding it to the table above and to the test in
   `tests/test_cli_surface.py` that runs every command in both spellings and

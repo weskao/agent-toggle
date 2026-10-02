@@ -10,7 +10,7 @@ import json
 import sys
 
 FAILED = ("error", "unsupported")      # row statuses that make the run a failure
-MARK = {"ok": "v", "planned": "~"}      # human marker per status; anything else is "x"
+MARK = {"ok": "v", "planned": "~", "skipped": "-"}   # human marker per status; else "x"
 
 
 class CliError(SystemExit):

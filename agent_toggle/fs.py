@@ -7,6 +7,8 @@ module constants.
 from __future__ import annotations
 
 import contextlib
+import importlib
+import json
 import os
 import shutil
 import subprocess
@@ -57,6 +59,39 @@ def claude_json() -> Path:
 
 def lock_file() -> Path:
     return state_dir() / "lock"
+
+
+def profiles_dir() -> Path:
+    return state_dir() / "profiles"
+
+
+def parked_dir() -> Path:
+    return state_dir() / "parked"
+
+
+def contained(path: Path, *roots: Path) -> bool:
+    """True if `path` sits inside one of `roots` (DESIGN s6.1 rows 1-2).
+
+    Refuses any `..` part. Only the PARENT is resolved: the item itself may be
+    a symlink and is never followed. A root inside our own state dir (parked,
+    backups) must not be reached through a symlink at all, since nothing
+    legitimate puts one there; harness homes may be symlinked (dotfile repos).
+    """
+    path = Path(path)
+    if ".." in path.parts:
+        return False
+    parent = path.parent.resolve()
+    sd = state_dir()
+    for root in map(Path, roots):
+        if not parent.is_relative_to(root.resolve()):
+            continue
+        if root.is_relative_to(sd):
+            chain = [sd, *(p for p in path.parent.parents if p.is_relative_to(sd)),
+                     path.parent]
+            if any(p.is_symlink() for p in chain):
+                continue
+        return True
+    return False
 
 
 # ------------------------------------------------- lock + private atomic write
@@ -171,6 +206,101 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+class WriteError(Exception):
+    """A checked_write was rolled back; the message names the file and why."""
+
+
+def _replace_bytes(path: Path, data: bytes, mode: int) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)                  # os.open's mode is umask-filtered
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def checked_write(path: Path, text: str, verify) -> str:
+    """Replace `path` with `text`, then re-read it and run verify(before, after).
+
+    Returns verify's note ("" when fully verified). On ANY exception the
+    previous bytes and mode are put back (a new file is removed) and
+    WriteError is raised. Bytes, not text mode, so line endings survive.
+    A symlinked config (dotfile repo) is written through, keeping the link.
+    """
+    path = Path(os.path.realpath(path))
+    try:
+        old = path.read_bytes()
+        old_mode = path.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        old, old_mode = None, 0o600
+    try:
+        _replace_bytes(path, text.encode("utf-8"), old_mode)
+        after = path.read_bytes().decode("utf-8")
+        return verify("" if old is None else old.decode("utf-8", errors="replace"), after)
+    except BaseException as e:           # Ctrl-C mid-verify must not leave the write
+        try:
+            if _untouched(path, old, old_mode):
+                pass                     # failed before os.replace: nothing to put back
+            elif old is None:
+                path.unlink(missing_ok=True)
+            else:
+                _replace_bytes(path, old, old_mode)
+        except OSError as r:
+            raise WriteError(f"{path}: write failed ({e}) AND restore failed ({r})") from e
+        if not isinstance(e, Exception):
+            raise
+        raise WriteError(f"{path}: write rolled back ({type(e).__name__}: {e})") from e
+
+
+def _untouched(path: Path, old: bytes | None, old_mode: int) -> bool:
+    """True if `path` still holds exactly its pre-write bytes and mode (or is still absent)."""
+    try:
+        return path.read_bytes() == old and path.stat().st_mode & 0o7777 == old_mode
+    except FileNotFoundError:
+        return old is None
+    except OSError:
+        return False
+
+
+def json_verify(expected: str | None = None):
+    """verify(): the result parses as JSON and, if given, equals `expected` exactly."""
+    def verify(before: str, after: str) -> str:
+        json.loads(after)
+        if expected is not None and after != expected:
+            raise ValueError("result differs from the expected edit")
+        return ""
+    return verify
+
+
+def _tomllib():
+    """The tomllib module, or None on Python 3.10 (no dependency may be added)."""
+    try:
+        return importlib.import_module("tomllib")
+    except ImportError:
+        return None
+
+
+def toml_verify(expected: str | None = None):
+    """verify(): the result parses (when tomllib exists) and, if given, equals
+    `expected` -- the before text with the one [mcp_servers.<name>] block
+    removed/appended. Note is `unverified (no tomllib)` only when neither ran."""
+    def verify(before: str, after: str) -> str:
+        toml = _tomllib()
+        if toml is not None:
+            toml.loads(after)                # TOMLDecodeError is a ValueError
+        if expected is not None and after != expected:
+            raise ValueError("result differs from the expected edit")
+        return "" if toml is not None or expected is not None else "unverified (no tomllib)"
+    return verify
 
 
 def tighten(path: Path) -> None:

@@ -30,6 +30,32 @@ adheres to [Semantic Versioning](https://semver.org/).
   Python 3.10, 3.13) plus `ruff`.
 - Open-source docs: `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md`, this
   changelog, GitHub issue templates, and `docs/DESIGN.md`.
+- `profile save|apply|diff|list`: portable snapshots of which items are live
+  (`{harness, type, name, live}` only, no paths or secrets), stored under
+  `~/.agent-toggle/profiles/` or any `.json` path. `apply` toggles only the items
+  the profile mentions and skips unknown ones; `--dry-run` / `diff` plan without
+  writing.
+- `undo`: reverses the last logged batch (itself a batch, so undo of undo works);
+  `enable --all [--harness H] [--project <dir>]` restores everything.
+- `doctor [--harness H] [--json]`: read-only drift and state check
+  (`ok` / `absent` / `note` / `unverified` / `warn` / `error`; exit `1` only on `error`).
+- `--project <dir>`: project scope for a repo's `.claude/` dir types and its own
+  `.mcp.json` MCP servers (strict JSON). Dir items park under
+  `~/.agent-toggle/parked/<sha8>` and `.mcp.json` entries are backed up under
+  `mcp-backups/`, never inside the project, with a git
+  tracked-deletion warning and the restore command. Claude layout only.
+- Flag mechanism: openclaw skills/plugins (`skills.entries.<name>.enabled`,
+  `plugins.entries.<name>.enabled`) and opencode mcp (`mcp.<name>.enabled`), a
+  one-token boolean edit that leaves every other byte alone. Both shapes are
+  assumed from the design survey and not verified on a real install; JSONC /
+  JSON5 files are refused.
+- Post-write verification with rollback of bytes and mode for JSON and TOML config
+  edits; an invalid codex `config.toml` fails the edit instead of being rewritten.
+- Tampered-state refusal: `enable` refuses entries whose paths leave their
+  harness home, project or `~/.agent-toggle` (`refused: <reason>`).
+- Log rows carry `harness`, `batch`, `project` and `scope`; `agent_toggle/ops.py`
+  is the single apply path for `disable`, `enable`, the picker, `profile apply`,
+  `undo` and `enable --all`.
 
 ### Changed
 
@@ -40,9 +66,37 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Install flow is `uv tool install git+<repo-url>` or `pip install -e .`
   instead of a user-specific script path.
 - MCP backups are written with mode `0600`.
+- `enable` refuses state entries whose `origin`, `parked_at`, backup or flag
+  file is outside its root, instead of replaying them.
+- `log.jsonl` rows now follow one schema: `{ts, harness, type, name, action,
+  result, batch, project, scope, detail}`; rows written by older versions have
+  no `batch` and cannot be undone.
+- `enable` takes `--all` in place of `<type> <name>...`.
 
 ### Fixed
 
+- `doctor`: a missing MCP config file, missing `mcpServers` / flag-parent key or missing
+  `config.toml` is now `absent` (informational, exit 0); only a present but unparseable
+  or unsupported file is `error: layout changed`. A recorded flag entry whose file or key
+  vanished is still an error. An empty leftover `parked/<sha8>` dir after a project
+  `enable` no longer warns.
+- `cost`, the picker and `profile save` show an openclaw skill that was disabled by its
+  flag as disabled, and list live openclaw plugins and opencode mcp servers that carry a
+  boolean `enabled` (they were listed only while parked, so a profile could not disable
+  them).
+- Profiles record their scope: a `--project` profile applied without `--project` (or the
+  reverse) exits 2 instead of toggling the user's items. `profile save` skips, with a
+  warning, names `apply` would refuse (such as an MCP server called `team/search`).
+- codex / grok `config.toml` edits are verified against the original text (not a copy of
+  the new text), refuse to overwrite a file edited between read and write, keep CRLF line
+  endings byte for byte, and a corrupt or non-UTF-8 MCP backup fails that one row instead
+  of aborting the batch.
+- `fs.checked_write` no longer reports a failed restore when the write failed before
+  touching the file.
+- A hand-edited non-object state entry is a named error instead of a `TypeError`;
+  `list`, `status`, `cost` and `profile save` tolerate bad field types.
+- `list --project` and `enable --all --project` exit 4 for a missing project dir, like
+  `disable --project`.
 - Names with `..`, an absolute path, an empty part or a leading `-` are refused
   (exit 2), and an item whose parent resolves outside the harness dir is never
   touched, so `disable skill ../../x` can no longer move files outside it.

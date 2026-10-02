@@ -14,7 +14,8 @@ TODAY = {
 } | {
     ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
 } | {("opencode", "skill"), ("opencode", "command"),
-     ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent")}
+     ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent"),
+     ("openclaw", "plugin"), ("opencode", "mcp")}
 
 
 class HarnessTableTest(SandboxCase):
@@ -50,6 +51,20 @@ class HarnessTableTest(SandboxCase):
         self.assertEqual(t["codex"].backend, "toml")
         self.assertEqual(t["grok"].mcp.file, self.tmp / ".grok" / "config.toml")
         self.assertIsNone(t["openclaw"].mcp)
+
+    def test_flag_pairs_are_declared_and_editable(self) -> None:
+        for n, h in build(self.tmp).items():
+            for t, (rel, pointer) in h.flags.items():
+                self.assertIn(rel, h.editable, f"{n}:{t} flag file is not editable")
+                self.assertIn("<name>", pointer)
+            for t, mech in h.mechanisms.items():
+                if mech == "flag":
+                    self.assertIn(t, h.flags, f"{n}:{t} claims flag but declares none")
+        t = build(self.tmp)
+        self.assertEqual(t["opencode"].mechanisms["mcp"], "flag")
+        self.assertEqual(t["openclaw"].mechanisms["plugin"], "flag")
+        self.assertEqual(t["openclaw"].mechanisms["skill"], "move")   # flag only when an entry exists
+        self.assertEqual(t["opencode"].flags["mcp"], ("opencode.json", ("mcp", "<name>", "enabled")))
 
     def test_shim_lists_every_type_and_harness(self) -> None:
         shim = (Path(hz.__file__).parent / "shims" / "claude.md.tmpl").read_text(encoding="utf-8")

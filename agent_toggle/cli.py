@@ -16,9 +16,15 @@ Usage:
     agent_toggle.py cost [--type T]            # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
-    agent_toggle.py list [<type>]              # what is currently disabled
+    agent_toggle.py enable --all [--harness H] [--dry-run]   # restore everything
+    agent_toggle.py undo [--dry-run]           # reverse the last logged batch
+    agent_toggle.py disable|enable <type> <name>... --project <dir>   # a repo's .claude/ + .mcp.json
+    agent_toggle.py enable --all --project <dir> | profile save|apply|diff ... --project <dir>
+    agent_toggle.py list [<type>] [--project D] # what is currently disabled
     agent_toggle.py status                     # health check
+    agent_toggle.py doctor [--harness H]       # read-only drift + state check; exit 1 on problems
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
+    agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
 
     <type> = skill | agent | command | rule | plugin | mcp
@@ -35,32 +41,55 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, fs, store
+from . import __version__, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
-from .harnesses import TYPES, harness_of, harnesses
-from .mechanisms import dir_view, toggle_dir_type, toggle_mcp, toggle_plugin, validate_name
+from .harnesses import TYPES, harness_of, harnesses, project_view
+from .mechanisms import dir_view, validate_name
 from .output import CliError, Result, die
 from .store import load_state, save_state
 
 
+def project_of(key: str, entry: dict) -> str | None:
+    """The --project dir of a project-scope entry (`harness@<sha8>:...`), else None.
+    (A claude local-scope mcp entry's `project` is its cwd, not a --project scope.)"""
+    try:
+        scoped = store.parse_key(key)[1]
+    except ValueError:
+        return None
+    return str(entry.get("project")) if scoped else None
+
+
+def _list_of(v: dict, key: str) -> list:
+    """A state entry's list field; a hand-edited non-list counts as empty."""
+    x = v.get(key)
+    return x if isinstance(x, list) else []
+
+
 def cmd_list(type_filter: str | None, state: dict, out: Result,
-             harness: str | None = None) -> None:
-    items = [v for v in state["disabled"].values()
-             if (not type_filter or v["type"] == type_filter)
-             and (not harness or harness in (v.get("harness"), *v.get("shared_with", ())))]
+             harness: str | None = None, project: str | None = None) -> None:
+    if project is not None:                  # one project's entries only
+        project = str(project_view(project).project)       # exit 4 like disable --project
+        state = store.scope_state(state, project)
+    items = [(project_of(k, v), v) for k, v in state["disabled"].items()
+             if (not type_filter or v.get("type") == type_filter)
+             and (not harness or harness in (v.get("harness"), *_list_of(v, "shared_with")))]
     if not items:
         out.say("nothing disabled")
         return
-    for v in sorted(items, key=lambda x: (x.get("harness", ""), x["type"], x["name"])):
-        extra = f"  +{len(v['companions'])} files" if v.get("companions") else ""
-        extra += f"  shared with {', '.join(v['shared_with'])}" if v.get("shared_with") else ""
-        out.say(f"  {v.get('harness', '?'):<9} {v['type']:<8} {v['name']:<36} "
-                f"since {v['at'][:10]}{extra}")
-        out.row(v.get("harness"), v["type"], v["name"], "list", "disabled",
-                f"since {v['at'][:10]}", show=False, at=v["at"],
-                mechanism=v.get("mechanism"), companions=len(v.get("companions") or []),
-                shared_with=v.get("shared_with") or [])
+    for proj, v in sorted(items, key=lambda x: (str(x[1].get("harness", "")), str(x[1].get("type")),
+                                                 str(x[1].get("name")), x[0] or "")):
+        shared = ", ".join(map(str, _list_of(v, "shared_with")))
+        extra = f"  +{len(_list_of(v, 'companions'))} files" if _list_of(v, "companions") else ""
+        extra += f"  shared with {shared}" if shared else ""
+        extra += f"  project {proj}" if proj else ""
+        at = str(v.get("at", "?"))
+        out.say(f"  {v.get('harness', '?')!s:<9} {v.get('type')!s:<8} {v.get('name')!s:<36} "
+                f"since {at[:10]}{extra}")
+        out.row(v.get("harness"), v.get("type"), v.get("name"), "list", "disabled",
+                f"since {at[:10]}", show=False, at=v.get("at"),
+                mechanism=v.get("mechanism"), companions=len(_list_of(v, "companions")),
+                shared_with=_list_of(v, "shared_with"), **({"project": proj} if proj else {}))
     out.say(f"\n{len(items)} disabled")
 
 
@@ -149,6 +178,13 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                        "live_twins": twins, "shared_with": sorted(shared)}
         out.row(hname, None, None, "status", "installed", "", show=False,
                 home=str(home), types=bits, mcp=backend, parked=info)
+    projects: dict[tuple, int] = {}
+    for k, e in state["disabled"].items():
+        if (proj := project_of(k, e)) is not None:
+            projects[e.get("harness"), proj] = projects.get((e.get("harness"), proj), 0) + 1
+    for (hname, proj), n in sorted(projects.items(), key=str):
+        out.say(f"project {proj}  ({n} parked under {fs.parked_dir()})")
+        out.row(hname, None, None, "status", "project", "", show=False, project=proj, parked=n)
 
 
 def parked_drift(items: list[Path], parked: Path, live: Path,
@@ -163,7 +199,7 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
 def cmd_cost(state: dict, out: Result, harness: str | None = None,
              type_: str | None = None) -> None:
     """Estimated startup tokens per item, biggest first. Read-only."""
-    items = [i for i in cost.inventory(state, harnesses(), out.warn)
+    items = [i for i in cost.inventory(store.scope_state(state), harnesses(), out.warn)
              if (not harness or harness in (i.harness, *i.shared_with))
              and (not type_ or i.type == type_)]
     items.sort(key=lambda i: (-i.tokens, -i.would_save, i.harness, i.type, i.name))
@@ -184,59 +220,45 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
             total_tokens=live, saved_tokens=saved, formula=cost.FORMULA)
 
 
-def apply_changes(changes: list, state: dict, out: Result | None = None,
-                  dry_run: bool = False) -> int:
-    """Run the staged picker changes, batched per harness/type/direction."""
-    out = out or Result()
-    batches: dict[tuple[str, str, str], list[str]] = {}
-    for row in changes:
-        action = "enable" if row.staged else "disable"
-        batches.setdefault((row.harness, row.type, action), []).append(row.name)
-
-    table = harnesses()
-    fails = 0
-    for (harness, type_, action), names in sorted(batches.items()):
-        h = table[harness]
-        out.say(f"\n{action} {type_} on {harness}:")
-        if type_ in h.dirs:
-            fails += toggle_dir_type(action, type_, names, state, harness, h.home, out, dry_run)
-        elif type_ == "plugin":
-            fails += toggle_plugin(action, names, state, harness, out, dry_run)
-        elif type_ == "mcp":
-            fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out, dry_run)
-    return fails
-
-
 def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
     try:
         from .ui import picker as ui
     except ImportError as e:                 # no curses build (rare)
         die(f"interactive UI unavailable: {e}")
-    changes = ui.pick(state, harnesses(), plugins=not dry_run)
+    changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run)
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
     if not changes:
         out.say("no changes")
         return
-    if dry_run:                     # plan only: no lock, no state write, no log
-        apply_changes(changes, load_state(write_back=False), out, True)
+    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name)
+                   for r in changes), key=lambda op: op[:3])
+    # the picker's state copy may be stale: apply_plan re-reads it under the lock
+    ops.apply_plan(plan, out, dry_run, batch=store.BATCH, headers=True)
+    if dry_run:
         out.say("\ndry run -- nothing changed")
         return
-    with fs.lock():
-        state = load_state()          # re-read: the picker's copy may be stale
-        try:
-            apply_changes(changes, state, out)
-        finally:
-            save_state(state)         # keep what already moved even if a later item crashed
     if any(r.type in ("mcp", "plugin") for r in changes):
         out.say("\nMCP/plugin changed -- open a NEW session for it to take effect.")
 
 
 def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     action, type_, names, harness = args.command, args.type, args.names, args.harness
+    if not type_ or not names:
+        die(f"{action} needs <type> <name>... (or `enable --all`)", 2)
     for name in names:
         validate_name(name)
+    if args.project is not None:
+        # project scope: claude layout dir types only (DESIGN s5.5)
+        if harness != "claude":
+            die(f"--project supports only the claude layout, not {harness}", 4)
+        h = project_view(args.project)
+        if type_ not in h.types:
+            die(f"--project supports {', '.join(h.types)} (not {type_})", 4)
+        ops.apply_plan([ops.Op(harness, type_, action, n, str(h.project)) for n in names],
+                       out, args.dry_run, batch=store.BATCH)
+        return
     h = harness_of(harness)
     home, supported = h.home, h.types
     if not home.is_dir():
@@ -244,23 +266,8 @@ def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     if type_ not in supported:
         die(f"{harness} has no {type_} support (it has: {', '.join(supported)})", 4)
 
-    def run(state: dict) -> None:
-        if type_ in h.dirs:
-            toggle_dir_type(action, type_, names, state, harness, home, out, args.dry_run)
-        elif type_ == "plugin":
-            toggle_plugin(action, names, state, harness, out, args.dry_run)
-        else:
-            toggle_mcp(action, names, state, harness, home, h.backend, out, args.dry_run)
-
-    if args.dry_run:                # no lock, no state write, no log: plan only
-        run(load_state(write_back=False))
-        return
-    with fs.lock():
-        state = load_state()
-        try:
-            run(state)
-        finally:
-            save_state(state)       # keep what already moved even if a later item crashed
+    ops.apply_plan([ops.Op(harness, type_, action, n) for n in names], out, args.dry_run,
+                   batch=store.BATCH)
 
 
 def cmd_migrate(out: Result) -> None:
@@ -334,7 +341,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims")
+            "install-shims", "profile", "undo", "doctor")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -366,6 +373,10 @@ class _Parser(argparse.ArgumentParser):
         die(message, 2)
 
 
+PROJECT_HELP = ("project scope: <dir>/.claude (claude dir types; `.` = cwd) and <dir>/.mcp.json "
+                "(mcp); parks under ~/.agent-toggle/parked, never inside the project")
+
+
 def build_parser() -> argparse.ArgumentParser:
     # SUPPRESS: a flag given before the subcommand must survive the subparser's
     # own defaults, so neither level sets a default; main() fills them in.
@@ -390,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", parents=[common], help="health check")
     ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
     ls.add_argument("type", nargs="?", choices=TYPES)
+    ls.add_argument("--project", metavar="dir", help="only this project's entries")
     cp = sub.add_parser("cost", parents=[common],
                         help="estimated startup tokens per item, biggest first")
     cp.add_argument("--type", choices=TYPES, help="only this resource type")
@@ -397,12 +409,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
     sp.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
+    pp = sub.add_parser("profile", parents=[common],
+                        help="save / apply / diff / list named sets of live items")
+    pp.add_argument("action", help="save | apply | diff | list")
+    pp.add_argument("target", nargs="?", metavar="name|file")
+    pp.add_argument("--out", metavar="file", help="save: write the profile here instead")
+    pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
+    pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
+    sub.add_parser("doctor", parents=[common],
+                   help="read-only check of harness layouts and state against disk")
+    up2 = sub.add_parser("undo", parents=[common], help="reverse the last logged batch")
+    up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
         sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
-        sp.add_argument("type", choices=TYPES)
-        sp.add_argument("names", nargs="+", metavar="name")
+        sp.add_argument("type", choices=TYPES, nargs="?" if name == "enable" else None)
+        sp.add_argument("names", nargs="*" if name == "enable" else "+", metavar="name")
         sp.add_argument("--dry-run", action="store_true",
                         help="show the plan; change nothing")
+        sp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
+        if name == "enable":
+            sp.add_argument("--all", action="store_true",
+                            help="restore every disabled item (optionally --harness H)")
     return p
 
 
@@ -425,11 +452,21 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "status":
             cmd_status(load_state(write_back=False), out, args.harness)
         elif cmd == "list":
-            cmd_list(args.type, load_state(write_back=False), out, args.harness)
+            cmd_list(args.type, load_state(write_back=False), out, args.harness, args.project)
         elif cmd == "migrate":
             cmd_migrate(out)
         elif cmd == "install-shims":
             cmd_install_shims(args, out)
+        elif cmd == "profile":
+            profiles.cmd_profile(args, out)
+        elif cmd == "doctor":
+            doctor.cmd_doctor(args.harness, out)
+        elif cmd == "undo":
+            undo.cmd_undo(args.dry_run, args.harness, out)
+        elif cmd == "enable" and args.all:
+            if args.type or args.names:
+                die("enable --all takes no <type> or <name>", 2)
+            undo.cmd_enable_all(args.harness, args.dry_run, out, args.project)
         else:
             args.harness = args.harness or "claude"
             cmd_toggle(args, out)

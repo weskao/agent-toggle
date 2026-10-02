@@ -1,0 +1,9 @@
+{
+  "meta" : { "note": "synthetic fixture — café ✓", "enabled":false },
+  "skills": {
+    "entries":   {
+      "demo-skill" :{ "enabled" :  true, "note": "enabled: true" }
+    }
+  },
+	"plugins": {"allow": ["demo-plugin"], "entries": {"demo-plugin": {"enabled":true,"config": {"enabled": false}}}}
+}

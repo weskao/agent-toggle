@@ -33,9 +33,11 @@ class Harness:
     dirs: Mapping[str, tuple[str, ...]]      # type -> candidate subdirs
     mechanisms: Mapping[str, str]            # type -> move|flag|remove_backup|native_cli
     mcp: McpSpec | None = None
-    flags: Mapping[str, tuple] = field(default_factory=dict)   # type -> (file, pointer)
+    # type -> (file relative to home, pointer tuple; "<name>" is replaced by the item name)
+    flags: Mapping[str, tuple] = field(default_factory=dict)
     editable: frozenset[str] = frozenset()   # files the tool may write
     aliases_from: tuple[str, ...] = ()
+    project: Path | None = None              # set only on a --project view (resolved dir)
 
     def __post_init__(self) -> None:
         # frozen only stops rebinding; wrap the dicts so they cannot be mutated either
@@ -108,17 +110,60 @@ def build(home: Path) -> dict[str, Harness]:
         # Assumption (DESIGN s11 q2): with no skills.paths, `skills/` is its own dir.
         Harness("opencode", oc,
                 dirs={"skill": opencode_skill_dirs(home, oc), "command": ("command",)},
-                mechanisms={"skill": "move", "command": "move"},
+                # ASSUMED shape (DESIGN s4/s11, not verified on a real install):
+                # `mcp.<name>.enabled` in opencode.json, strict JSON only.
+                mechanisms={"skill": "move", "command": "move", "mcp": "flag"},
+                flags={"mcp": ("opencode.json", ("mcp", "<name>", "enabled"))},
+                editable=frozenset({"opencode.json"}),
                 aliases_from=("skills.paths",)),
+        # ASSUMED shapes (DESIGN s4/s11, not verified on a real install):
+        # `skills.entries.<name>.enabled` and `plugins.entries.<name>.enabled` in
+        # openclaw.json. A skill uses the flag only when its entry exists, else
+        # the dir move; a plugin is flag-only.
         Harness("openclaw", home / ".openclaw",
                 dirs={"skill": ("skills",), "agent": ("agents",)},
-                mechanisms={"skill": "move", "agent": "move"}),
+                mechanisms={"skill": "move", "agent": "move", "plugin": "flag"},
+                flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
+                       "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
+                editable=frozenset({"openclaw.json"})),
     )}
 
 
 def harnesses() -> dict[str, Harness]:
     """The table for the CURRENT home."""
     return build(fs.home())
+
+
+PROJECT_TYPES = ("skill", "agent", "command", "rule")
+
+
+def project_view(project: Path | str) -> Harness:
+    """The claude-shaped row for `--project <dir>` (DESIGN s5.5): home=<dir>/.claude,
+    the dir types plus `mcp` (the repo's own <dir>/.mcp.json, strict JSON, edited
+    directly). Refuses (CliError) a dir that is missing (4), has neither .claude
+    nor .mcp.json (4),
+    is a root / $HOME / an ancestor of $HOME / inside our state dir or a user harness
+    home, or whose .claude resolves outside it (2):
+    a project view must never address user-scope files."""
+    p = Path(project)
+    if not p.is_dir():
+        die(f"--project {project}: no such directory", 4)
+    p = p.resolve()
+    if p == Path(p.anchor) or fs.home().resolve().is_relative_to(p):
+        die(f"--project {p} is a root, $HOME or holds $HOME -- drop --project for user scope", 2)
+    for root in (fs.state_dir(), *(h.home for h in harnesses().values())):
+        if p.is_relative_to(root.resolve()):     # user-scope files under a project key
+            die(f"--project {p} is inside {root} -- not a project", 2)
+    claude = p / ".claude"
+    if not claude.is_dir() and not (p / ".mcp.json").is_file():
+        die(f"--project {p} has no .claude directory or .mcp.json", 4)
+    if os.path.lexists(claude) and not claude.resolve().is_relative_to(p):
+        die(f"--project {p}: .claude resolves outside the project ({claude.resolve()})", 2)
+    return Harness("claude", claude,
+                   dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",),
+                         "rule": ("rules",)},
+                   mechanisms={**dict.fromkeys(PROJECT_TYPES, "move"), "mcp": "remove_backup"},
+                   mcp=McpSpec("project-json", p / ".mcp.json", ("mcpServers",)), project=p)
 
 
 def harness_of(name: str) -> Harness:
