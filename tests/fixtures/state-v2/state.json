@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "disabled": {
+    "claude:skill:demo-skill": {
+      "harness": "claude",
+      "type": "skill",
+      "name": "demo-skill",
+      "parked_at": "@ROOT@/.claude/skills-disabled/demo-skill",
+      "origin": "@ROOT@/.claude/skills/demo-skill",
+      "companions": [],
+      "at": "2026-09-19T00:00:00+0000"
+    },
+    "claude:mcp:example-mcp": {
+      "harness": "claude",
+      "type": "mcp",
+      "name": "example-mcp",
+      "backend": "claude-json",
+      "backup": "@ROOT@/.agent-toggle/mcp-backups/claude__example-mcp.json",
+      "scope": "user",
+      "project": null,
+      "at": "2026-09-19T00:00:00+0000"
+    },
+    "claude:plugin:demo-plugin": {
+      "harness": "claude",
+      "type": "plugin",
+      "name": "demo-plugin",
+      "native": true,
+      "at": "2026-09-19T00:00:00+0000"
+    }
+  }
+}

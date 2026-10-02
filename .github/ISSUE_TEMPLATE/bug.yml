@@ -1,0 +1,50 @@
+name: Bug report
+description: Something did not toggle, restore, or report correctly
+labels: [bug]
+body:
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options:
+        - claude
+        - codex
+        - grok
+        - openclaw
+        - opencode
+        - copilot
+        - vibe
+        - devin
+        - agy
+        - other
+    validations:
+      required: true
+  - type: input
+    id: harness_version
+    attributes:
+      label: Harness version
+      description: Output of the harness's own `--version`.
+      placeholder: "1.2.3"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15, Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: status_json
+    attributes:
+      label: "`agent-toggle status --json` output"
+      description: Redact anything you do not want public. Never paste MCP backup contents.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
