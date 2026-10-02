@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import cost, fs, ops, store
 from .harnesses import TYPES, harnesses, project_view
-from .mechanisms import validate_name
+from .mechanisms import _valid_name, validate_name
 from .output import Result, die
 
 VERSION = 1
@@ -60,8 +60,10 @@ def _load(arg: str) -> dict:
 def _validate(doc) -> dict:
     """Exit 2 on anything but a well-formed v1 profile (it may come from anywhere)."""
     table = harnesses()
-    if not isinstance(doc, dict) or set(doc) - {"version", "saved_at", "items"}:
+    if not isinstance(doc, dict) or set(doc) - {"version", "saved_at", "items", "scope"}:
         die("profile must be an object with version, saved_at, items", 2)
+    if doc.get("scope", "user") not in ("user", "project"):
+        die(f"unknown profile scope {doc['scope']!r} (expected user or project)", 2)
     v = doc.get("version")
     if type(v) is not int or v != VERSION:
         die(f"unsupported profile version {v!r} (expected {VERSION})", 2)
@@ -122,10 +124,16 @@ def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result,
         if path.is_dir() or not path.parent.is_dir():
             die(f"cannot write {path}: not a file in an existing directory", 2)
     inv = _inventory(out, plugins=not only or only == "claude", project=project)
-    items = [{"harness": h, "type": t, "name": n, "live": live}
-             for (h, t, n), live in sorted(inv.items()) if not only or h == only]
+    items = []
+    for (h, t, n), live in sorted(inv.items()):
+        if only and h != only:
+            continue
+        if _valid_name(n):
+            items.append({"harness": h, "type": t, "name": n, "live": live})
+        else:                    # apply/diff would refuse the whole profile over this name
+            out.warn(f"skipped {h} {t} {n!r}: not a name agent-toggle can toggle")
     doc = {"version": VERSION, "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-           "items": items}
+           "items": items, **({"scope": "project"} if project else {})}
     if not out_file:
         fs.private_dir(fs.profiles_dir())
     fs.atomic_write(path, json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
@@ -137,6 +145,9 @@ def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result,
 def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result,
               project: Path | None = None) -> None:
     doc = _load(arg)
+    if (doc.get("scope", "user") == "project") != (project is not None):
+        die(f"profile {arg!r} is {doc.get('scope', 'user')}-scope: "
+            + ("pass --project <dir>" if project is None else "drop --project"), 2)
     inv = _inventory(out, plugins=not dry_run and (not only or only == "claude"),  # dry run: no CLI
                      project=project)
     plan, same, skipped = [], 0, 0

@@ -92,6 +92,98 @@ class RoundTripTest(ProfileCase):
         self.assertEqual({i["harness"] for i in doc["items"]}, {"codex"})
 
 
+class FlagProfileTest(ProfileCase):
+    """openclaw skills and opencode mcp are flag items: live in the dir/config, disabled by a flag."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for h in ("openclaw", "opencode"):
+            shutil.copytree(FIXTURES / h, self.tmp, dirs_exist_ok=True)
+
+    def saved(self, name: str) -> list[dict]:
+        return json.loads((fs.profiles_dir() / f"{name}.json").read_text(encoding="utf-8"))["items"]
+
+    def test_flag_disabled_skill_round_trips_through_a_profile(self) -> None:
+        before = file_bytes(self.tmp)
+        self.assertEqual(self.run_cli("profile", "save", "all")[0], 0)
+        self.assertIn(self.item("openclaw", "skill", "demo-skill"), self.saved("all"))
+        self.assertEqual(self.run_cli("disable", "skill", "demo-skill", "--harness", "openclaw")[0], 0)
+        self.assertEqual(self.run_cli("profile", "save", "off")[0], 0)
+        self.assertIn(self.item("openclaw", "skill", "demo-skill", False), self.saved("off"))
+        rc, env = self.run_json("profile", "apply", "all")
+        self.assertEqual(rc, 0, env)
+        self.assertEqual(file_bytes(self.tmp), before)
+
+    def test_live_flag_items_are_saved_and_applied_without_skips(self) -> None:
+        self.assertEqual(self.run_cli("profile", "save", "all")[0], 0)
+        for it in (self.item("opencode", "mcp", "example-mcp"),
+                   self.item("openclaw", "plugin", "demo-plugin")):
+            self.assertIn(it, self.saved("all"))
+        before = file_bytes(self.tmp)
+        self.assertEqual(self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")[0], 0)
+        rc, env = self.run_json("profile", "apply", "all")
+        self.assertEqual(rc, 0, env)
+        self.assertNotIn("skipped", {r["status"] for r in env["results"]})
+        self.assertEqual(file_bytes(self.tmp), before)
+
+    def test_flag_item_profiled_off_is_not_reported_missing(self) -> None:
+        self.assertEqual(self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")[0], 0)
+        self.assertEqual(self.run_cli("profile", "save", "off")[0], 0)
+        self.assertIn(self.item("opencode", "mcp", "example-mcp", False), self.saved("off"))
+        rc, out, _ = self.run_cli("profile", "apply", "off")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("not on this machine", out)
+        self.assertIn("already as profiled", out)
+
+
+class ScopeTest(ProfileCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.proj = self.tmp / "work" / "app"
+        (self.proj / ".claude" / "skills" / "proj-skill").mkdir(parents=True)
+        (self.proj / ".claude" / "skills" / "proj-skill" / "SKILL.md").write_text("x", encoding="utf-8")
+        self.write("skills/proj-skill/SKILL.md")           # same name in user scope
+
+    def test_project_profile_records_its_scope(self) -> None:
+        self.assertEqual(self.run_cli("profile", "save", "p", "--project", str(self.proj))[0], 0)
+        doc = json.loads((fs.profiles_dir() / "p.json").read_text(encoding="utf-8"))
+        self.assertEqual(doc["scope"], "project")
+        self.assertEqual(self.run_cli("profile", "save", "u")[0], 0)
+        self.assertNotIn("scope", json.loads((fs.profiles_dir() / "u.json").read_text(encoding="utf-8")))
+
+    def test_project_profile_never_applies_to_user_scope(self) -> None:
+        self.run_cli("profile", "save", "p", "--project", str(self.proj))
+        self.run_cli("disable", "skill", "proj-skill", "--project", str(self.proj))
+        before = snapshot(self.tmp)
+        for verb in ("apply", "diff"):
+            rc, env = self.run_json("profile", verb, "p")
+            self.assertEqual(rc, 2, env)
+            self.assertIn("--project", json.dumps(env))
+        self.assertEqual(snapshot(self.tmp), before)
+        self.assertTrue((self.home / "skills" / "proj-skill").is_dir())      # user item untouched
+
+    def test_user_profile_never_applies_to_a_project(self) -> None:
+        self.run_cli("profile", "save", "u")
+        self.assertEqual(self.run_cli("profile", "apply", "u", "--project", str(self.proj))[0], 2)
+
+    def test_scope_key_must_be_user_or_project(self) -> None:
+        p = self.profile([self.item("claude", "skill", "demo-skill")], scope="elsewhere")
+        self.assertEqual(self.run_cli("profile", "apply", str(p))[0], 2)
+
+
+class SaveFilterTest(ProfileCase):
+    def test_names_apply_would_refuse_are_skipped_on_save_with_a_warning(self) -> None:
+        self.claude_json({"mcpServers": {"team/search": {"command": "x"}, "ok-mcp": {"command": "y"}}})
+        rc, env = self.run_json("profile", "save", "work")
+        self.assertEqual(rc, 0, env)
+        self.assertTrue(any("team/search" in w for w in env["warnings"]), env["warnings"])
+        doc = json.loads((fs.profiles_dir() / "work.json").read_text(encoding="utf-8"))
+        self.assertEqual([i["name"] for i in doc["items"] if i["type"] == "mcp"
+                          and i["harness"] == "claude"], ["ok-mcp"])
+        self.assertEqual(self.run_cli("profile", "apply", "work")[0], 0)
+        self.assertEqual(self.run_cli("profile", "diff", "work")[0], 0)
+
+
 class SemanticsTest(ProfileCase):
     def test_unknown_item_is_skipped_not_failed(self) -> None:
         p = self.profile([self.item("claude", "skill", "ghost-skill"),
