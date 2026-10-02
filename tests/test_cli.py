@@ -38,7 +38,7 @@ class StatusTest(SandboxCase):
     def test_status_script_exits_zero_with_temp_home(self) -> None:
         # HOME / USERPROFILE already point at the sandbox and are inherited.
         p = subprocess.run([sys.executable, str(REPO / "agent_toggle.py"), "status"],
-                           capture_output=True, text=True, cwd=self.tmp, timeout=60)
+                           capture_output=True, text=True, cwd=self.tmp, timeout=60, encoding="utf-8")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn(str(fs.state_file()), p.stdout)
 

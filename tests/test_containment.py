@@ -15,7 +15,7 @@ class NameValidationTest(SandboxCase):
         # a victim directory outside the harness, reachable via ../
         self.victim = self.tmp / "victim"
         (self.victim / "SKILL.md").parent.mkdir()
-        (self.victim / "SKILL.md").write_text("not ours\n")
+        (self.victim / "SKILL.md").write_text("not ours\n", encoding="utf-8")
 
     def assert_refused(self, *argv: str) -> None:
         self.assertEqual(cli.main(list(argv)), 2, argv)
@@ -58,7 +58,7 @@ class NameValidationTest(SandboxCase):
     def test_ordinary_and_nested_names_still_work(self) -> None:
         (self.home / "skills" / "demo-skill").mkdir()
         (self.home / "commands" / "demo").mkdir()
-        (self.home / "commands" / "demo" / "batch.md").write_text("x\n")
+        (self.home / "commands" / "demo" / "batch.md").write_text("x\n", encoding="utf-8")
         self.assertEqual(cli.main(["disable", "skill", "demo-skill"]), 0)
         self.assertEqual(cli.main(["disable", "command", "demo:batch"]), 0)
 
@@ -68,7 +68,7 @@ class SymlinkItemTest(SandboxCase):
     def test_symlinked_item_is_moved_as_a_link_not_followed(self) -> None:
         target = self.tmp / "elsewhere" / "linked-skill"
         target.mkdir(parents=True)
-        (target / "SKILL.md").write_text("x\n")
+        (target / "SKILL.md").write_text("x\n", encoding="utf-8")
         (self.home / "skills" / "linked-skill").symlink_to(target)
         self.assertEqual(cli.main(["disable", "skill", "linked-skill"]), 0)
         parked = self.home / "skills-disabled" / "linked-skill"

@@ -85,13 +85,13 @@ class ConformanceTest(CliCase):
         self.run_cli("install-shims")
         ignore = (self.tmp / ".claude/.gitignore")
         self.assertFalse(ignore.exists())      # only an existing .gitignore is touched
-        ignore.write_text("")
+        ignore.write_text("", encoding="utf-8")
         self.run_cli("install-shims", "--harness", "claude")
-        self.assertIn("rules-disabled/", ignore.read_text().splitlines())
+        self.assertIn("rules-disabled/", ignore.read_text(encoding="utf-8").splitlines())
 
     def test_claude_cli_pairs_drive_the_cli(self) -> None:
         self.load("claude")
-        orig = json.loads((self.tmp / ".claude.json").read_text())["mcpServers"]["example-mcp"]
+        orig = json.loads((self.tmp / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]["example-mcp"]
         self.assertEqual(self.run_cli("disable", "plugin", "demo-plugin")[0], 0)
         self.assertEqual(self.run_cli("enable", "plugin", "demo-plugin")[0], 0)
         self.assertEqual(self.run_cli("disable", "mcp", "example-mcp")[0], 0)

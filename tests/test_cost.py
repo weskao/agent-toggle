@@ -58,7 +58,7 @@ class EstimatorTest(CliCase):
         (self.tmp / ".codex").mkdir()
         (self.tmp / ".codex" / "config.toml").write_text(
             '[mcp_servers.a]\ncommand = "x"\n[mcp_servers.a.tools.t1]\nx = 1\n'
-            "[mcp_servers.a.tools.t2]\nx = 1\n[mcp_servers.b]\ncommand = \"y\"\n")
+            "[mcp_servers.a.tools.t2]\nx = 1\n[mcp_servers.b]\ncommand = \"y\"\n", encoding="utf-8")
         est = {i.name: i for i in cost.inventory({"disabled": {}}, build(self.tmp))
                if i.type == "mcp"}
         self.assertEqual((est["a"].tokens, est["b"].tokens), (600, 1500))
@@ -112,7 +112,7 @@ class CostCommandTest(CliCase):
     def test_shared_dir_is_one_row_under_its_owner(self) -> None:
         oc = self.tmp / ".config" / "opencode"
         oc.mkdir(parents=True)
-        (oc / "opencode.json").write_text(json.dumps({"skills": {"paths": ["~/.claude/skills"]}}))
+        (oc / "opencode.json").write_text(json.dumps({"skills": {"paths": ["~/.claude/skills"]}}), encoding="utf-8")
         for harness in ("claude", "opencode"):
             rows = [r for r in self.results("cost", "--type", "skill", "--harness", harness)
                     if r["name"] == "big"]
@@ -125,10 +125,10 @@ class CostCommandTest(CliCase):
         live, off = self.tmp / "plug-live", self.tmp / "plug-off"
         for root in (live, off):
             (root / "skills" / "ps").mkdir(parents=True)
-            (root / "skills" / "ps" / "SKILL.md").write_text(FM.format(n="ps", d="d" * 38, body=""))
+            (root / "skills" / "ps" / "SKILL.md").write_text(FM.format(n="ps", d="d" * 38, body=""), encoding="utf-8")
             (root / "commands").mkdir()
-            (root / "commands" / "c.md").write_text("---\ndescription: dddd\n---\n")
-        (live / ".mcp.json").write_text(json.dumps({"mcpServers": {"m": {}}}))
+            (root / "commands" / "c.md").write_text("---\ndescription: dddd\n---\n", encoding="utf-8")
+        (live / ".mcp.json").write_text(json.dumps({"mcpServers": {"m": {}}}), encoding="utf-8")
         listing = [{"id": "live@mk", "enabled": True, "installPath": str(live)},
                    {"id": "off@mk", "enabled": False, "installPath": str(off)}]
         calls = []

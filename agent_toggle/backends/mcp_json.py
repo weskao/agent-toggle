@@ -23,7 +23,7 @@ def claude_mcp_config(name: str) -> tuple[dict, str, str | None] | None:
     the cwd does not pick a winner.
     """
     try:
-        cfg = json.loads(fs.claude_json().read_text())
+        cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -52,7 +52,7 @@ def claudeai_connector_names() -> set[str]:
     mcpServers entry -- .claudeAiMcpEverConnected is the only place they are
     listed)."""
     try:
-        cfg = json.loads(fs.claude_json().read_text())
+        cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return set()
     return set(cfg.get("claudeAiMcpEverConnected", []) or [])
@@ -69,7 +69,7 @@ def toggle_claudeai_connector(action: str, name: str,
     """
     path = fs.claude_json()
     try:
-        cfg = json.loads(path.read_text())
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         return False, f"~/.claude.json unreadable: {e}"
 
@@ -89,6 +89,6 @@ def toggle_claudeai_connector(action: str, name: str,
     if not touched or dry_run:
         return True, touched
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
     return True, touched

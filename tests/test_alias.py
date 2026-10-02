@@ -29,11 +29,11 @@ class AliasBase(CliCase):
         self.parked = self.tmp / ".claude" / "skills-disabled" / ITEM
 
     def state(self) -> dict:
-        return json.loads((self.tmp / ".agent-toggle" / "state.json").read_text())["disabled"]
+        return json.loads((self.tmp / ".agent-toggle" / "state.json").read_text(encoding="utf-8"))["disabled"]
 
     def alias_via_paths(self) -> None:
         (self.oc / "opencode.json").write_text(
-            json.dumps({"skills": {"paths": ["~/.claude/skills"]}}))
+            json.dumps({"skills": {"paths": ["~/.claude/skills"]}}), encoding="utf-8")
 
     def check_parked_once(self) -> None:
         self.assertFalse(self.shared.exists())
@@ -90,7 +90,7 @@ class AliasBehaviour:
         self.assertNotIn("untracked", text)       # alias view still recognises the parked item
 
     def test_sync_marker_warns(self) -> None:
-        (self.tmp / ".claude" / "skills" / ".synced-from-test").write_text("")
+        (self.tmp / ".claude" / "skills" / ".synced-from-test").write_text("", encoding="utf-8")
         rc, env = self.run_json("disable", "skill", ITEM, "--harness", "opencode")
         self.assertEqual(rc, 0)
         self.assertTrue(any(".synced-from-test" in w for w in env["warnings"]), env["warnings"])
@@ -135,10 +135,10 @@ class OpencodeTableTest(AliasBase):
     def test_skill_dirs_follow_skills_paths_and_survive_bad_json(self) -> None:
         dirs = lambda: build(self.tmp)["opencode"].dirs["skill"]      # noqa: E731
         self.assertEqual(dirs(), ("skills",))
-        (self.oc / "opencode.json").write_text("{ not json")
+        (self.oc / "opencode.json").write_text("{ not json", encoding="utf-8")
         self.assertEqual(dirs(), ("skills",))
         (self.oc / "opencode.json").write_text(json.dumps(
-            {"skills": {"paths": ["~/.codex/skills", "rel", 7, "~/.codex/skills"]}}))
+            {"skills": {"paths": ["~/.codex/skills", "rel", 7, "~/.codex/skills"]}}), encoding="utf-8")
         self.assertEqual(dirs(), ("skills", str(self.tmp / ".codex/skills"), str(self.oc / "rel")))
 
     def test_unshared_opencode_items_report_no_sharing(self) -> None:

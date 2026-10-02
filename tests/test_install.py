@@ -43,24 +43,24 @@ class InstallShimsCase(SandboxCase):
                          {"claude", "codex"})
         self.assertEqual({r["harness"] for r in env["results"] if r["status"] == "skipped"},
                          {"grok", "opencode", "openclaw"})
-        text = shim(self.tmp / ".claude").read_text()
+        text = shim(self.tmp / ".claude").read_text(encoding="utf-8")
         self.assertIn("--json", text)
         self.assertNotIn("__AGENT_TOGGLE_ROOT__", text)
         self.assertIn("agent_toggle.py", text)     # checkout fallback line kept
 
     def test_rerun_is_idempotent(self) -> None:
         self.run_cli()
-        first = shim(self.tmp / ".claude").read_text()
+        first = shim(self.tmp / ".claude").read_text(encoding="utf-8")
         rc, _ = self.run_cli()
         self.assertEqual(rc, 0)
-        self.assertEqual(shim(self.tmp / ".claude").read_text(), first)
+        self.assertEqual(shim(self.tmp / ".claude").read_text(encoding="utf-8"), first)
 
     def test_dry_run_writes_nothing(self) -> None:
-        (self.tmp / ".claude" / ".gitignore").write_text("junk\n")
+        (self.tmp / ".claude" / ".gitignore").write_text("junk\n", encoding="utf-8")
         rc, env = self.run_cli("--dry-run")
         self.assertEqual(rc, 0)
         self.assertEqual(self.installed(), set())
-        self.assertEqual((self.tmp / ".claude" / ".gitignore").read_text(), "junk\n")
+        self.assertEqual((self.tmp / ".claude" / ".gitignore").read_text(encoding="utf-8"), "junk\n")
         self.assertTrue(all(r["status"] in ("planned", "skipped") for r in env["results"]))
 
     def test_no_harness_is_exit_4(self) -> None:
@@ -72,10 +72,10 @@ class InstallShimsCase(SandboxCase):
 
     def test_park_dirs_appended_once_from_table(self) -> None:
         ignore = self.tmp / ".claude" / ".gitignore"
-        ignore.write_text("skills-disabled/\nkeep")          # one present, no trailing newline
+        ignore.write_text("skills-disabled/\nkeep", encoding="utf-8")          # one present, no trailing newline
         self.run_cli()
         self.run_cli()
-        lines = ignore.read_text().splitlines()
+        lines = ignore.read_text(encoding="utf-8").splitlines()
         for d in ("skills-disabled/", "agents-disabled/", "commands-disabled/"):
             self.assertEqual(lines.count(d), 1, d)
         self.assertIn("keep", lines)
@@ -85,10 +85,11 @@ class InstallShimsCase(SandboxCase):
         self.assertTrue((Path(cli.__file__).parent / "shims" / "claude.md.tmpl").is_file())
         self.assertFalse((REPO / "shims").exists())
 
+    @unittest.skipIf(os.name == "nt", "install.sh is a POSIX wrapper; Windows uses the console script")
     def test_install_sh_wrapper(self) -> None:
         env = {**os.environ, "HOME": str(self.tmp), "USERPROFILE": str(self.tmp)}
         p = subprocess.run(["bash", str(REPO / "install.sh")], env=env,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, encoding="utf-8")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(self.installed(), {"claude", "codex"})
 

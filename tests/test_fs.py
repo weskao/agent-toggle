@@ -14,7 +14,7 @@ class SafeMoveTest(SandboxCase):
         self.assertFalse(dest.exists())
         fs.safe_move(src.parent, dest)
         # safe_move keeps the item as a CHILD of dest
-        self.assertEqual((dest / "demo" / "SKILL.md").read_text(), "hello")
+        self.assertEqual((dest / "demo" / "SKILL.md").read_text(encoding="utf-8"), "hello")
         # safe_move did not rename src to dest
         self.assertTrue(dest.is_dir())
 
@@ -30,4 +30,4 @@ class SafeMoveTest(SandboxCase):
         with self.assertRaises(FileExistsError):
             fs.safe_move(src.parent, self.home / "skills-disabled")
         # existing parked copy untouched
-        self.assertEqual((self.home / "skills-disabled/a/SKILL.md").read_text(), "old")
+        self.assertEqual((self.home / "skills-disabled/a/SKILL.md").read_text(encoding="utf-8"), "old")

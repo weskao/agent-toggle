@@ -47,7 +47,7 @@ class CliCase(SandboxCase):
         return rc, json.loads(out)         # the WHOLE stdout must be one document
 
     def claude_json(self, cfg: dict) -> None:
-        (self.tmp / ".claude.json").write_text(json.dumps(cfg))
+        (self.tmp / ".claude.json").write_text(json.dumps(cfg), encoding="utf-8")
 
 
 class EnvelopeTest(CliCase):
@@ -212,7 +212,7 @@ class DryRunTest(CliCase):
     def test_mcp_codex_disable_dry_run_writes_nothing(self) -> None:
         codex = self.tmp / ".codex"
         codex.mkdir()
-        (codex / "config.toml").write_text('[mcp_servers.example-mcp]\ncommand = "x"\n')
+        (codex / "config.toml").write_text('[mcp_servers.example-mcp]\ncommand = "x"\n', encoding="utf-8")
         env = self.assert_untouched("disable", "mcp", "example-mcp", "--harness", "codex")
         self.assertEqual(env["results"][0]["status"], "planned")
 
@@ -328,7 +328,7 @@ class UnexpectedErrorTest(CliCase):
         codex = self.tmp / ".codex"
         codex.mkdir()
         cfg = codex / "config.toml"
-        cfg.write_text('[mcp_servers.example-mcp]\ncommand = "x"\n')
+        cfg.write_text('[mcp_servers.example-mcp]\ncommand = "x"\n', encoding="utf-8")
         cfg.chmod(0)
         self.addCleanup(cfg.chmod, 0o600)
         env = self.assert_one_error_doc("disable", "mcp", "example-mcp", "--harness", "codex")
@@ -360,7 +360,7 @@ class UnexpectedErrorTest(CliCase):
                 mock.patch.object(cli, "apply_changes", half_done):
             rc, _, err = self.run_cli("ui")
         self.assertEqual(rc, 1)
-        self.assertIn("claude:skill:demo-skill", json.loads(fs.state_file().read_text())["disabled"])
+        self.assertIn("claude:skill:demo-skill", json.loads(fs.state_file().read_text(encoding="utf-8"))["disabled"])
 
 
 class DryRunNoShellOutTest(CliCase):

@@ -29,7 +29,7 @@ class LockTest(SandboxCase):
 
     def test_acquire_release(self) -> None:
         with fs.lock():
-            self.assertEqual(fs.lock_file().read_text(), str(os.getpid()))
+            self.assertEqual(fs.lock_file().read_text(encoding="utf-8"), str(os.getpid()))
         self.assertFalse(fs.lock_file().exists())
 
     def test_second_acquire_raises_locked(self) -> None:
@@ -42,45 +42,45 @@ class LockTest(SandboxCase):
 
     def test_release_leaves_a_lock_we_no_longer_own(self) -> None:
         with fs.lock():
-            fs.lock_file().write_text("999999")      # a rival took it over
-        self.assertEqual(fs.lock_file().read_text(), "999999")
+            fs.lock_file().write_text("999999", encoding="utf-8")      # a rival took it over
+        self.assertEqual(fs.lock_file().read_text(encoding="utf-8"), "999999")
 
     def test_stale_lock_is_taken_over(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.lock_file().write_text("999999")
+        fs.lock_file().write_text("999999", encoding="utf-8")
         old = time.time() - 11 * 60
         os.utime(fs.lock_file(), (old, old))
         with fs.lock():
-            self.assertEqual(fs.lock_file().read_text(), str(os.getpid()))
+            self.assertEqual(fs.lock_file().read_text(encoding="utf-8"), str(os.getpid()))
 
     def test_takeover_never_steals_a_lock_a_rival_just_refreshed(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.lock_file().write_text("999999")
+        fs.lock_file().write_text("999999", encoding="utf-8")
         old = time.time() - 11 * 60
         os.utime(fs.lock_file(), (old, old))
         real_rename = os.rename
 
         def rival_wins_the_race(src, dst):
-            fs.lock_file().write_text("424242")          # rival replaces the stale lock
+            fs.lock_file().write_text("424242", encoding="utf-8")          # rival replaces the stale lock
             real_rename(src, dst)                        # ...and we move THEIR fresh one
 
         with mock.patch.object(fs.os, "rename", rival_wins_the_race):
             with self.assertRaises(fs.Locked):
                 with fs.lock():
                     self.fail("proceeded despite a live rival lock")
-        self.assertEqual(fs.lock_file().read_text(), "424242")     # put back
+        self.assertEqual(fs.lock_file().read_text(encoding="utf-8"), "424242")     # put back
         self.assertEqual(list(fs.state_dir().glob("lock.stale.*")), [])
 
     @unittest.skipIf(not POSIX, "PID liveness is POSIX only")
     def test_stale_lock_of_a_live_pid_is_not_taken_over(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.lock_file().write_text(str(os.getpid()))      # a running process
+        fs.lock_file().write_text(str(os.getpid()), encoding="utf-8")      # a running process
         old = time.time() - 11 * 60
         os.utime(fs.lock_file(), (old, old))
         with self.assertRaises(fs.Locked):
             with fs.lock():
                 pass
-        self.assertEqual(fs.lock_file().read_text(), str(os.getpid()))
+        self.assertEqual(fs.lock_file().read_text(encoding="utf-8"), str(os.getpid()))
 
     def test_batch_refreshes_the_lock_mtime(self) -> None:
         self.write("skills/demo-skill/SKILL.md")
@@ -93,7 +93,7 @@ class LockTest(SandboxCase):
 
     def test_refresh_ignores_a_lock_we_do_not_own(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.lock_file().write_text("999999")
+        fs.lock_file().write_text("999999", encoding="utf-8")
         old = time.time() - 9 * 60
         os.utime(fs.lock_file(), (old, old))
         fs.refresh_lock()
@@ -113,7 +113,7 @@ class PrivateModeTest(SandboxCase):
         p = self.tmp / "out.json"
         fs.atomic_write(p, "{}")
         self.assertEqual(mode(p), 0o600)
-        self.assertEqual(p.read_text(), "{}")
+        self.assertEqual(p.read_text(encoding="utf-8"), "{}")
         # no tmp file left behind
         self.assertEqual([x.name for x in self.tmp.glob(".out.json*")], [])
 
@@ -136,7 +136,7 @@ class PrivateModeTest(SandboxCase):
     def test_load_tightens_loose_files(self) -> None:
         fs.backup_dir().mkdir(parents=True)
         bp = fs.backup_dir() / "claude__example-mcp.json"
-        bp.write_text('{"headers": {"Authorization": "Bearer test-token-000"}}')
+        bp.write_text('{"headers": {"Authorization": "Bearer test-token-000"}}', encoding="utf-8")
         store.save_state({"version": 3, "disabled": {}})
         for p in (bp, fs.state_file()):
             p.chmod(0o644)
@@ -175,7 +175,7 @@ class ReadOnlyNeverChmodsTest(SandboxCase):
         store.save_state({"version": 3, "disabled": {}})
         fs.backup_dir().mkdir()
         self.bp = fs.backup_dir() / "claude__example-mcp.json"
-        self.bp.write_text("{}")
+        self.bp.write_text("{}", encoding="utf-8")
         for p in (fs.state_file(), self.bp):
             p.chmod(0o644)
 
@@ -199,7 +199,9 @@ class ReadOnlyNeverChmodsTest(SandboxCase):
 class SchemaV3Test(SandboxCase):
     def _install_fixture(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.state_file().write_text(FIXTURE.read_text().replace("@ROOT@", str(self.tmp)))
+        root = json.dumps(str(self.tmp))[1:-1]          # JSON-escaped: Windows paths hold backslashes
+        fs.state_file().write_text(FIXTURE.read_text(encoding="utf-8").replace("@ROOT@", root),
+                                   encoding="utf-8")
 
     def test_v2_state_migrates(self) -> None:
         self._install_fixture()
@@ -210,32 +212,32 @@ class SchemaV3Test(SandboxCase):
                                "claude:mcp:example-mcp": "remove_backup",
                                "claude:plugin:demo-plugin": "native_cli"})
         # written back, atomically and privately
-        self.assertEqual(json.loads(fs.state_file().read_text())["version"], 3)
+        self.assertEqual(json.loads(fs.state_file().read_text(encoding="utf-8"))["version"], 3)
         if POSIX:
             self.assertEqual(mode(fs.state_file()), 0o600)
 
     def test_read_only_load_does_not_write(self) -> None:
         self._install_fixture()
-        before = fs.state_file().read_text()
+        before = fs.state_file().read_text(encoding="utf-8")
         state = store.load_state(write_back=False)
         self.assertEqual(state["version"], 3)
-        self.assertEqual(fs.state_file().read_text(), before)
+        self.assertEqual(fs.state_file().read_text(encoding="utf-8"), before)
 
     def test_newer_schema_is_refused(self) -> None:
         fs.state_dir().mkdir(parents=True)
-        fs.state_file().write_text('{"version": 4, "disabled": {}}')
+        fs.state_file().write_text('{"version": 4, "disabled": {}}', encoding="utf-8")
         with self.assertRaises(SystemExit):
             store.load_state()
-        self.assertEqual(json.loads(fs.state_file().read_text())["version"], 4)
+        self.assertEqual(json.loads(fs.state_file().read_text(encoding="utf-8"))["version"], 4)
 
     def test_v2_migration_is_idempotent(self) -> None:
         self._install_fixture()
         first = store.load_state()
-        on_disk = fs.state_file().read_text()
+        on_disk = fs.state_file().read_text(encoding="utf-8")
         os.utime(fs.state_file(), (1, 1))
         second = store.load_state()
         self.assertEqual(first, second)
-        self.assertEqual(fs.state_file().read_text(), on_disk)
+        self.assertEqual(fs.state_file().read_text(encoding="utf-8"), on_disk)
         # no rewrite when nothing changed
         self.assertEqual(fs.state_file().stat().st_mtime, 1)
 
