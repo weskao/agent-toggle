@@ -189,10 +189,23 @@ class FlagCostTest(CliCase):
         self.assertFalse(rows["opencode", "mcp", "example-mcp"]["enabled"])
         self.assertEqual(len([k for k in rows if k[2] == "example-mcp"]), 1)
 
-    def test_flag_set_false_by_hand_is_not_live(self) -> None:
+    def test_only_toggleable_flag_items_are_listed_live(self) -> None:
         cfg = self.tmp / ".config/opencode/opencode.json"
-        cfg.write_text(cfg.read_text(encoding="utf-8").replace("true", "false"), encoding="utf-8")
-        self.assertFalse(self.rows()["opencode", "mcp", "example-mcp"]["enabled"])
+        cfg.write_text(json.dumps({"mcp": {
+            "has-flag": {"enabled": True}, "no-flag": {"url": "https://example.com"},
+            "off-by-hand": {"enabled": False}}}), encoding="utf-8")
+        names = {k[2] for k in self.rows() if k[:2] == ("opencode", "mcp")}
+        # no `enabled` key: disable would refuse (never invents a key); false by hand: enable
+        # would refuse (no state entry) -- neither is something the picker or a profile can toggle
+        self.assertEqual(names, {"has-flag"})
+
+    def test_bad_shared_with_in_state_does_not_crash_cost(self) -> None:
+        fs.private_dir(fs.state_dir())
+        fs.state_file().write_text(json.dumps({"version": 3, "disabled": {
+            "claude:skill:x": {"mechanism": "move", "harness": "claude", "type": "skill",
+                               "name": "x", "shared_with": [1, None, "codex"]}}}), encoding="utf-8")
+        rc, env = self.run_json("cost")
+        self.assertEqual(rc, 0, env)
 
 
 class PerfAndDryRunTest(CliCase):

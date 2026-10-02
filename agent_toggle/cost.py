@@ -154,10 +154,11 @@ def mcp_tool_counts(h) -> dict[str, int]:
     return {}
 
 
-def flag_names(h, type_: str) -> list[tuple[str, bool]]:
-    """(name, enabled) of the items a flag-mechanism type keeps in the harness config:
-    the object keys under the pointer's `<name>` slot. `enabled` is false only when the
-    entry's own flag is literally false (switched off outside this tool)."""
+def flag_names(h, type_: str) -> list[str]:
+    """Names of the live items a flag-mechanism type keeps in the harness config: the
+    object keys under the pointer's `<name>` slot whose own flag is `true`. An entry with
+    no flag (disable would refuse: a key is never invented) or `false` by hand (enable
+    would refuse: no state entry) is not something this tool can toggle, so not listed."""
     rel, pointer = h.flags[type_]
     prefix = pointer[:pointer.index("<name>")] if "<name>" in pointer else pointer[:-1]
     try:
@@ -168,8 +169,8 @@ def flag_names(h, type_: str) -> list[tuple[str, bool]]:
         node = node.get(k) if isinstance(node, dict) else None
     if not isinstance(node, dict):
         return []
-    return sorted((n, not (isinstance(v, dict) and v.get("enabled") is False))
-                  for n, v in node.items() if isinstance(v, dict) and _valid_name(n))
+    return sorted(n for n, v in node.items()
+                  if isinstance(v, dict) and v.get("enabled") is True and _valid_name(n))
 
 
 def backup_tools(entry: dict) -> int | None:
@@ -254,8 +255,8 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                         add(hname, type_, name, True,
                             file_estimate(type_, name, resolve_item(v.live, name)), shared)
             elif type_ in h.flags:
-                for name, on in flag_names(h, type_):
-                    add(hname, type_, name, on, mcp_estimate(hname, None) if type_ == "mcp"
+                for name in flag_names(h, type_):
+                    add(hname, type_, name, True, mcp_estimate(hname, None) if type_ == "mcp"
                         else (0, None, "flag entry; size unknown"))
             elif type_ == "mcp":
                 counts = mcp_tool_counts(h)
@@ -282,5 +283,6 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
             parked = e.get("parked_at")
             est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)
         shared = e.get("shared_with")
-        add(h, t, n, False, est, shared if isinstance(shared, list) else ())
+        add(h, t, n, False, est,
+            [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
     return items

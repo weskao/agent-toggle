@@ -414,7 +414,7 @@ help. Picker additions, all within stdlib curses:
   (`h`/`t` cycle);
 - plugin rows from `claude plugin list --json` (landed in phase 1; `ui --dry-run`
   skips them, it never shells out). Flag-mechanism items (phase 2: openclaw
-  plugins and flagged skills, opencode mcp) are listed live from the config file and
+  plugins and flagged skills, opencode mcp) are listed live from the config file (entries with a boolean `enabled` only) and
   parked from state; a flag-disabled skill shows as disabled;
 - `/` starts typing a text filter; `s`, `h`, `t`, `?` are commands only while
   the filter is empty, so a filter beginning with one of them needs the leading

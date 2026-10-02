@@ -231,7 +231,8 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
         if d.name.startswith("."):
             continue
         if d.name not in digests:
-            if not any(p.is_symlink() or not p.is_dir() for p in d.rglob("*")):
+            if d.is_dir() and not d.is_symlink() and not any(
+                    p.is_symlink() or not p.is_dir() for p in d.rglob("*")):
                 continue                # only empty dirs: what a project enable leaves behind
             _row(out, None, None, d.name, "warn", f"{d} holds parked project items with no state "
                  f"entry; fix: move what you want back by hand, then delete the dir")
@@ -266,7 +267,7 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
     for h in installed:
         _check_layout(out, h, table)
     try:
-        state = load_state(write_back=False)
+        state = load_state(write_back=False, check_entries=False)    # bad entries get rows
     except CliError as e:
         _row(out, None, None, None, "error", f"{e.msg}; fix: repair or move aside {fs.state_file()}")
     else:

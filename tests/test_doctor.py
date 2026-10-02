@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import unittest
 from unittest import mock
@@ -243,6 +244,25 @@ class StateTest(DoctorCase):
         rc, rows = self.doctor()
         self.assertEqual(rc, 0, rows)
         self.assertEqual(self.rows(rows, "warn"), [])
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_stray_file_and_dangling_link_in_parked_are_still_warned(self) -> None:
+        fs.private_dir(fs.state_dir())
+        fs.private_dir(fs.parked_dir())
+        (fs.parked_dir() / "stray.txt").write_text("x", encoding="utf-8")
+        (fs.parked_dir() / "dangling").symlink_to(self.tmp / "nowhere")
+        rows = self.rows(self.doctor()[1], "warn")
+        self.assertEqual({r["name"] for r in rows}, {"stray.txt", "dangling"})
+
+    def test_non_object_entry_does_not_hide_the_others(self) -> None:
+        store.save_state({"version": 3, "disabled": {
+            "claude:skill:a-skill": 5,
+            "claude:mcp:e-mcp": {"mechanism": "remove_backup", "harness": "claude",
+                                 "backup": str(fs.backup_dir() / "gone.json")}}})
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 1)
+        self.assertEqual({r["name"] for r in self.rows(rows, "error") if r["name"]},
+                         {"a-skill", "e-mcp"}, rows)
 
     def test_orphans_are_reported_not_deleted(self) -> None:
         orphan = fs.parked_dir() / "deadbeef" / "skills-disabled" / "old-skill"

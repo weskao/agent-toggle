@@ -480,13 +480,26 @@ class CheckedConfigWriteTest(SandboxCase):
         self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "second-mcp",
                                    "--harness", "codex"]), 0)
         entry = store.load_state()["disabled"]["codex:mcp:example-mcp"]
-        for payload in ("{}", '{"toml": 5}', "[]", "not json"):
-            Path(entry["backup"]).write_text(payload, encoding="utf-8")
+        for payload in ("{}", '{"toml": 5}', "[]", "not json", b"\xff\xfe not utf-8"):
+            if isinstance(payload, bytes):
+                Path(entry["backup"]).write_bytes(payload)
+            else:
+                Path(entry["backup"]).write_text(payload, encoding="utf-8")
             rc = cli.main(["enable", "mcp", "example-mcp", "second-mcp", "--harness", "codex"])
             self.assertEqual(rc, 1, payload)
             self.assertEqual(list(store.load_state()["disabled"]), ["codex:mcp:example-mcp"])
             self.assertIn(b"[mcp_servers.second-mcp]", self.cfg.read_bytes())    # batch went on
             self.assertEqual(cli.main(["disable", "mcp", "second-mcp", "--harness", "codex"]), 0)
+
+    def test_non_utf8_config_blames_the_config_not_the_backup(self) -> None:
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+        self.cfg.write_bytes(b'x = "\xff"\n')
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli.main(["enable", "mcp", "example-mcp", "--harness", "codex", "--json"])
+        self.assertEqual(rc, 1)
+        self.assertNotIn("backup", buf.getvalue())
+        self.assertIn("codex:mcp:example-mcp", store.load_state()["disabled"])
 
     def test_bad_connector_write_is_rolled_back(self) -> None:
         cj = self.tmp / ".claude.json"

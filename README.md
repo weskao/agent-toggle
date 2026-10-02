@@ -193,7 +193,8 @@ exits `4`, which is why the matrix leaves it unchecked.
 
 Flag items (openclaw plugins and flagged skills, opencode mcp) are toggled with
 `disable` / `enable`, `undo` and `enable --all`. The picker, `cost` and `profile`
-list them live (read from the config file) and parked (from `state.json`); an
+list them live (read from the config file; only entries that carry a boolean
+`enabled`, since a key is never invented) and parked (from `state.json`); an
 openclaw skill whose flag was switched off by this tool is shown as disabled even
 though its directory is still in place.
 

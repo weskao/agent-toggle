@@ -153,16 +153,17 @@ def upgrade(state: dict) -> bool:
     changed = state.get("version") != VERSION
     state["version"] = VERSION
     for entry in state.setdefault("disabled", {}).values():
-        if "mechanism" not in entry:
+        if isinstance(entry, dict) and "mechanism" not in entry:
             mech = mechanism_of(entry) or "flag"
             entry["mechanism"] = "flag" if mech == "connector" else mech   # stored enum
             changed = True
     return changed
 
 
-def load_state(write_back: bool = True) -> dict:
+def load_state(write_back: bool = True, check_entries: bool = True) -> dict:
     """Read state, upgrading it to v3. Read-only commands pass write_back=False
-    so they never write outside the lock; the upgrade then stays in memory."""
+    so they never write outside the lock; the upgrade then stays in memory.
+    `check_entries=False` (doctor) lets a non-object entry through to be reported."""
     state_file = fs.state_file()
     if not state_file.exists():
         return {"version": VERSION, "disabled": {}}
@@ -182,7 +183,7 @@ def load_state(write_back: bool = True) -> dict:
     if not isinstance(state.get("disabled", {}), dict):
         die(f"state file malformed ({state_file}): disabled must be an object")
     for key, entry in state.get("disabled", {}).items():
-        if not isinstance(entry, dict):
+        if check_entries and not isinstance(entry, dict):
             die(f"state file malformed ({state_file}): entry {key!r} must be an object")
     if upgrade(state) and write_back:
         save_state(state)

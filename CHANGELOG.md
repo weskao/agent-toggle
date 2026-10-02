@@ -81,15 +81,16 @@ adheres to [Semantic Versioning](https://semver.org/).
   vanished is still an error. An empty leftover `parked/<sha8>` dir after a project
   `enable` no longer warns.
 - `cost`, the picker and `profile save` show an openclaw skill that was disabled by its
-  flag as disabled, and list live openclaw plugins and opencode mcp servers (they were
-  listed only while parked, so a profile could not disable them).
+  flag as disabled, and list live openclaw plugins and opencode mcp servers that carry a
+  boolean `enabled` (they were listed only while parked, so a profile could not disable
+  them).
 - Profiles record their scope: a `--project` profile applied without `--project` (or the
   reverse) exits 2 instead of toggling the user's items. `profile save` skips, with a
   warning, names `apply` would refuse (such as an MCP server called `team/search`).
 - codex / grok `config.toml` edits are verified against the original text (not a copy of
   the new text), refuse to overwrite a file edited between read and write, keep CRLF line
-  endings byte for byte, and a corrupt MCP backup fails that one row instead of aborting
-  the batch.
+  endings byte for byte, and a corrupt or non-UTF-8 MCP backup fails that one row instead
+  of aborting the batch.
 - `fs.checked_write` no longer reports a failed restore when the write failed before
   touching the file.
 - A hand-edited non-object state entry is a named error instead of a `TypeError`;
