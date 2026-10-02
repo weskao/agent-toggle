@@ -15,8 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - OpenCode adapter (XDG home; skills and commands) with alias detection: a
   directory shared by several harnesses is one item, and rows report
   `shared_with`. `status` warns about `.synced-from-*` markers.
-- Grok MCP through the existing TOML backend (config path assumed, see
-  `docs/DESIGN.md`) and codex `prompts/` as a second command directory.
+- Grok MCP through the existing TOML backend (`~/.grok/config.toml`,
+  confirmed on a live install; `.headers` sub-tables are backed up verbatim) and codex `prompts/` as a second command directory.
 - Plugins in the picker; picker sort (`s`), harness and type filters (`h`, `t`),
   key help (`?`), and `/` to type a filter.
 - `install-shims` subcommand (replaces the shell logic of `install.sh`).

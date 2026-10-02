@@ -175,7 +175,7 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
 | claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
 | codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | — | ✓ `config.toml` |
-| grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` (assumed) |
+| grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
 | opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | — |
 | openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — | — (sqlite) |
 
@@ -183,9 +183,9 @@ Only `claude` plugins are toggleable (through `claude plugin enable/disable`).
 Codex has no plugin CLI this tool can drive: `disable plugin x --harness codex`
 exits `4`, which is why the matrix leaves it unchecked.
 
-The grok MCP location (`~/.grok/config.toml`, same `[mcp_servers.<name>]`
-tables as codex) is **assumed** from the design survey, not verified against a
-live install; treat grok MCP as experimental until confirmed.
+The grok MCP location (`~/.grok/config.toml`, the same `[mcp_servers.<name>]`
+tables as codex, including a `.headers` sub-table for remote servers) was
+confirmed on a live install. Backups keep every sub-table verbatim.
 
 Unsupported pairs fail loudly. OpenClaw keeps MCP servers in
 `state/openclaw.sqlite`, not a file this tool can safely slice, so it refuses

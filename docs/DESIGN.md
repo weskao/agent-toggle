@@ -566,9 +566,9 @@ runs this pattern in production:
 - The `.synced-from-*` warning repeats once per harness that views the same
   directory.
 - `aliases_from` on the harness record is metadata only (§5.2).
-- Grok's MCP location (`~/.grok/config.toml`) is assumed from the survey, not
-  verified on a live install; OpenCode's no-`skills.paths` default is assumed
-  to be its own `skills/` (§11 q2).
+- Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
+  `.headers` sub-table) was confirmed on a live install; OpenCode's
+  no-`skills.paths` default is still assumed to be its own `skills/` (§11 q2).
 - `claude.ai` connectors are toggled through each *existing* project's
   `disabledMcpServers`; a project opened for the first time later starts without
   the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
