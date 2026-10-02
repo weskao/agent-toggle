@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege by default; only the publish job is granted id-token.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Tag must match __version__
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Read the file instead of importing: the root agent_toggle.py wrapper shadows the package.
+          version=$(python -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('agent_toggle/__init__.py').read()).group(1))")
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "::error::tag ${TAG} does not match __version__ v${version}"
+            exit 1
+          fi
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agent-toggle/
+    permissions:
+      id-token: write # PyPI trusted publishing (OIDC); granted to this job only
+    steps:
+      # No checkout: this job runs no repository code.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  smoke:
+    needs: publish
+    runs-on: macos-latest
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - run: pip install uv
+      - name: Install from PyPI (retry for index lag)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          for attempt in $(seq 1 30); do
+            if uv tool install "agent-toggle==${version}" --no-cache; then
+              exit 0
+            fi
+            echo "attempt ${attempt}/30: ${version} not installable yet, retrying in 20s"
+            sleep 20
+          done
+          echo "::error::agent-toggle==${version} never became installable"
+          exit 1
+      - name: Disable / enable round trip under a throwaway HOME
+        run: |
+          set -euo pipefail
+          export PATH="$(uv tool dir --bin):$PATH"
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.claude/skills/demo-skill"
+          printf -- '---\nname: demo-skill\ndescription: demo\n---\n' > "$HOME/.claude/skills/demo-skill/SKILL.md"
+          agent-toggle status
+          agent-toggle disable skill demo-skill
+          test ! -e "$HOME/.claude/skills/demo-skill"
+          test -f "$HOME/.claude/skills-disabled/demo-skill/SKILL.md"
+          agent-toggle enable skill demo-skill
+          test -f "$HOME/.claude/skills/demo-skill/SKILL.md"
+          test ! -e "$HOME/.claude/skills-disabled/demo-skill"
