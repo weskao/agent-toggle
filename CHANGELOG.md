@@ -1,3 +1,94 @@
+## [0.1.0] - 2026-10-02
+
+### 🚀 Features
+
+- Multi-harness resource toggle extracted from skill-toggle
+- Interactive curses picker for browsing and toggling
+- **mcp:** Support local-scope Claude MCP servers
+- **mcp:** Add claude.ai connector toggles
+- **status:** Flag untracked parked items and stale live twins
+- **symlinks:** Support toggling symlinks and broken links across harnesses
+- **store:** Lock, 0600 writes, state schema v3
+- **cli:** Json envelope, exit codes, dry-run
+- **cli:** Install-shims subcommand
+- **harness:** Rule type, codex prompts, grok mcp
+- **harness:** Opencode adapter with alias detection
+- **cost:** Token estimates and picker column
+- **safety:** Containment, checked writes, entry checks, log schema
+- **backends:** Flag_json one-token boolean edit for openclaw/opencode
+- **safety:** Ops.apply_plan seam, enable refusal, checked config writes
+- **profiles:** Profile save/apply/diff/list
+- **flag:** Wire openclaw and opencode flag toggles
+- **undo:** Undo last batch and enable --all
+- **project:** --project scope for dir types
+- **project:** --project .mcp.json mcp entries
+- **doctor:** Read-only drift and state check
+- **harnesses:** Add vibe, devin and agy rows
+- **copilot:** Skills, agents and mcp-config.json
+- **output:** Add --color auto|always|never
+
+### 🐛 Bug Fixes
+
+- Prune park subdirs left empty after restoring a nested item
+- **gitignore:** Append trailing slash to directory check-ignore queries
+- **store:** Harden lock takeover and error paths
+- **cli:** Refuse names that escape the harness dir
+- Name utf-8 for all text I/O, fix windows tests
+- **doctor:** Missing layout files are absent, not errors
+- **cost:** Flag-disabled items are not live
+- **profile:** Record scope, skip unusable names
+- **fs:** No false restore-failed on early write error
+- **toml:** Independent verify, keep CRLF, bad backup
+- **state:** Validate entries, check --project
+- Address self-review findings in doctor, cost, toml
+- **copilot:** Validate backup text and cover guards with tests
+- **test:** Write copilot fixtures as bytes
+- **test:** Write copilot fixtures as bytes
+
+### 💼 Other
+
+- Phase 2 profiles, scope and safety
+- Phase 2 windows test fix
+- Tick phase 2 roadmap
+
+### 🚜 Refactor
+
+- Split into agent_toggle package
+- **harness:** Declarative harness records
+
+### 📚 Documentation
+
+- Add living design doc and roadmap
+- **design:** Defer pypi to phase 4, os ports to 5
+- **design:** Add phase status checklist
+- **design:** Add phase 6 ci telegram alerts
+- Add design roadmap and CLI command surface
+- **readme:** Drop personal path from test command
+- Mark phase 0 and 1 complete
+- **readme:** Add checkout form of install-shims
+- **design:** Record green ci on all three oses
+- Grok mcp path confirmed on a live install
+- Document phase 2 features
+- Sync review fixes into readme, design, changelog
+- **design:** Record green ci for phase 2
+- **design:** Add phase 3.5 colorful cli to roadmap
+- Add remaining-work checklist in TODO.md
+- Add phase 3 harness support (copilot, vibe, devin, agy)
+- **roadmap:** Tick phase 3 and update changelog
+- **todo:** Refresh intro for phase 3 status
+- Document color output and release process
+
+### 🧪 Testing
+
+- **harness:** Cover multi-candidate dirs
+- **backends:** Pin toml headers sub-table backup
+- **fs:** Windows newline and 8.3 path in checked_write
+
+### ⚙️ Miscellaneous Tasks
+
+- Add oss hygiene docs
+- Ignore claude agent memory dir
+- **release:** Add tag-triggered PyPI publish workflow
 # Changelog
 
 All notable changes to this project are documented here. The format follows
