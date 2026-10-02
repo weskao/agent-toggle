@@ -20,9 +20,24 @@ puts it back where it came from.
 
 ## Install
 
+Latest release (on PyPI from the first tagged release):
+
 ```sh
-uv tool install git+<repo-url>         # or: pipx install git+<repo-url>
+uv tool install agent-toggle
 agent-toggle --version
+```
+
+Pre-release versions from this repository:
+
+```sh
+uv tool install git+<repo-url>
+agent-toggle --version
+```
+
+Alternatively, use `pipx`:
+
+```sh
+pipx install agent-toggle             # from the first tagged release; or: pipx install git+<repo-url>
 ```
 
 From a checkout, either install it editable or run it in place:
@@ -86,6 +101,13 @@ Flags accepted by every command, before or after the subcommand:
 - `--version` prints the version.
 - `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
   unexpected errors; otherwise they are a single `error:` line.
+- `--color auto|always|never` sets ANSI color for human output: green ok, red errors,
+  yellow warnings, cyan harness names, dim secondary text (`status`, `list`, `cost`,
+  `disable` / `enable`, `doctor`, warnings and errors; the picker uses curses color pairs
+  and stays monochrome when the terminal has no colors). `--json` is never colored.
+  `never` turns it off and `always` forces it even when piped; `auto` (default) checks
+  `NO_COLOR`, then `FORCE_COLOR`, then `TERM=dumb`, and otherwise colors only on a TTY.
+  `always` still stays plain on a Windows console that cannot do ANSI.
 
 Extra row fields: `list` rows carry `at`, `mechanism`, `companions`; `cost` rows
 carry `enabled`, `tokens`, `would_save`, `chars`, and the final `total` row
@@ -501,6 +523,23 @@ ruff check .
 
 stdlib `unittest`, no fixtures, no network. Every test runs against a
 throwaway temp `HOME` and a stubbed `claude` CLI.
+
+## Releasing
+
+A release is a git tag `vX.Y.Z` (where `X.Y.Z` must match `agent_toggle.__version__`).
+Pushing the tag triggers `.github/workflows/release.yml`:
+
+1. **Build** job checks that the tag matches `__version__` and builds a wheel and
+   source distribution.
+2. **Publish** job uploads to PyPI using
+   [trusted publishing](https://docs.pypi.org/trusted-publishers/),
+   with no stored tokens—only the `pypi` environment and OIDC setup.
+3. **Smoke** job installs the published version on macOS under a throwaway `HOME`
+   and runs a `disable` / `enable` round trip to verify the install.
+
+Before the first tag, register a trusted publisher for this repository with
+PyPI: workflow `release.yml`, environment `pypi`. See
+[PyPI trusted publishers documentation](https://docs.pypi.org/trusted-publishers/).
 
 ## Cross-machine behaviour
 
