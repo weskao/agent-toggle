@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,9 +7,32 @@ name = "agent-toggle"
 dynamic = ["version"]
 description = "Temporarily disable / re-enable AI-agent skills, agents, commands, rules, plugins and MCP servers across harnesses (Claude Code, Codex, Grok, OpenCode, OpenClaw, Copilot, Vibe, Devin, Antigravity)"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["ai-agents", "claude-code", "codex", "skills", "mcp", "cli", "toggle"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
 requires-python = ">=3.10"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/weskao/agent-toggle"
+Repository = "https://github.com/weskao/agent-toggle"
+Issues = "https://github.com/weskao/agent-toggle/issues"
+Changelog = "https://github.com/weskao/agent-toggle/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 windows = ["windows-curses; sys_platform == 'win32'"]

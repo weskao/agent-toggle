@@ -43,3 +43,23 @@ We follow [SemVer](https://semver.org/):
 
 Use conventional commit subjects (`feat(scope): ...`, `fix(scope): ...`),
 keep changes focused, and update `README.md` when behaviour changes.
+
+## Releasing
+
+To release a new version:
+
+1. Bump `__version__` in `agent_toggle/__init__.py` and update `CHANGELOG.md`
+   under the `[Unreleased]` section. Merge these changes to `main` with a
+   conventional commit subject (e.g., `chore(release): v0.2.0`).
+2. Ensure CI is green on `main` before proceeding.
+3. Create an annotated tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"` (where
+   `X.Y.Z` matches `__version__` exactly).
+4. Push the tag: `git push origin vX.Y.Z`. This triggers the release workflow.
+5. If reviewers are configured for the `pypi` environment, approve the
+   `publish` job in the GitHub Actions UI.
+6. Watch the `smoke` job in the workflow run. It installs the published version
+   from PyPI on macOS and verifies a `disable` / `enable` round trip.
+
+**Action pins:** GitHub Actions in `ci.yml` are pinned by full commit SHA with a
+`# vX.Y.Z` comment that notes the semantic version. Action pins are updated
+deliberately (not automatically) when you decide to upgrade.

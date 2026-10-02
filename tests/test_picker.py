@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest import mock
 
 from base import SandboxCase
 
@@ -110,3 +111,85 @@ class PickerTest(SandboxCase):
     def test_cost_cell_shows_saving_for_parked(self) -> None:
         self.assertEqual(picker.Row("claude", "skill", "a", True, 12).cost_cell, "12")
         self.assertEqual(picker.Row("claude", "skill", "a", False, 0, 7).cost_cell, "(7)")
+
+
+class FakeWin:
+    """Just enough of a curses window: records addnstr calls, replays queued keys."""
+
+    def __init__(self, keys=(), size=(8, 60)):
+        self.size, self.keys, self.calls = size, list(keys), []
+
+    def getmaxyx(self):
+        return self.size
+
+    def addnstr(self, y, x, text, n, attr=0):
+        self.calls.append((y, x, text[:n], attr))
+
+    def get_wch(self):
+        return self.keys.pop(0)
+
+    def erase(self): pass
+    def noutrefresh(self): pass
+    def keypad(self, flag): pass
+
+
+@unittest.skipIf(picker is None, "curses unavailable")
+class PickerColorTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.rows = [picker.Row("claude", "skill", "a", True, 5),
+                     picker.Row("codex", "skill", "b", False, 0, 7)]
+        self.rows[1].staged = True            # pending enable
+        p = mock.patch.multiple(
+            picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
+            start_color=mock.DEFAULT, use_default_colors=mock.DEFAULT,
+            init_pair=mock.DEFAULT, create=True)
+        self.m = p.start()
+        self.addCleanup(p.stop)
+        cp = mock.patch.object(picker.curses, "color_pair", side_effect=lambda n: n << 8)
+        cp.start()
+        self.addCleanup(cp.stop)
+
+    def test_state_pair(self) -> None:
+        self.assertEqual(picker.state_pair(self.rows[0]), picker.P_LIVE)
+        self.assertEqual(picker.state_pair(self.rows[1]), picker.P_PENDING)
+        self.rows[1].staged = False
+        self.assertEqual(picker.state_pair(self.rows[1]), picker.P_PARKED)
+
+    def test_monochrome_draw_is_one_call_per_row_with_todays_attrs(self) -> None:
+        win = FakeWin()
+        picker.draw(win, self.rows, "", 0, 0, 1, "chips", color=False)
+        body = [c for c in win.calls if 1 <= c[0] <= 2]
+        self.assertEqual([c[0] for c in body], [1, 2])
+        self.assertEqual(body[0][3], picker.curses.A_REVERSE)
+        self.assertEqual(body[1][3], picker.curses.A_NORMAL | picker.curses.A_BOLD)
+        self.assertTrue(all(len(c[2]) == 59 for c in body))
+
+    def test_color_draw_segments_rebuild_same_text_and_cursor_row_stays_reversed(self) -> None:
+        mono, col = FakeWin(), FakeWin()
+        picker.draw(mono, self.rows, "", 0, 0, 1, color=False)
+        picker.draw(col, self.rows, "", 0, 0, 1, color=True)
+        for y in (1, 2):
+            text = "".join(c[2] for c in sorted(col.calls, key=lambda c: c[1]) if c[0] == y)
+            self.assertEqual(text, next(c[2] for c in mono.calls if c[0] == y))
+        cursor = [c for c in col.calls if c[0] == 1]
+        self.assertEqual(len(cursor), 1)                       # one reversed bar
+        self.assertTrue(cursor[0][3] & picker.curses.A_REVERSE)
+        self.assertEqual((cursor[0][3] >> 8) & 0xFF, picker.P_LIVE)
+        other = {c[1]: (c[3] >> 8) & 0xFF for c in col.calls if c[0] == 2}
+        self.assertEqual(sorted(other.values()),
+                         [0, picker.P_HARNESS, picker.P_TYPE, picker.P_PENDING])
+
+    def test_loop_without_has_colors_never_touches_pairs(self) -> None:
+        with mock.patch.object(picker.curses, "has_colors", return_value=False):
+            out = picker.loop(FakeWin(["\t", "\n"]), self.rows, color=True)
+        self.assertEqual([r.name for r in out], ["a", "b"])
+        self.m["start_color"].assert_not_called()
+        self.m["init_pair"].assert_not_called()
+
+    def test_loop_with_colors_inits_five_pairs_and_color_off_skips(self) -> None:
+        with mock.patch.object(picker.curses, "has_colors", return_value=True):
+            self.assertIsNone(picker.loop(FakeWin(["\x1b"]), self.rows, color=True))
+            self.assertEqual(self.m["init_pair"].call_count, 5)
+            self.m["init_pair"].reset_mock()
+            self.assertIsNone(picker.loop(FakeWin(["\x1b"]), self.rows, color=False))
+            self.m["init_pair"].assert_not_called()

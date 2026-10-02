@@ -46,7 +46,7 @@ from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
 from .mechanisms import dir_view, validate_name
-from .output import CliError, Result, die
+from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
 
 
@@ -84,8 +84,9 @@ def cmd_list(type_filter: str | None, state: dict, out: Result,
         extra += f"  shared with {shared}" if shared else ""
         extra += f"  project {proj}" if proj else ""
         at = str(v.get("at", "?"))
-        out.say(f"  {v.get('harness', '?')!s:<9} {v.get('type')!s:<8} {v.get('name')!s:<36} "
-                f"since {at[:10]}{extra}")
+        who = out.paint(f"{v.get('harness', '?')!s:<9}", "cyan")
+        out.say(f"  {who} {v.get('type')!s:<8} {v.get('name')!s:<36} "
+                + out.paint(f"since {at[:10]}{extra}", "dim"))
         out.row(v.get("harness"), v.get("type"), v.get("name"), "list", "disabled",
                 f"since {at[:10]}", show=False, at=v.get("at"),
                 mechanism=v.get("mechanism"), companions=len(_list_of(v, "companions")),
@@ -122,14 +123,15 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
             continue
         home, backend = h.home, h.backend
         if not home.is_dir():
-            out.say(f"{hname:<9} {home}  (not installed)")
+            out.say(f"{out.paint(f'{hname:<9}', 'cyan')} {home}  "
+                    + out.paint("(not installed)", "dim"))
             out.row(hname, None, None, "status", "not-installed", "", show=False,
                     home=str(home))
             continue
         bits = [t for t in h.types
                 if t not in h.dirs or any((home / s).is_dir() for s in h.dirs[t])]
         shown = ",".join(bits) if h.types else "(found, nothing supported yet)"
-        out.say(f"{hname:<9} {home}  types: {shown}  mcp: {backend or '-'}")
+        out.say(f"{out.paint(f'{hname:<9}', 'cyan')} {home}  types: {shown}  mcp: {backend or '-'}")
         info: dict = {}
         for t in bits:
             if t not in h.dirs:
@@ -208,7 +210,9 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
         what = (f"~{i.tokens:>6} tok  {i.basis}" if i.enabled
                 else f"~{0:>6} tok  parked, would save ~{i.would_save} tok  ({i.basis})")
         extra = f"  shared with {', '.join(i.shared_with)}" if i.shared_with else ""
-        out.say(f"  {i.harness:<9} {i.type:<8} {i.name:<36} {what}{extra}")
+        tail = what + extra
+        out.say(f"  {out.paint(f'{i.harness:<9}', 'cyan')} {i.type:<8} {i.name:<36} "
+                + (tail if i.enabled else out.paint(tail, "dim")))
         out.row(i.harness, i.type, i.name, "cost", "ok", i.basis, show=False,
                 enabled=i.enabled, tokens=i.tokens, would_save=i.would_save,
                 chars=i.chars, shared_with=list(i.shared_with))
@@ -226,7 +230,8 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
         from .ui import picker as ui
     except ImportError as e:                 # no curses build (rare)
         die(f"interactive UI unavailable: {e}")
-    changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run)
+    changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run,
+                      color=use_color(sys.stdout, out.color))
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
@@ -357,9 +362,9 @@ def normalize_argv(argv: list[str]) -> list[str]:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--harness":
+        if a in ("--harness", "--color"):
             i += 2
-        elif a in _GLOBAL_FLAGS or a.startswith("--harness="):
+        elif a in _GLOBAL_FLAGS or a.startswith(("--harness=", "--color=")):
             i += 1
         else:
             if a.startswith("--") and a[2:] in COMMANDS:
@@ -385,6 +390,8 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--harness", choices=list(harnesses()), default=argparse.SUPPRESS,
                         help="target harness (default: claude)")
+    common.add_argument("--color", choices=COLOR_MODES, default=argparse.SUPPRESS,
+                        help="colorize output (default: auto; honors NO_COLOR / FORCE_COLOR)")
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                         help="print exactly one JSON document instead of text")
     common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
@@ -438,7 +445,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code (the process exit code)."""
     argv = normalize_argv(sys.argv[1:] if argv is None else argv)
-    out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv)
+    out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv,
+                 scan_color(argv))
     try:
         args = build_parser().parse_args(argv)
         out.command = "ui" if args.command == "pick" else args.command

@@ -260,6 +260,15 @@ class SpellingTest(CliCase):
                          self.run_cli("--harness=codex", "list"))
         self.assertEqual(self.run_cli("--pick", "--json"), self.run_cli("pick", "--json"))
 
+    def test_color_flag_before_a_double_dash_command(self) -> None:
+        self.write("skills/demo-skill/SKILL.md")
+        for flag in (["--color", "never"], ["--color=never"], ["--color", "always", "--json"]):
+            for cmd in ("status", "list", "cost", "doctor"):
+                self.assertEqual(self.run_cli(*flag, f"--{cmd}"), self.run_cli(*flag, cmd), (flag, cmd))
+        self.assertEqual(self.run_cli("--color", "never", "--harness", "codex", "--list"),
+                         self.run_cli("--harness", "codex", "list"))
+        self.assertEqual(self.run_cli("--color", "bogus", "status")[0], 2)
+
     def test_help_and_version_without_dashes(self) -> None:
         for word in ("help", "version"):
             self.assertEqual(self.run_cli(word), self.run_cli(f"--{word}"))

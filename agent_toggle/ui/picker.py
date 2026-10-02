@@ -107,8 +107,39 @@ def cycle(options: tuple[str, ...] | list[str], current: str) -> str:
 
 # -------------------------------------------------------------------- drawing
 
+# curses colour-pair ids; 0 is the terminal default.
+P_HARNESS, P_TYPE, P_LIVE, P_PARKED, P_PENDING = 1, 2, 3, 4, 5
+
+
+def state_pair(r: Row) -> int:
+    """Pair id for a row's state cell: staged change > ticked (live) > unticked (parked)."""
+    return P_PENDING if r.changed else P_LIVE if r.staged else P_PARKED
+
+
+def init_colors(color: bool) -> bool:
+    """Set up the pairs; True only when colours are wanted AND the terminal has them."""
+    if not color:
+        return False
+    try:
+        if not curses.has_colors():
+            return False
+        curses.start_color()
+        try:
+            curses.use_default_colors()
+            bg = -1
+        except curses.error:
+            bg = curses.COLOR_BLACK
+        for pid, fg in ((P_HARNESS, curses.COLOR_CYAN), (P_TYPE, curses.COLOR_BLUE),
+                        (P_LIVE, curses.COLOR_GREEN), (P_PARKED, curses.COLOR_YELLOW),
+                        (P_PENDING, curses.COLOR_MAGENTA)):
+            curses.init_pair(pid, fg, bg)
+    except curses.error:
+        return False
+    return True
+
+
 def draw(win, rows: list[Row], query: str, cur: int, top: int, pending: int,
-         chips: str = "") -> None:
+         chips: str = "", color: bool = False) -> None:
     win.erase()
     height, width = win.getmaxyx()
     body = max(1, height - 3)
@@ -124,11 +155,26 @@ def draw(win, rows: list[Row], query: str, cur: int, top: int, pending: int,
         box = "[x]" if r.staged else "[ ]"
         mark = "*" if r.changed else " "
         also = f"  (+{','.join(r.shared)})" if r.shared else ""
-        line = f" {mark}{box} {r.cost_cell:>7}  {r.harness:<9}{r.type:<8}{r.name}{also}"
+        parts = (f" {mark}{box} {r.cost_cell:>7}  ", f"{r.harness:<9}", f"{r.type:<8}",
+                 f"{r.name}{also}")
+        line = "".join(parts)
         attr = curses.A_REVERSE if idx == cur else curses.A_NORMAL
         if r.changed:
             attr |= curses.A_BOLD
-        win.addnstr(1 + i, 0, line.ljust(width - 1), width - 1, attr)
+        if not color:
+            win.addnstr(1 + i, 0, line.ljust(width - 1), width - 1, attr)
+        elif idx == cur:                # one reversed bar, tinted by state
+            win.addnstr(1 + i, 0, line.ljust(width - 1), width - 1,
+                        attr | curses.color_pair(state_pair(r)))
+        else:
+            x = 0
+            for n, (text, pid) in enumerate(zip(parts, (state_pair(r), P_HARNESS, P_TYPE, 0))):
+                if x >= width - 1:
+                    break
+                if n == len(parts) - 1:
+                    text = text.ljust(width - 1 - x)
+                win.addnstr(1 + i, x, text, width - 1 - x, attr | curses.color_pair(pid))
+                x += len(text)
 
     count = f" {len(rows)} shown  |  ~{sum(r.tokens for r in rows)} tok  |  {chips}"
     if pending:
@@ -151,7 +197,8 @@ def show_help(win) -> None:
         pass
 
 
-def loop(win, rows: list[Row]) -> list[Row] | None:
+def loop(win, rows: list[Row], color: bool = False) -> list[Row] | None:
+    color = init_colors(color)
     curses.curs_set(0)
     win.keypad(True)
     query, cur, top = "", 0, 0
@@ -172,7 +219,7 @@ def loop(win, rows: list[Row]) -> list[Row] | None:
 
         pending = sum(1 for r in rows if r.changed)
         draw(win, shown, query, cur, top, pending,
-             f"harness:{harness} type:{type_} sort:{sort}")
+             f"harness:{harness} type:{type_} sort:{sort}", color)
 
         try:
             key = win.get_wch()
@@ -218,7 +265,7 @@ def loop(win, rows: list[Row]) -> list[Row] | None:
         # KEY_RESIZE and anything else just redraw
 
 
-def pick(state: dict, harnesses: dict, plugins: bool = True) -> list[Row] | None:
+def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False) -> list[Row] | None:
     """`plugins=False` skips the `claude plugin list` call (a dry run never shells out)."""
     notes: list[str] = []
     rows = collect(state, harnesses, notes.append, plugins)
@@ -226,7 +273,7 @@ def pick(state: dict, harnesses: dict, plugins: bool = True) -> list[Row] | None
         print("nothing to show")
         return None
     try:
-        return curses.wrapper(loop, rows)
+        return curses.wrapper(loop, rows, color)
     finally:
         for n in notes:                 # after curses is torn down, where they are readable
             print(f"WARNING  {n}")

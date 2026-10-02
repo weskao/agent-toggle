@@ -25,17 +25,17 @@ the same commit.
 
 Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`.
 
-- [ ] one small color helper in `agent_toggle/output.py` (stdlib ANSI): green ok, red
+- [x] one small color helper in `agent_toggle/output.py` (stdlib ANSI): green ok, red
       error, yellow warning, cyan harness name, dim for secondary text
-- [ ] `--color auto|always|never` option flag; `auto` colors only on a TTY and honors
+- [x] `--color auto|always|never` option flag; `auto` colors only on a TTY and honors
       `NO_COLOR`, `FORCE_COLOR` and `TERM=dumb`
-- [ ] color applied to `status`, `list`, `cost`, `disable`/`enable` results, `doctor`,
+- [x] color applied to `status`, `list`, `cost`, `disable`/`enable` results, `doctor`,
       warnings and errors
-- [ ] picker: curses color pairs, monochrome fallback when `curses.has_colors()` is false
+- [x] picker: curses color pairs, monochrome fallback when `curses.has_colors()` is false
 - [ ] Windows: enable virtual-terminal processing, or stay plain when it fails
-- [ ] tests: non-TTY, `--json` and `NO_COLOR=1` output has no escape bytes and equals the
+- [x] tests: non-TTY, `--json` and `NO_COLOR=1` output has no escape bytes and equals the
       pre-3.5 output; forced-color `status` and `cost` carry the expected escapes
-- [ ] README documents `--color` and `NO_COLOR`; CHANGELOG entry; the two-spellings table
+- [x] README documents `--color` and `NO_COLOR`; CHANGELOG entry; the two-spellings table
       in `CLAUDE.md` needs no change (option flag, not a command)
 
 ### Phase 4 — PyPI release

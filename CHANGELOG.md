@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Colorful CLI output: `--color auto|always|never` flag controls ANSI color for
+  human output; `auto` (default) honors `NO_COLOR`, `FORCE_COLOR` and `TERM=dumb`
+  environment variables and colors only on a TTY; `--json` is never colored and
+  piped output stays plain unless `--color always` or `FORCE_COLOR` is set; the
+  picker uses curses color pairs and falls back to monochrome when colors are
+  unavailable.
 - Copilot adapter: skills, agents and MCP servers (`~/.copilot/mcp-config.json`,
   through a user-scope strict-JSON backend); `config.json` is never edited and
   plugins are not yet supported.
@@ -62,9 +68,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Log rows carry `harness`, `batch`, `project` and `scope`; `agent_toggle/ops.py`
   is the single apply path for `disable`, `enable`, the picker, `profile apply`,
   `undo` and `enable --all`.
+- Tag-triggered release workflow (`.github/workflows/release.yml`) with PyPI
+  trusted publishing (OIDC, no stored tokens, GitHub environment `pypi`) and a
+  macOS post-publish smoke job that installs the published version and runs a
+  `disable` / `enable` round trip in a throwaway HOME.
+- PyPI metadata in `pyproject.toml`: classifiers, keywords, project URLs
+  (homepage, repository, issues, changelog), SPDX license identifier, and
+  setuptools ≥ 77 as a build backend requirement.
 
 ### Changed
 
+- GitHub Actions in `ci.yml` pinned by commit SHA with a `# vX.Y.Z` comment
+  denoting the semantic version of the action; deliberately updated together.
 - MCP entries whose `tools` is `["*"]` now get the flat token estimate on every
   backend instead of counting as one tool.
 - A dry run whose plan contains a failing item exits `1`, not `0`.
