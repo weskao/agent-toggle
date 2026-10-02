@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
 from base import SandboxCase
+from test_cli_surface import CliCase, snapshot
 
 from agent_toggle import fs, mechanisms
 from agent_toggle.backends import flag_json, mcp_json, mcp_toml
@@ -153,6 +155,87 @@ class ProjectMcpJsonTest(SandboxCase):
             mcp_json.read_project_mcp(self.tmp / "missing.json")
         with self.assertRaises(mcp_json.ProjectMcpError):
             mcp_json.project_mcp_remove(self.put('{"mcpServers": {}}'), "a-mcp")
+
+
+class CopilotMcpTest(CliCase):
+    """copilot's user-scope strict-JSON mcp-config.json (backend `json`)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.copytree(FIXTURES / "copilot", self.tmp, dirs_exist_ok=True)
+        self.cfg = self.tmp / ".copilot" / "mcp-config.json"
+        self.cli_rc = 0
+
+    def test_state_entry_and_backup_payload(self) -> None:
+        before = self.cfg.read_bytes()
+        rc, env = self.run_json("disable", "mcp", "example-mcp", "--harness", "copilot")
+        self.assertEqual(rc, 0, env)
+        entry = json.loads(fs.state_file().read_text(encoding="utf-8"))[
+            "disabled"]["copilot:mcp:example-mcp"]
+        self.assertEqual((entry["backend"], entry["scope"], entry["project"],
+                          entry["mechanism"]), ("json", "user", None, "remove_backup"))
+        bp = fs.backup_dir() / "copilot__example-mcp.json"
+        self.assertEqual(entry["backup"], str(bp))
+        payload = json.loads(bp.read_text(encoding="utf-8"))["json"]
+        self.assertEqual(payload["entry"]["headers"], {"Authorization": "Bearer test-token-000"})
+        self.assertEqual(payload["before"], before.decode("utf-8"))
+        self.assertNotIn("example-mcp", self.cfg.read_text(encoding="utf-8"))
+        self.assertIn("other-mcp", self.cfg.read_text(encoding="utf-8"))
+        if os.name == "posix":
+            self.assertEqual(bp.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.run_json("enable", "mcp", "example-mcp",
+                                       "--harness", "copilot")[0], 0)
+        self.assertEqual(self.cfg.read_bytes(), before)
+        self.assertEqual(self.cli_calls, [])           # never shells out to claude
+
+    def test_enable_merges_when_the_file_changed_since_disable(self) -> None:
+        self.run_json("disable", "mcp", "example-mcp", "--harness", "copilot")
+        self.cfg.write_text('{"mcpServers": {"other-mcp": {"command": "x"}}, "extra": 1}\n',
+                            encoding="utf-8")
+        self.assertEqual(self.run_json("enable", "mcp", "example-mcp",
+                                       "--harness", "copilot")[0], 0)
+        cfg = json.loads(self.cfg.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["extra"], 1)
+        self.assertEqual(cfg["mcpServers"]["example-mcp"]["url"], "https://example.invalid/mcp")
+
+    def test_jsonc_symlink_and_dry_run_leave_everything_untouched(self) -> None:
+        self.cfg.write_text('{\n  // machine-managed\n  "mcpServers": {"example-mcp": {}}\n}\n',
+                            encoding="utf-8")
+        link = self.tmp / "real.json"
+
+        def snap() -> dict:                # the tool's own state/log dir may appear
+            return {k: v for k, v in snapshot(self.tmp).items()
+                    if not k.startswith(".agent-toggle")}
+
+        before = snap()
+        rc, env = self.run_json("disable", "mcp", "example-mcp", "--harness", "copilot")
+        self.assertEqual((rc, env["results"][0]["status"]), (1, "error"))
+        self.assertIn("not strict JSON", env["results"][0]["detail"])
+        self.assertEqual(snap(), before)
+        if os.name == "posix":
+            self.cfg.rename(link)
+            self.cfg.symlink_to(link)
+            link.write_text('{"mcpServers": {"example-mcp": {}}}', encoding="utf-8")
+            before = snap()
+            rc, env = self.run_json("disable", "mcp", "example-mcp", "--harness", "copilot")
+            self.assertEqual(rc, 1)
+            self.assertIn("symlink", env["results"][0]["detail"])
+            self.assertEqual(snap(), before)
+        self.assertEqual(self.cli_calls, [])
+
+    def test_a_tampered_claude_entry_cannot_route_through_the_json_backend(self) -> None:
+        self.claude_json({"mcpServers": {"x": {"command": "x"}}})
+        bp = fs.backup_dir() / "claude__x.json"
+        fs.private_dir(fs.backup_dir())
+        bp.write_text('{"json": {"entry": {}, "before": "", "after": ""}}', encoding="utf-8")
+        fs.state_file().write_text(json.dumps({"version": 3, "disabled": {"claude:mcp:x": {
+            "mechanism": "remove_backup", "harness": "claude", "type": "mcp", "name": "x",
+            "backend": "json", "backup": str(bp), "scope": "user", "project": None,
+            "at": "2026-01-01"}}}), encoding="utf-8")
+        rc, env = self.run_json("enable", "mcp", "x")
+        self.assertEqual(rc, 1)
+        self.assertIn("refused", env["results"][0]["detail"])
+        self.assertEqual(self.cli_calls, [])
 
 
 class FlagJsonTest(SandboxCase):

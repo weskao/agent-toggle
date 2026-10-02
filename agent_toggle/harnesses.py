@@ -21,7 +21,7 @@ PROBE_SUFFIXES = ("", ".md", ".toml", ".yaml", ".yml")
 
 @dataclass(frozen=True)
 class McpSpec:
-    backend: str                 # "claude-json" | "toml"
+    backend: str                 # "claude-json" | "toml" | "json" | "project-json"
     file: Path                   # the config file holding the servers
     key_path: tuple[str, ...]    # where the servers live inside it
 
@@ -126,6 +126,13 @@ def build(home: Path) -> dict[str, Harness]:
                 flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
                        "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
                 editable=frozenset({"openclaw.json"})),
+        # DESIGN s4: `mcp-config.json -> mcpServers`, strict JSON, backend "json". Its
+        # `config.json` is machine-managed JSONC: never listed, never in `editable`.
+        Harness("copilot", home / ".copilot",
+                dirs={"skill": ("skills",), "agent": ("agents",)},
+                mechanisms={"skill": "move", "agent": "move", "mcp": "remove_backup"},
+                mcp=McpSpec("json", home / ".copilot" / "mcp-config.json", ("mcpServers",)),
+                editable=frozenset({"mcp-config.json"})),
         # DESIGN s4: vibe keeps skills/<name>/SKILL.md; no MCP config found.
         Harness("vibe", home / ".vibe",
                 dirs={"skill": ("skills",)},

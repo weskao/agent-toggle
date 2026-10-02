@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "other-mcp": {
+      "type": "local",
+      "command": "other",
+      "tools": ["*"]
+    },
+    "example-mcp": {
+      "type": "http",
+      "url": "https://example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer test-token-000"
+      },
+      "tools": ["*"]
+    }
+  }
+}

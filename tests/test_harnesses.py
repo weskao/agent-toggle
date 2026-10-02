@@ -15,7 +15,8 @@ TODAY = {
     ("codex", t) for t in ("skill", "agent", "command", "plugin", "mcp")
 } | {("opencode", "skill"), ("opencode", "command"),
      ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent"),
-     ("openclaw", "plugin"), ("opencode", "mcp"), ("vibe", "skill")}
+     ("openclaw", "plugin"), ("opencode", "mcp"), ("vibe", "skill"),
+     ("copilot", "skill"), ("copilot", "agent"), ("copilot", "mcp")}
 
 
 class HarnessTableTest(SandboxCase):
@@ -51,6 +52,10 @@ class HarnessTableTest(SandboxCase):
         self.assertEqual(t["codex"].backend, "toml")
         self.assertEqual(t["grok"].mcp.file, self.tmp / ".grok" / "config.toml")
         self.assertIsNone(t["openclaw"].mcp)
+        self.assertEqual(t["copilot"].home, self.tmp / ".copilot")
+        self.assertEqual(t["copilot"].backend, "json")
+        self.assertEqual(t["copilot"].mcp.file, self.tmp / ".copilot" / "mcp-config.json")
+        self.assertEqual(t["copilot"].editable, {"mcp-config.json"})
 
     def test_flag_pairs_are_declared_and_editable(self) -> None:
         for n, h in build(self.tmp).items():

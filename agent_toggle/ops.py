@@ -14,6 +14,7 @@ from .harnesses import harnesses, project_view
 from .mechanisms import (
     fail_row,
     toggle_dir_type,
+    toggle_json_mcp,
     toggle_mcp,
     toggle_plugin,
     toggle_project_mcp,
@@ -65,6 +66,9 @@ def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: st
         elif mech == "remove_backup" and h.project:      # the repo's own .mcp.json
             fails += toggle_project_mcp(action, names, state, harness, out, dry_run, table,
                                         batch=batch)
+        elif mech == "remove_backup" and h.backend == "json":    # user-scope strict JSON file
+            fails += toggle_json_mcp(action, names, state, harness, out, dry_run, table,
+                                     batch=batch)
         elif mech == "remove_backup" or (mech == "flag" and type_ == "mcp"):
             fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out,
                                 dry_run, batch=batch)
