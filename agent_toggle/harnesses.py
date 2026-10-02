@@ -33,7 +33,8 @@ class Harness:
     dirs: Mapping[str, tuple[str, ...]]      # type -> candidate subdirs
     mechanisms: Mapping[str, str]            # type -> move|flag|remove_backup|native_cli
     mcp: McpSpec | None = None
-    flags: Mapping[str, tuple] = field(default_factory=dict)   # type -> (file, pointer)
+    # type -> (file relative to home, pointer tuple; "<name>" is replaced by the item name)
+    flags: Mapping[str, tuple] = field(default_factory=dict)
     editable: frozenset[str] = frozenset()   # files the tool may write
     aliases_from: tuple[str, ...] = ()
 
@@ -108,11 +109,22 @@ def build(home: Path) -> dict[str, Harness]:
         # Assumption (DESIGN s11 q2): with no skills.paths, `skills/` is its own dir.
         Harness("opencode", oc,
                 dirs={"skill": opencode_skill_dirs(home, oc), "command": ("command",)},
-                mechanisms={"skill": "move", "command": "move"},
+                # ASSUMED shape (DESIGN s4/s11, not verified on a real install):
+                # `mcp.<name>.enabled` in opencode.json, strict JSON only.
+                mechanisms={"skill": "move", "command": "move", "mcp": "flag"},
+                flags={"mcp": ("opencode.json", ("mcp", "<name>", "enabled"))},
+                editable=frozenset({"opencode.json"}),
                 aliases_from=("skills.paths",)),
+        # ASSUMED shapes (DESIGN s4/s11, not verified on a real install):
+        # `skills.entries.<name>.enabled` and `plugins.entries.<name>.enabled` in
+        # openclaw.json. A skill uses the flag only when its entry exists, else
+        # the dir move; a plugin is flag-only.
         Harness("openclaw", home / ".openclaw",
                 dirs={"skill": ("skills",), "agent": ("agents",)},
-                mechanisms={"skill": "move", "agent": "move"}),
+                mechanisms={"skill": "move", "agent": "move", "plugin": "flag"},
+                flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
+                       "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
+                editable=frozenset({"openclaw.json"})),
     )}
 
 

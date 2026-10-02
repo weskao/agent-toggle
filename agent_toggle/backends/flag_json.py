@@ -33,6 +33,10 @@ class FlagError(ValueError):
     """The flag cannot be read or set safely; the message says why."""
 
 
+class FlagMissing(FlagError):
+    """The file or the pointer does not exist (as opposed to an unsafe file)."""
+
+
 def _no_dupes(pairs):
     seen = set()
     for k, _ in pairs:
@@ -71,11 +75,11 @@ def _span(text: str, pointer: Sequence[str], where: str) -> tuple[int, int, bool
     i = _ws(text, 1 if text.startswith(BOM) else 0)
     for depth, want in enumerate(pointer):
         if text[i:i + 1] != "{":
-            raise FlagError(f"{where}: {shown} not found")
+            raise FlagMissing(f"{where}: {shown} not found")
         i = _ws(text, i + 1)
         while True:
             if text[i] == "}":
-                raise FlagError(f"{where}: {shown} not found")
+                raise FlagMissing(f"{where}: {shown} not found")
             key, i = scanstring(text, i + 1)         # text[i] is the opening quote
             i = _ws(text, _ws(text, i) + 1)          # past ':'
             if key == want:
@@ -96,7 +100,7 @@ def _load(file: Path) -> str:
     except UnicodeDecodeError as e:
         raise FlagError(f"{file}: not strict JSON (not UTF-8: {e})") from None
     except OSError as e:                         # missing / unreadable: a row, not a traceback
-        raise FlagError(f"{file}: cannot read ({e.strerror or e})") from None
+        raise (FlagMissing if isinstance(e, FileNotFoundError) else FlagError)(f"{file}: cannot read ({e.strerror or e})") from None
     _strict(text, str(file))
     return text
 

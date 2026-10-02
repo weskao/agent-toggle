@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import fs
+from .backends.flag_json import FlagError, FlagMissing, read_flag, set_flag
 from .backends.mcp_json import (
     claude_mcp_config,
     claudeai_connector_names,
@@ -69,6 +70,9 @@ def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> 
             entry = {k: v for k, v in entry.items() if k != "project"}
     elif entry.get("backend") == "claude-json" and entry.get("scope") is not None:
         return f"unknown mcp scope {entry.get('scope')!r}"
+    if entry.get("mechanism") == "flag" and not entry.get("connector"):
+        if reason := _flag_reason(entry, table):
+            return reason
     comps = entry.get("companions") or []
     if not isinstance(comps, list):
         return "companions is not a list"
@@ -80,6 +84,33 @@ def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> 
         if not (home and _abs_path(dst) and fs.contained(Path(dst), home)):
             return f"companion origin outside the harness home: {dst!r}"
     return check_entry(entry, table, key=key)
+
+
+def flag_target(h, type_: str, name: str) -> tuple[Path, tuple[str, ...]] | None:
+    """(file, pointer) the table declares for this harness/type/name, or None.
+    `<name>` in the declared pointer is the item name; the file is under the home."""
+    spec = h.flags.get(type_)
+    if not spec:
+        return None
+    rel, pointer = spec
+    return h.home / rel, tuple(name if p == "<name>" else p for p in pointer)
+
+
+def _flag_reason(entry: dict, table: dict) -> str | None:
+    """A flag entry may only replay the exact file+pointer the table declares for
+    its harness/type/name, so a tampered state file cannot aim the write elsewhere."""
+    h = table.get(entry.get("harness"))
+    target = flag_target(h, entry.get("type"), entry.get("name")) if h else None
+    f = entry.get("flag")
+    if target is None or not isinstance(f, dict):
+        return "flag entry has no flag record for this harness/type"
+    if not isinstance(f.get("file"), str) or Path(f["file"]) != target[0]:
+        return f"flag file is not the declared one: {f.get('file')!r}"
+    if not isinstance(f.get("pointer"), list) or tuple(f["pointer"]) != target[1]:
+        return f"flag pointer is not the declared one: {f.get('pointer')!r}"
+    if not isinstance(f.get("was"), bool):
+        return "flag.was is not a boolean"
+    return None
 
 
 def _ok(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
@@ -191,16 +222,110 @@ def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> Dir
                    sorted({hn for hn, _ in found}))
 
 
+def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness: str,
+                out: Result, dry_run: bool = False, *, batch: str = BATCH,
+                optional: bool = False) -> tuple[int, list[str]]:
+    """Flip one boolean in the harness's strict-JSON config (mechanism `flag`).
+
+    Returns (fails, rest). With `optional` (a `move` type that ALSO has a flag),
+    a name with no flag entry (disable) or no flag state entry (enable) is not
+    handled here: it comes back in `rest` for the dir-move path. Otherwise every
+    name is handled and a missing/unsafe flag is an error row. The flag shapes
+    are ASSUMED (DESIGN s4/s11); JSONC/JSON5 is refused by flag_json."""
+    table = harnesses()
+    h = table[harness]
+    rest: list[str] = []
+    fails = 0
+
+    def fail(name: str, msg: str) -> int:
+        return fail_row(out, dry_run, harness, type_, action, name, msg, batch=batch)
+
+    for name in names:
+        fs.refresh_lock()
+        key = f"{harness}:{type_}:{name}"
+        file, pointer = flag_target(h, type_, name)
+        entry = state["disabled"].get(key)
+        if file.name not in h.editable:
+            if optional:
+                rest.append(name)
+            else:
+                fails += fail(name, f"{file.name} is not an editable {harness} file")
+            continue
+        if action == "disable":
+            if entry:               # never overwrite another mechanism's record
+                fails += fail(name, "already disabled (see `agent-toggle list`)")
+                continue
+            try:
+                was = read_flag(file, pointer)
+            except FlagError as e:
+                if not optional:
+                    fails += fail(name, str(e))
+                elif isinstance(e, FlagMissing):
+                    rest.append(name)               # no flag entry: plain dir move
+                else:                               # unsafe config: keep the dir move, say why
+                    out.warn(f"{e}; parking {name} by dir move instead")
+                    rest.append(name)
+                continue
+            if not was:
+                fails += fail(name, f"{'.'.join(pointer)} is already false in {file}")
+            elif dry_run:
+                _ok(out, dry_run, harness, type_, action, name, "")
+            else:
+                try:
+                    set_flag(file, pointer, False)
+                except (FlagError, fs.WriteError) as e:
+                    fails += fail(name, str(e))
+                    continue
+                state["disabled"][key] = {
+                    "mechanism": "flag", "harness": harness, "type": type_, "name": name,
+                    "flag": {"file": str(file), "pointer": list(pointer), "was": was},
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+                _ok(out, dry_run, harness, type_, action, name,
+                    f"disabled (set {'.'.join(pointer)} to false in {file})")
+                log(action, type_, name, "ok", str(file), harness=harness, batch=batch)
+            continue
+        if optional and not (entry or {}).get("flag"):
+            rest.append(name)
+            continue
+        # _flag_reason is NOT gated on the entry's own mechanism/connector fields
+        # (they are untrusted): a tampered entry must refuse, never crash or replay.
+        refused = _refusal(entry, table, key, ())
+        if not refused and entry and (why := _flag_reason(entry, table)):
+            refused = f"refused: {why}"
+        if refused:
+            fails += fail(name, refused)
+        elif not entry:
+            fails += fail(name, f"no flag state entry to restore (if an interrupted run left "
+                                f"{'.'.join(pointer)} false in {file}, set it to true by hand)")
+        elif dry_run:
+            _ok(out, dry_run, harness, type_, action, name, "")
+        else:
+            try:
+                set_flag(file, pointer, entry["flag"]["was"])
+            except (FlagError, fs.WriteError) as e:
+                fails += fail(name, str(e))
+                continue
+            state["disabled"].pop(key, None)
+            _ok(out, dry_run, harness, type_, action, name,
+                f"enabled (restored {'.'.join(pointer)} in {file})")
+            log(action, type_, name, "ok", str(file), harness=harness, batch=batch)
+    return fails, rest
+
+
 def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                     harness: str, home: Path, out: Result | None = None,
                     dry_run: bool = False, *, batch: str = BATCH) -> int:
     """Park / restore skills, agents, commands. dry_run plans and writes nothing."""
     out = out or Result()
     table = harnesses()
-    views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
     fails = 0
+    if type_ in table[harness].flags:            # openclaw skill: flag when an entry exists
+        fails, names = toggle_flag(action, type_, names, state, harness, out, dry_run,
+                                   batch=batch, optional=True)
+    views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
 
-    if action == "disable":
+    if action == "disable" and names:
         for v in views:
             ohome = home if v.owner == harness else table[v.owner].home
             if not gitignored(v.parked, ohome):
@@ -301,6 +426,8 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                   batch: str = BATCH) -> int:
     """Claude Code has a native, fully reversible plugin disable -- drive it."""
     out = out or Result()
+    if "plugin" in harnesses()[harness].flags:
+        return toggle_flag(action, "plugin", names, state, harness, out, dry_run, batch=batch)[0]
     if harness != "claude":
         for name in names:
             fail_row(out, dry_run, harness, "plugin", action, name,
@@ -342,6 +469,8 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                batch: str = BATCH) -> int:
     """Remove / re-add MCP servers. dry_run plans and writes nothing."""
     out = out or Result()
+    if "mcp" in harnesses()[harness].flags:
+        return toggle_flag(action, "mcp", names, state, harness, out, dry_run, batch=batch)[0]
     if backend is None:
         for name in names:
             fail_row(out, dry_run, harness, "mcp", action, name,
