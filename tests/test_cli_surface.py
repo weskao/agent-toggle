@@ -247,6 +247,7 @@ class SpellingTest(CliCase):
             ["profile", "list"], ["profile", "diff", "work"],
             ["profile", "apply", "work", "--dry-run"],
             ["undo", "--dry-run"], ["enable", "--all", "--dry-run"],
+            ["doctor"], ["doctor", "--harness", "claude"],
             ["disable", "skill", "demo-skill", "--project", str(proj), "--dry-run"],
         )
         for argv in cases:

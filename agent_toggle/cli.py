@@ -22,6 +22,7 @@ Usage:
     agent_toggle.py enable --all --project <dir> | profile save|apply|diff ... --project <dir>
     agent_toggle.py list [<type>] [--project D] # what is currently disabled
     agent_toggle.py status                     # health check
+    agent_toggle.py doctor [--harness H]       # read-only drift + state check; exit 1 on problems
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
     agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
@@ -40,7 +41,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, fs, ops, profiles, store, undo
+from . import __version__, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
@@ -331,7 +332,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims", "profile", "undo")
+            "install-shims", "profile", "undo", "doctor")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -406,6 +407,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--out", metavar="file", help="save: write the profile here instead")
     pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
     pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
+    sub.add_parser("doctor", parents=[common],
+                   help="read-only check of harness layouts and state against disk")
     up2 = sub.add_parser("undo", parents=[common], help="reverse the last logged batch")
     up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
@@ -447,6 +450,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_install_shims(args, out)
         elif cmd == "profile":
             profiles.cmd_profile(args, out)
+        elif cmd == "doctor":
+            doctor.cmd_doctor(args.harness, out)
         elif cmd == "undo":
             undo.cmd_undo(args.dry_run, args.harness, out)
         elif cmd == "enable" and args.all:
