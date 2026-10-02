@@ -344,7 +344,10 @@ agent-toggle profile list
 
 Stored as `~/.agent-toggle/profiles/<name>.json` (dir `0700`, file `0600`) as
 `{"version": 1, "saved_at": ..., "items": [{"harness", "type", "name", "live"}]}`
-holding only those fields, never a path or a secret.
+holding only those fields, never a path or a secret. A `--project` profile adds
+`"scope": "project"`; `apply` / `diff` exit 2 when the profile scope and the
+`--project` flag disagree, so a project profile never toggles user items. `save`
+skips (with a warning) items whose name `apply` would refuse.
 
 **`apply` semantics (mentioned items only).** An item the profile lists as
 live that is parked now is enabled; one it lists as parked that is live now is
@@ -411,8 +414,8 @@ help. Picker additions, all within stdlib curses:
   (`h`/`t` cycle);
 - plugin rows from `claude plugin list --json` (landed in phase 1; `ui --dry-run`
   skips them, it never shells out). Flag-mechanism items (phase 2: openclaw
-  plugins and flagged skills, opencode mcp) are listed by the picker only while parked (§8.2);
-  toggle them with `disable` / `enable`;
+  plugins and flagged skills, opencode mcp) are listed live from the config file and
+  parked from state; a flag-disabled skill shows as disabled;
 - `/` starts typing a text filter; `s`, `h`, `t`, `?` are commands only while
   the filter is empty, so a filter beginning with one of them needs the leading
   `/` (landed in phase 1). `?` shows the keys;
@@ -606,15 +609,10 @@ runs this pattern in production:
 
 Known gaps added by phase 2:
 
-- The picker, `cost` and `profile` see an openclaw plugin or opencode mcp server only
-  while it is parked (the inventory adds flag items from `state.json`): `profile
-  save` does not record live ones and `profile apply` can re-enable them but not
-  disable them. A flagged openclaw skill is listed by its directory and always shows
-  as live, even while its flag is false. `ui` and `cost` are user-scope only (no
-  `--project`).
+- `ui` and `cost` are user-scope only (no `--project`).
 - The picker has no profile key (§5.10); profiles are CLI only.
-- TOML post-write verification is textual only on Python 3.10 (no `tomllib`):
-  the block removed or appended is checked, not a full parse. `doctor` reports
+- On Python 3.10 (no `tomllib`) a TOML edit is checked textually against the original
+  (only the one block removed or appended), not parsed; `doctor` reports an existing
   codex/grok `config.toml` as `unverified` there.
 - JSONC / JSON5 config (`opencode.json`, `openclaw.json`) is refused, never
   rewritten; the flag edits require strict JSON (no comments, no trailing
@@ -630,12 +628,10 @@ Known gaps added by phase 2:
   still validated (not `$HOME`, roots or tool dirs; must exist).
 - A project with only `.mcp.json` saves only its parked servers in
   `profile save --project`; live ones are not listed (the cost inventory needs
-  `.claude/`). `list --project` and `enable --all --project` do not validate the
-  dir; a bad one just matches nothing.
+  `.claude/`).
 - Project `.mcp.json` backups hold the whole file text before and after the edit
   (mode `0600`), so they can include other servers' auth headers.
-- `doctor` flags an empty leftover `parked/<sha8>` dir as a warning, and it
-  does not check companion files.
+- `doctor` does not check companion files.
 
 ---
 

@@ -193,10 +193,9 @@ exits `4`, which is why the matrix leaves it unchecked.
 
 Flag items (openclaw plugins and flagged skills, opencode mcp) are toggled with
 `disable` / `enable`, `undo` and `enable --all`. The picker, `cost` and `profile`
-see an openclaw plugin or opencode mcp server only while it is parked (from
-`state.json`): `profile save` does not record live ones, and `profile apply` can
-re-enable them but not disable them. A flagged openclaw skill is listed by its
-directory and always shows as live.
+list them live (read from the config file) and parked (from `state.json`); an
+openclaw skill whose flag was switched off by this tool is shown as disabled even
+though its directory is still in place.
 
 The grok MCP location (`~/.grok/config.toml`, the same `[mcp_servers.<name>]`
 tables as codex, including a `.headers` sub-table for remote servers) was
@@ -302,7 +301,11 @@ one batch, logged, undoable with `undo`).
 - A user-scope profile never contains project-scope entries; with
   `--project <dir>` the same commands save, diff and apply that project's
   items (claude layout) instead -- the profile holds no directory, so `apply`
-  needs `--project` again.
+  needs `--project` again. A project profile records `"scope": "project"`;
+  applying it without `--project` (or a user profile with `--project`) exits `2`,
+  so a project profile can never disable the user's items.
+- `save` skips (with a warning) any item whose name `apply` would refuse, such as
+  an MCP server called `team/search`, so a saved profile always applies.
 
 ## Undo and `enable --all`
 
@@ -336,8 +339,7 @@ bulk operations with `--dry-run`.
 Claude layout only: `--harness codex --project ...` exits `4`, as does a
 missing directory or one with neither `.claude/` nor `.mcp.json`. `$HOME`, its
 ancestors, the tool's own state dir and the harness homes are refused (exit
-`2`) -- that is user scope. `list` and `enable --all` only filter state by the
-dir and do not run these checks (a bad dir just matches nothing). `cost` and
+`2`) -- that is user scope. `list` and `enable --all` run the same checks. `cost` and
 `ui` are user-scope only.
 
 ```sh
@@ -368,7 +370,7 @@ agent-toggle enable --all --project .
   if it is unchanged since the disable, otherwise merges the entry back in and
   reformats.
 - Moves across filesystems fall back to copy + delete (not atomic). An empty
-  `parked/<sha8>/*-disabled` dir may remain after `enable`.
+  `parked/<sha8>/*-disabled` dir may remain after `enable`; `doctor` ignores it.
 - `status` prints one `project <dir>` line per project holding parked items.
   A project with only `.mcp.json` saves only its parked servers in
   `profile save --project`; live ones are not listed (the inventory needs
@@ -390,11 +392,11 @@ passes the same tamper checks `enable` runs, modes no looser than `0600` /
 | status | meaning |
 |---|---|
 | `ok` | matches |
-| `absent` | a dir, file or key the row expects is not there -- informational |
+| `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
-| `unverified` | could not be parsed here (codex/grok `config.toml` on Python 3.10, which has no `tomllib`) |
-| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir (also when empty after `enable`) |
-| `error` | needs fixing: unparseable config (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
+| `unverified` | could not be parsed here (an existing codex/grok `config.toml` on Python 3.10, which has no `tomllib`) |
+| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one after `enable` is ignored) |
+| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
 
 Only `error` makes the exit code `1`; each problem row names the command that
 fixes it. `--harness X` for a harness that is not installed is a `note` (exit
@@ -427,7 +429,10 @@ back by hand. Please report a real install that differs.
 - Every edit of a JSON or TOML config is verified after writing (still parses,
   only the target changed) and rolled back, bytes and mode, on failure. An
   invalid codex `config.toml` makes an MCP edit fail and roll back instead of
-  being rewritten. On Python 3.10 (no `tomllib`) the TOML check is textual only.
+  being rewritten. A codex `config.toml` edit also fails (and is left as the other
+  tool wrote it) if the file changed between read and write, and CRLF files keep their
+  line endings. On Python 3.10 (no `tomllib`) the TOML check is textual only: it checks
+  against the original text that only the one block changed, but cannot parse.
 - Profiles and project dirs are validated like command-line input.
 
 ## Where state lives
