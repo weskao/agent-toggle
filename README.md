@@ -20,7 +20,7 @@ puts it back where it came from.
 
 ## Install
 
-Latest release (on PyPI from the first tagged release):
+Latest release, from [PyPI](https://pypi.org/project/agent-toggle/):
 
 ```sh
 uv tool install agent-toggle
@@ -37,7 +37,7 @@ agent-toggle --version
 Alternatively, use `pipx`:
 
 ```sh
-pipx install agent-toggle             # from the first tagged release; or: pipx install git+<repo-url>
+pipx install agent-toggle             # from PyPI; or: pipx install git+<repo-url>
 ```
 
 From a checkout, either install it editable or run it in place:

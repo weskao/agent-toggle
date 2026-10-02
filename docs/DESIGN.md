@@ -540,8 +540,8 @@ Phase status (tick a phase only once its acceptance criteria hold):
 - [x] Phase 1 — cost + structure (local gate and CI green on macOS, Linux, Windows)
 - [x] Phase 2 — profiles + scope (local gate and CI green on macOS, Linux, Windows)
 - [x] Phase 3 — remaining harnesses
-- [ ] Phase 3.5 — colorful CLI
-- [ ] Phase 4 — PyPI release
+- [x] Phase 3.5 — colorful CLI
+- [x] Phase 4 — PyPI release
 - [ ] Phase 5 — Linux + Windows
 - [ ] Phase 6 — CI hardening + Telegram failure alerts
 

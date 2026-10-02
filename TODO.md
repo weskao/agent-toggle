@@ -1,8 +1,8 @@
 # TODO
 
-What is left after phases 0-2 (merged to `main`, CI green on macOS, Linux and Windows)
-and phase 3 (done on branch `phase-3`, not yet pushed or run on CI). Source of truth for
-scope and acceptance criteria: `docs/DESIGN.md` §8.
+What is left after phases 0-4 (merged to `main`, CI green on macOS, Linux and Windows;
+`v0.1.0` published to PyPI). Source of truth for scope and acceptance criteria:
+`docs/DESIGN.md` §8.
 
 Finished items are `- [x]`, open ones `- [ ]`. Change an item to `- [x]` only when its
 acceptance criterion holds on CI, and tick the matching box in `docs/DESIGN.md` §7/§8 in
@@ -32,7 +32,7 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
 - [x] color applied to `status`, `list`, `cost`, `disable`/`enable` results, `doctor`,
       warnings and errors
 - [x] picker: curses color pairs, monochrome fallback when `curses.has_colors()` is false
-- [ ] Windows: enable virtual-terminal processing, or stay plain when it fails
+- [x] Windows: enable virtual-terminal processing, or stay plain when it fails
 - [x] tests: non-TTY, `--json` and `NO_COLOR=1` output has no escape bytes and equals the
       pre-3.5 output; forced-color `status` and `cost` carry the expected escapes
 - [x] README documents `--color` and `NO_COLOR`; CHANGELOG entry; the two-spellings table
@@ -40,12 +40,12 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
 
 ### Phase 4 — PyPI release
 
-- [ ] publish `agent-toggle` from a tag via GitHub Actions trusted publishing (OIDC,
+- [x] publish `agent-toggle` from a tag via GitHub Actions trusted publishing (OIDC,
       no stored PyPI token)
-- [ ] pin every workflow action by SHA
-- [ ] README install switches to `uv tool install agent-toggle`
-- [ ] tagged release installs on a clean macOS runner and passes the phase-0 smoke
-      test
+- [x] pin every workflow action by SHA
+- [x] README install switches to `uv tool install agent-toggle`
+- [x] tagged release installs on a clean macOS runner and passes the phase-0 smoke
+      test (v0.1.0 Release run green)
 
 ### Phase 5 — Linux + Windows
 
