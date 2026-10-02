@@ -291,6 +291,16 @@ without sharers omit the field). `disable` / `enable` result rows report
 (never `owner`; `[]` when unshared). `enable` through an alias finds the
 owner's entry.
 
+Project scope (`--project`, §5.8) uses the key `<harness>@<sha8>:<type>:<name>`
+(`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir; helpers
+`make_key` / `parse_key` in `store.py`) and carries `"project": "/dir"`, so a
+project entry and a user entry of the same name never collide. Flag entries carry
+`"mechanism": "flag"` and a `flag: {file, pointer, was}` record; claude.ai connector
+entries also store `mechanism: flag` but carry `"connector": true` and no `flag` record.
+Every log row follows `{ts, harness, type, name, action, result, batch,
+project, scope, detail}`; `batch` is one id per process and is what `undo`
+reverses.
+
 `store.py` migrates v2 → v3 on first load (adds `mechanism` from the
 presence of `backup`/`native`/`parked_at`). Migrations are forward-only and
 tested with a v2 fixture.
@@ -321,24 +331,40 @@ carries `total_tokens`, `saved_tokens` and `formula` (the estimator rules as
 data), so an external measured total can be compared. No tokenizer dependency; if a harness ships a
 token counter later, a `CostEstimator` implementation can wrap it.
 
-### 5.7 Profiles (phase 2)
+### 5.7 Profiles (phase 2, CLI only)
 
-A profile is a named set of items to keep **live**, per harness:
+A profile is a named snapshot of which items are live, per harness:
 
 ```
-agent-toggle profile save flutter          # snapshot: everything currently live
-agent-toggle profile apply flutter         # disable what is live but not in the set, enable the rest
+agent-toggle profile save flutter          # snapshot: every item, live or parked
+agent-toggle profile apply flutter         # toggle the items the profile mentions
 agent-toggle profile diff flutter          # dry view of what apply would do
 agent-toggle profile list
 ```
 
-Stored as `~/.agent-toggle/profiles/<name>.json`. Items unknown to the
-machine (profile shared from elsewhere) are reported and skipped, never
-invented. Profiles are the only portable artifact and double as the
-import/export format: `profile save <name> --out <file>` and
-`profile apply <file.json>` accept a path, so a profile can live in a
-dotfiles repo. Nothing else is exportable: `state.json` holds machine-local
-absolute paths; `mcp-backups/` holds auth material. Per-project auto-switch is deliberately **not** in scope until
+Stored as `~/.agent-toggle/profiles/<name>.json` (dir `0700`, file `0600`) as
+`{"version": 1, "saved_at": ..., "items": [{"harness", "type", "name", "live"}]}`
+holding only those fields, never a path or a secret.
+
+**`apply` semantics (mentioned items only).** An item the profile lists as
+live that is parked now is enabled; one it lists as parked that is live now is
+disabled; **anything the profile does not mention is never touched**, so an
+item installed after the save survives an `apply`. An item the profile names
+that the machine lacks gets a `skipped` row (`not on this machine`), never a
+failure and never invented. `apply` goes through `ops.apply_plan` under one
+lock and one batch, so it is logged and `undo` reverses it. `diff` and
+`apply --dry-run` plan without a lock, state, log or CLI call; because plugin
+state needs the claude CLI, plugin items show as `skipped` in a dry run.
+
+An argument ending in `.json` or containing a path separator is a file path
+(absolute paths allowed, `..` refused); anything else is a stored name.
+`profile save <name> --out <file>` and `profile apply <file.json>` let a profile
+live in a dotfiles repo. Schema version, harness, type, every item name, the
+profile name and the file size (1 MiB) are validated; any violation exits 2.
+`--project <dir>` saves, diffs and applies one project's items instead, and
+project-scope entries are never part of a user-scope profile. Nothing else is
+exportable: `state.json` holds machine-local absolute paths; `mcp-backups/` holds
+auth material. Per-project auto-switch is deliberately **not** in scope until
 `profile apply` has been used for a while; it would require a hook per
 harness and a definition of "project" that differs per harness.
 
@@ -383,12 +409,15 @@ help. Picker additions, all within stdlib curses:
 
 - cost column and `s` to sort by cost; harness and type filter chips
   (`h`/`t` cycle);
-- plugin rows from `claude plugin list --json` (landed in phase 1; flag
-  backends follow in phase 2; `ui --dry-run` skips them, it never shells out);
+- plugin rows from `claude plugin list --json` (landed in phase 1; `ui --dry-run`
+  skips them, it never shells out). Flag-mechanism items (phase 2: openclaw
+  plugins and flagged skills, opencode mcp) are listed by the picker only while parked (§8.2);
+  toggle them with `disable` / `enable`;
 - `/` starts typing a text filter; `s`, `h`, `t`, `?` are commands only while
   the filter is empty, so a filter beginning with one of them needs the leading
   `/` (landed in phase 1). `?` shows the keys;
-- `p` to apply a profile (phase 2); `--dry-run` shows the plan and exits.
+- `--dry-run` shows the plan and exits. A `p` key to apply a profile is **not
+  built**: phase 2 ships profiles as CLI only (§5.7); the picker has no profile key yet.
 
 Windows: `pip install agent-toggle[windows]` pulls `windows-curses`; without
 it `ui/menu.py` provides a numbered-menu fallback (filter prompt → numbered
@@ -423,9 +452,9 @@ and should be proven early.
 | **Secrets in backups** | MCP entries carry auth headers. Write backups and `state.json` with mode `0600`; `log.jsonl` never includes payloads; `SECURITY.md` states what is stored and where; `status` warns if the directory is group/world readable. |
 | **Concurrency** | Lock file as in §5.4. Agents and humans do run the tool simultaneously. |
 | **Sync jobs** | Detect `.synced-from-*` markers in a live dir and warn that a sync may re-create parked items; recommend parking in the *source* harness. |
-| **Harness drift** | Harness config formats change between versions. Each table row records the harness version it was verified against; `doctor` compares the live layout against the row (expected dirs/keys present) and reports "layout changed" instead of failing deep inside an operation. Fixture homes in tests freeze the verified layout. |
+| **Harness drift** | Harness config formats change between versions. Each table row records the harness version it was verified against; `doctor` compares the live layout against the row (expected dirs/keys present) and reports "layout changed" instead of failing deep inside an operation. Fixture homes in tests freeze the verified layout. Phase 2 ships it read-only (no lock, no state write, no CLI): a missing dir, file or key is an informational `absent`; only a present-but-unparseable or unsupported file is `error: layout changed`; JSONC is a `note`. |
 | **Dry run** | `--dry-run` on disable/enable/profile apply prints the plan (moves, flags, backups, shared-path warnings) and writes nothing; it exits 0, or 1 when the plan contains a failing item, exactly as the real run would. Cheap and the first thing a cautious public user looks for. `disable` / `enable` plan rows have action `would-<verb>`; every plan row has status `planned`. |
-| **Undo** | `undo` reverses the last logged batch using `log.jsonl`; `enable --all [--harness H]` restores everything. |
+| **Undo** | `undo` reverses the last logged batch using `log.jsonl`; `enable --all [--harness H]` restores everything. Done in phase 2: the reversal is its own batch (undo of undo works), rows replay in their own scope, a pre-batch log is refused. |
 | **Stale state** | `status` already reports untracked parked items and live twins; add the inverse — state entries whose `parked_at` no longer exists — with the fix command. |
 | **Name collisions** | A name may exist as both a skill and a command; the type is always explicit, and `cost`/picker rows show type. No "guess the type" convenience. |
 | **Exit codes** | `0` ok, `1` partial failure, `2` usage error, `3` locked, `4` unsupported pair. Shims branch on them. |
@@ -452,11 +481,11 @@ directories, and the promise that a disable never loses data.
 | # | threat | control | status |
 |---|---|---|---|
 | 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
-| 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | planned; schema-version check exists |
+| 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
 | 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | modes and warning done; output audit planned |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | planned: shim text, rule warning |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | argv form done; validation lands with phase 5 |
-| 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | planned; verification is a phase 2 acceptance item |
+| 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the TOML check is textual only (see §8.2) |
 | 7 | **Races and links** | one lock per batch; `safe_move` on one filesystem; refuse a park dir reached through a symlinked parent; same-user attackers are out of scope | lock and `safe_move` done |
 | 8 | **Supply chain** | zero runtime dependencies; PyPI trusted publishing (OIDC, no stored token); GitHub Actions pinned by commit SHA and kept current by Dependabot; workflows default to `contents: read` and only the publish job gets `id-token: write`; README pins installs to a tag, `git+<repo-url>@vX.Y.Z` | planned for phases 0, 4 and 6 |
 | 9 | **Installer overwrites**: `install-shims` writes into harness dirs | writes only its own shim files under `$HOME`-relative paths and refuses to overwrite a file that lacks the shim marker | planned; confirm against the current `install-shims` |
@@ -572,8 +601,41 @@ runs this pattern in production:
 - `claude.ai` connectors are toggled through each *existing* project's
   `disabledMcpServers`; a project opened for the first time later starts without
   the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
-  Repo `.mcp.json` (project scope) and codex plugins are not toggleable; project
-  scope arrives with `--project` in phase 2.
+  Codex plugins are not toggleable. A repo's own `.mcp.json` is toggleable only
+  through `--project` (phase 2).
+
+Known gaps added by phase 2:
+
+- The picker, `cost` and `profile` see an openclaw plugin or opencode mcp server only
+  while it is parked (the inventory adds flag items from `state.json`): `profile
+  save` does not record live ones and `profile apply` can re-enable them but not
+  disable them. A flagged openclaw skill is listed by its directory and always shows
+  as live, even while its flag is false. `ui` and `cost` are user-scope only (no
+  `--project`).
+- The picker has no profile key (§5.10); profiles are CLI only.
+- TOML post-write verification is textual only on Python 3.10 (no `tomllib`):
+  the block removed or appended is checked, not a full parse. `doctor` reports
+  codex/grok `config.toml` as `unverified` there.
+- JSONC / JSON5 config (`opencode.json`, `openclaw.json`) is refused, never
+  rewritten; the flag edits require strict JSON (no comments, no trailing
+  commas, no duplicate keys; a leading BOM is preserved).
+- The openclaw and opencode flag shapes are assumed, not verified (§11).
+- A project park across filesystems is copy + delete, not an atomic rename
+  (symlink and permission handling differ); an empty `parked/<sha8>/*-disabled`
+  dir can remain after `enable`.
+- A killed run between the flag write and the state save leaves the flag `false`
+  with no state entry; `enable` then asks the user to set it back by hand.
+- `undo` and `enable --all` trust the project dir recorded in the log or state,
+  the same trust user-scope replay already places in them; project dirs are
+  still validated (not `$HOME`, roots or tool dirs; must exist).
+- A project with only `.mcp.json` saves only its parked servers in
+  `profile save --project`; live ones are not listed (the cost inventory needs
+  `.claude/`). `list --project` and `enable --all --project` do not validate the
+  dir; a bad one just matches nothing.
+- Project `.mcp.json` backups hold the whole file text before and after the edit
+  (mode `0600`), so they can include other servers' auth headers.
+- `doctor` flags an empty leftover `parked/<sha8>` dir as a warning, and it
+  does not check companion files.
 
 ---
 
@@ -616,6 +678,7 @@ runs this pattern in production:
 | 2026-10-02 | Phase-0 OSS hygiene section | minimal; none | the project is going public; these items block the first external user |
 | 2026-10-02 | Explicit security model (§6.1): same-user local scope; validate every name at the boundary; profiles never carry paths; no subprocess shell; trusted publishing | ad hoc per-feature checks; defending against same-user malware | the tool moves files and holds secrets and is driven by AI agents that read untrusted text; a written model makes each control testable, and same-user malware could already edit every file involved |
 | 2026-10-02 | No cache, no export/import command, no account sync; profiles are the portable unit | mtime-keyed cost cache; `export`/`import` bundle; hosted sync of `~/.agent-toggle` | cost is ms-scale file reads; state is machine-local and backups hold secrets; sync contradicts "never phone home" and dotfiles + git already solve it |
+| 2026-10-02 | `profile apply` toggles only the items a profile mentions; profiles are CLI only in phase 2 | apply = exact set (disable everything else); picker `p` key | an exact-set apply would park anything installed after the save; the picker key adds UI surface before the semantics have been used |
 
 ## 11. Open questions (need a real install to answer)
 
@@ -627,3 +690,10 @@ runs this pattern in production:
    (directory was empty on the surveyed machine).
 4. Windows harness home paths per harness — each harness documents its own;
    fill §5.11 from docs at phase 5, not from guesses.
+5. openclaw: are `skills.entries.<name>.enabled` and
+   `plugins.entries.<name>.enabled` in `openclaw.json` the real flag shape, and
+   is the file strict JSON on a real install (not JSON5)? The flag mechanism
+   assumes yes and refuses anything else (phase 2; not verified).
+6. opencode: is `mcp.<name>.enabled` in `opencode.json` the real flag, and does
+   a real `opencode.json` stay free of comments and trailing commas (it may be
+   JSONC)? Assumed, refused otherwise (phase 2; not verified).

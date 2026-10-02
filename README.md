@@ -56,11 +56,15 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 |---|---|
 | `ui` | interactive picker — cost column, sort, filters; `--dry-run` shows the plan for what you stage and changes nothing |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs |
-| `list [type]` | what is currently disabled |
+| `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
 | `install-shims` | write the skill shim into every installed harness (`--dry-run` shows the plan) |
-| `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan) |
-| `enable <type> <name>...` | put them back (`--dry-run` shows the plan) |
+| `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
+| `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
+| `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
+| `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
+| `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
+| `doctor` | read-only check of each harness layout and of `state.json` against disk; exit `1` only on an `error` row |
 | `migrate` | import an older `~/.claude-toggle/` state |
 
 `<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
@@ -76,6 +80,8 @@ Flags accepted by every command, before or after the subcommand:
   `{ExceptionType}: {message}` -- always emit it, with `"ok": false`.
   Exception: `--help` / `--version` print plain text even with `--json`, and
   `ui` is interactive so it rejects `--json` (exit 2).
+- `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `profile
+  save|apply|diff`) switches to project scope; see [Project scope](#project-scope).
 - `--version` prints the version.
 - `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
   unexpected errors; otherwise they are a single `error:` line.
@@ -89,7 +95,8 @@ asked, plus `owner`, the harness whose park dir and state entry hold the item;
 `list` and `cost` rows are filed under the owner (`shared_with` is `[]` when
 unshared).
 
-`--dry-run` (`disable` / `enable` / `install-shims` / `ui`) computes the plan --
+`--dry-run` (`disable` / `enable` / `enable --all` / `undo` / `profile apply` /
+`install-shims` / `ui`) computes the plan --
 moves, companions, backups, MCP edits, warnings -- and writes nothing: no state,
 log, lock or backup, and no chmod; it never shells out to `claude`. `disable` /
 `enable` result rows have action `would-disable` / `would-enable`; every plan
@@ -176,12 +183,20 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 | claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
 | codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | — | ✓ `config.toml` |
 | grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
-| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | — |
-| openclaw | `~/.openclaw` | ✓ | ✓ | — | — | — | — (sqlite) |
+| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | ✓ `opencode.json` (flag, *assumed*) |
+| openclaw | `~/.openclaw` | ✓ (dir move, or flag when `skills.entries.<name>` exists, *assumed*) | ✓ | — | — | ✓ `openclaw.json` (flag, *assumed*) | — (sqlite) |
 
-Only `claude` plugins are toggleable (through `claude plugin enable/disable`).
+`claude` plugins are toggled through `claude plugin enable/disable`; `openclaw`
+plugins through a config flag (see [Assumed formats](#assumed-formats)).
 Codex has no plugin CLI this tool can drive: `disable plugin x --harness codex`
 exits `4`, which is why the matrix leaves it unchecked.
+
+Flag items (openclaw plugins and flagged skills, opencode mcp) are toggled with
+`disable` / `enable`, `undo` and `enable --all`. The picker, `cost` and `profile`
+see an openclaw plugin or opencode mcp server only while it is parked (from
+`state.json`): `profile save` does not record live ones, and `profile apply` can
+re-enable them but not disable them. A flagged openclaw skill is listed by its
+directory and always shows as live.
 
 The grok MCP location (`~/.grok/config.toml`, the same `[mcp_servers.<name>]`
 tables as codex, including a `.headers` sub-table for remote servers) was
@@ -243,13 +258,177 @@ Both scopes stored in `~/.claude.json` are togglable, and the scope round-trips:
 |---|---|---|
 | user | top-level `mcpServers` | ✓ |
 | local | `projects/<dir>/mcpServers` | ✓ — project path saved with the backup |
-| project | the repo's own `.mcp.json` | — committed config, not ours to move |
+| project | the repo's own `.mcp.json` | ✓ with `--project <dir>` only, see [Project scope](#project-scope) |
 | claude.ai connector | your account | ✓ — recorded in each *existing* project's `disabledMcpServers`; a project first opened later needs the toggle re-run |
 
 `claude mcp remove -s local` only sees the project it runs in, so the project
 path is recorded at disable time and the restore runs back in that directory.
 One name that is local-scope in several projects is refused unless your cwd
 picks the winner — guessing would restore it into the wrong project.
+
+## Profiles
+
+A profile is a named snapshot of which items are live, for the dotfiles repo
+or a second machine. It holds only `{harness, type, name, live}` per item --
+never a path or a secret.
+
+```sh
+agent-toggle profile save work                       # -> ~/.agent-toggle/profiles/work.json
+agent-toggle profile save work --out ~/dotfiles/agent-toggle/work.json
+agent-toggle profile diff work                       # what apply would do; writes nothing
+agent-toggle profile apply ~/dotfiles/agent-toggle/work.json --dry-run
+agent-toggle profile apply work
+agent-toggle profile list
+```
+
+**`apply` toggles only the items the profile mentions.** An item the profile
+lists as live but that is parked now is enabled; one it lists as parked but
+that is live now is disabled; everything else is left alone -- in particular an
+item installed after the save is never touched. An item the profile names that
+this machine does not have gets a `skipped` row (`not on this machine`), not a
+failure. `apply` runs through the same path as `enable` / `disable` (one lock,
+one batch, logged, undoable with `undo`).
+
+- An argument ending in `.json` or containing a path separator is a **file
+  path** (absolute paths are fine); anything else is a stored profile name under
+  `~/.agent-toggle/profiles`. `..` in a path, and names that are not plain file
+  names, are refused (exit `2`), as are a bad version, an unknown harness or
+  type, an invalid item name, a duplicate item or a file over 1 MiB.
+- `--out` belongs to `save` only; `--dry-run` to `apply` / `diff`. `--harness H`
+  narrows `save`, `apply` and `diff` to one harness.
+- `diff` and `apply --dry-run` do not read plugin state (that needs the claude
+  CLI, and a dry run never shells out), so profile plugin items show as
+  `skipped` there.
+- A user-scope profile never contains project-scope entries; with
+  `--project <dir>` the same commands save, diff and apply that project's
+  items (claude layout) instead -- the profile holds no directory, so `apply`
+  needs `--project` again.
+
+## Undo and `enable --all`
+
+`undo` reads `~/.agent-toggle/log.jsonl`, takes the batch of the last
+successful `disable` / `enable`, and reverses its rows in reverse order. The
+reversal is logged as its own batch, so `undo` twice puts things back.
+Project rows are replayed in their own project scope, never in user scope.
+
+```sh
+agent-toggle undo --dry-run
+agent-toggle undo
+```
+
+- Nothing logged yet: `nothing to undo` (exit `0`). A log written before
+  batch ids existed: `nothing to undo: log predates undo` (exit `1`).
+- `undo` rejects `--harness` (exit `2`): it reverses a whole batch.
+- The log is a plain file you can edit; its names and project dirs are checked
+  like command-line input, and a project dir is trusted as written, exactly as
+  user-scope replay trusts the log.
+
+`enable --all [--harness H] [--project <dir>]` restores every disabled entry in
+scope, each in its own scope (`--project` takes only that project's).
+`enable --all <name>` and `disable --all` are usage errors (exit `2`). Preview
+bulk operations with `--dry-run`.
+
+## Project scope
+
+`--project <dir>` (`.` = the current directory) points `disable`, `enable`,
+`enable --all`, `list` and `profile` at one repo: its `.claude/` dir types
+(`skill`, `agent`, `command`, `rule`) and its own `.mcp.json` servers (`mcp`).
+Claude layout only: `--harness codex --project ...` exits `4`, as does a
+missing directory or one with neither `.claude/` nor `.mcp.json`. `$HOME`, its
+ancestors, the tool's own state dir and the harness homes are refused (exit
+`2`) -- that is user scope. `list` and `enable --all` only filter state by the
+dir and do not run these checks (a bad dir just matches nothing). `cost` and
+`ui` are user-scope only.
+
+```sh
+agent-toggle disable skill demo-skill --project .
+agent-toggle disable mcp example-mcp --project ~/work/repo
+agent-toggle list --project .
+agent-toggle enable --all --project .
+```
+
+- Parked items go to `~/.agent-toggle/parked/<sha8>/`, **never inside the
+  project**; project and user state entries are separate, so one can never
+  restore into the other. Companion files are not moved in project scope.
+- **A tracked file still disappears from the worktree.** Every project-scope
+  disable prints a warning like this one, and `git status` shows the deletion:
+
+  ```
+  <repo>/.claude/skills/demo-skill is a tracked deletion in git status; restore with: agent-toggle enable skill demo-skill --project <repo>
+  <repo>/.mcp.json is a tracked change in git status; restore with: agent-toggle enable mcp example-mcp --project <repo>
+  ```
+
+  Restore with that command, or `git checkout`; do not commit the deletion if
+  the repo is shared.
+- `.mcp.json` is edited directly (no `claude` CLI) and must be **strict JSON**:
+  a BOM, comments or trailing commas are refused. `disable` rewrites the file in
+  its detected layout (tabs or 2 spaces, LF or CRLF) and saves a verbatim backup
+  at `mcp-backups/<sha8>__claude__<name>.json` (mode `0600`; it holds the file
+  text, so it may hold auth headers). `enable` restores the file byte for byte
+  if it is unchanged since the disable, otherwise merges the entry back in and
+  reformats.
+- Moves across filesystems fall back to copy + delete (not atomic). An empty
+  `parked/<sha8>/*-disabled` dir may remain after `enable`.
+- `status` prints one `project <dir>` line per project holding parked items.
+  A project with only `.mcp.json` saves only its parked servers in
+  `profile save --project`; live ones are not listed (the inventory needs
+  `.claude/`).
+
+## Doctor
+
+```sh
+agent-toggle doctor [--harness H] [--json]
+```
+
+Read-only: no lock, no state write-back, no `claude` CLI call. For each
+installed harness it compares the live layout with the table row (expected
+dirs and config keys), then cross-checks `state.json` against disk (parked
+item present, origin dir present, backup present, project dir present, entry
+passes the same tamper checks `enable` runs, modes no looser than `0600` /
+`0700`). Rows (`action: doctor`) carry a status:
+
+| status | meaning |
+|---|---|
+| `ok` | matches |
+| `absent` | a dir, file or key the row expects is not there -- informational |
+| `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
+| `unverified` | could not be parsed here (codex/grok `config.toml` on Python 3.10, which has no `tomllib`) |
+| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir (also when empty after `enable`) |
+| `error` | needs fixing: unparseable config (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
+
+Only `error` makes the exit code `1`; each problem row names the command that
+fixes it. `--harness X` for a harness that is not installed is a `note` (exit
+`0`). Companion files are not checked.
+
+## Assumed formats
+
+Two config shapes come from the design survey (`docs/DESIGN.md` §4 / §11) and
+were **not verified on a real install**:
+
+- `openclaw.json`: `skills.entries.<name>.enabled` and
+  `plugins.entries.<name>.enabled`
+- `opencode.json`: `mcp.<name>.enabled`
+
+The edit changes one boolean token and nothing else, is verified after writing
+and rolled back on any mismatch (bytes and file mode). Files that are not
+strict JSON (JSONC / JSON5 -- comments, trailing commas) or that repeat a key are
+**refused**, never rewritten; a leading BOM is kept as is; a missing key is
+refused, never invented. An openclaw skill
+uses the flag only when `skills.entries.<name>` already exists, otherwise its
+directory is moved. If a run is killed between the flag write and the state
+save, the flag is `false` with no state entry: `enable` then tells you to set it
+back by hand. Please report a real install that differs.
+
+## Safety checks
+
+- `enable` refuses a state entry whose `origin`, `parked_at`, backup or flag
+  file is outside its harness home, project or `~/.agent-toggle`, or holds `..`:
+  an error row `refused: <reason>`, nothing moved.
+- Every edit of a JSON or TOML config is verified after writing (still parses,
+  only the target changed) and rolled back, bytes and mode, on failure. An
+  invalid codex `config.toml` makes an MCP edit fail and roll back instead of
+  being rewritten. On Python 3.10 (no `tomllib`) the TOML check is textual only.
+- Profiles and project dirs are validated like command-line input.
 
 ## Where state lives
 
@@ -260,10 +439,18 @@ bookkeeping.
 | file | contents |
 |---|---|
 | `state.json` | current disabled list (schema v3; atomic write, mode `0600`) |
-| `lock` | held by `disable` / `enable` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item) |
-| `log.jsonl` | one line per operation (mode `0600`) |
-| `mcp-backups/` | `<harness>__<server>.json` (mode `0600` -- may hold auth headers) |
+| `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item) |
+| `log.jsonl` | one line per operation (mode `0600`), see below |
+| `mcp-backups/` | `<harness>__<server>.json`, or `<sha8>__<harness>__<server>.json` for a project `.mcp.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
+| `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
+| `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
+
+Each `log.jsonl` row is `{ts, harness, type, name, action, result, batch,
+project, scope, detail}`. `batch` is one id per run (what `undo` reverses);
+`project` is `null` and `scope` is `user` outside project scope (a claude
+local-scope MCP row has `scope: local` and its working directory in `project`).
+Older rows without `batch`/`harness` cannot be undone.
 
 ## Two guardrails, both earned
 
