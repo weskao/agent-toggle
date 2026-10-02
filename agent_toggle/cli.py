@@ -16,6 +16,8 @@ Usage:
     agent_toggle.py cost [--type T]            # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
+    agent_toggle.py enable --all [--harness H] [--dry-run]   # restore everything
+    agent_toggle.py undo [--dry-run]           # reverse the last logged batch
     agent_toggle.py list [<type>]              # what is currently disabled
     agent_toggle.py status                     # health check
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
@@ -36,7 +38,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, fs, ops, profiles, store
+from . import __version__, cost, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
@@ -210,6 +212,8 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
 
 def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     action, type_, names, harness = args.command, args.type, args.names, args.harness
+    if not type_ or not names:
+        die(f"{action} needs <type> <name>... (or `enable --all`)", 2)
     for name in names:
         validate_name(name)
     h = harness_of(harness)
@@ -294,7 +298,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims", "profile")
+            "install-shims", "profile", "undo")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -363,12 +367,17 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("target", nargs="?", metavar="name|file")
     pp.add_argument("--out", metavar="file", help="save: write the profile here instead")
     pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
+    up2 = sub.add_parser("undo", parents=[common], help="reverse the last logged batch")
+    up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
         sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
-        sp.add_argument("type", choices=TYPES)
-        sp.add_argument("names", nargs="+", metavar="name")
+        sp.add_argument("type", choices=TYPES, nargs="?" if name == "enable" else None)
+        sp.add_argument("names", nargs="*" if name == "enable" else "+", metavar="name")
         sp.add_argument("--dry-run", action="store_true",
                         help="show the plan; change nothing")
+        if name == "enable":
+            sp.add_argument("--all", action="store_true",
+                            help="restore every disabled item (optionally --harness H)")
     return p
 
 
@@ -398,6 +407,12 @@ def main(argv: list[str] | None = None) -> int:
             cmd_install_shims(args, out)
         elif cmd == "profile":
             profiles.cmd_profile(args, out)
+        elif cmd == "undo":
+            undo.cmd_undo(args.dry_run, args.harness, out)
+        elif cmd == "enable" and args.all:
+            if args.type or args.names:
+                die("enable --all takes no <type> or <name>", 2)
+            undo.cmd_enable_all(args.harness, args.dry_run, out)
         else:
             args.harness = args.harness or "claude"
             cmd_toggle(args, out)

@@ -244,6 +244,7 @@ class SpellingTest(CliCase):
             ["install-shims", "--dry-run"],
             ["profile", "list"], ["profile", "diff", "work"],
             ["profile", "apply", "work", "--dry-run"],
+            ["undo", "--dry-run"], ["enable", "--all", "--dry-run"],
         )
         for argv in cases:
             plain = self.run_cli(*argv, "--json")

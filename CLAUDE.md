@@ -17,6 +17,7 @@ behave identically (same output, same exit code):
 | `install-shims` | `--install-shims` |
 | `disable`, `enable` | `--disable`, `--enable` |
 | `profile` | `--profile` |
+| `undo` | `--undo` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:
