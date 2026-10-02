@@ -103,6 +103,7 @@ class CheckEntryTest(SandboxCase):
         super().setUp()
         self.table = harnesses.build(self.tmp)
         self.proj = self.tmp / "proj"
+        self.park = fs.parked_dir() / store.project_digest(self.proj)
 
     def entry(self, **kw) -> dict:
         return {"harness": "claude", "type": "skill", "name": "demo-skill", **kw}
@@ -121,11 +122,9 @@ class CheckEntryTest(SandboxCase):
         self.assertOk(self.entry(mechanism="move", name="orch:batch",
                                  origin=str(self.home / "commands/orch/batch.md"),
                                  parked_at=str(self.home / "commands-disabled/orch/batch.md")))
-        self.assertOk(self.entry(mechanism="move", origin=str(self.home / "skills/demo-skill"),
-                                 parked_at=str(fs.parked_dir() / "claude/skill/demo-skill")))
         self.assertOk(self.entry(mechanism="move", project=str(self.proj),
                                  origin=str(self.proj / ".claude/skills/demo-skill"),
-                                 parked_at=str(self.proj / ".claude/skills-disabled/demo-skill")))
+                                 parked_at=str(self.park / "skills-disabled/demo-skill")))
         self.assertOk(self.entry(type="mcp", name="example-mcp", mechanism="remove_backup",
                                  backup=str(fs.backup_dir() / "claude__example-mcp.json"),
                                  scope="user", project=None))
@@ -148,7 +147,8 @@ class CheckEntryTest(SandboxCase):
         for bad in (self.tmp / "elsewhere/demo-skill",
                     self.home / "skills/demo-skill",          # not a *-disabled dir
                     self.home / "other-disabled/demo-skill",  # not a declared dir's sibling
-                    fs.state_dir() / "demo-skill"):
+                    fs.state_dir() / "demo-skill",
+                    fs.parked_dir() / "claude/skill/demo-skill"):   # parked_dir is project-only
             self.assertRefused(self.entry(origin=good_origin, parked_at=str(bad)), "parked_at")
 
     def test_forged_project(self) -> None:
@@ -156,7 +156,7 @@ class CheckEntryTest(SandboxCase):
             self.assertRefused(self.entry(project=str(proj), origin=str(proj / "x"),
                                           parked_at=str(fs.parked_dir() / "x")), "project")
         legit = self.entry(project=str(self.proj), origin=str(self.proj / ".claude/skills/x"),
-                           parked_at=str(fs.parked_dir() / "x"))
+                           parked_at=str(self.park / "x"))
         key = store.make_key("claude", "skill", "x", project=self.proj)
         self.assertIsNone(store.check_entry(legit, self.table, key))
         self.assertIn("project", store.check_entry(legit, self.table, "claude:skill:x"))
@@ -166,7 +166,32 @@ class CheckEntryTest(SandboxCase):
     def test_opencode_project_dir(self) -> None:
         self.assertOk(self.entry(harness="opencode", project=str(self.proj),
                                  origin=str(self.proj / ".opencode/skills/x"),
-                                 parked_at=str(self.proj / ".opencode/skills-disabled/x")))
+                                 parked_at=str(self.park / "skills-disabled/x")))
+
+    def test_project_entries_park_only_under_their_parked_dir(self) -> None:
+        origin = str(self.proj / ".claude/skills/demo-skill")
+        other = fs.parked_dir() / store.project_digest(self.tmp / "other")
+        for bad in (self.proj / ".claude/skills-disabled/demo-skill",   # inside the repo
+                    self.home / "skills-disabled/demo-skill",           # user scope park
+                    other / "skills-disabled/demo-skill",               # another project's
+                    Path(str(self.park) + "0") / "demo-skill",          # string prefix
+                    fs.parked_dir() / "demo-skill"):
+            self.assertRefused(self.entry(project=str(self.proj), origin=origin,
+                                          parked_at=str(bad)), "parked_at")
+        for bad in (self.home / "skills/demo-skill", self.proj / "src/demo-skill"):
+            self.assertRefused(self.entry(project=str(self.proj), origin=str(bad),
+                                          parked_at=str(self.park / "x")), "origin")
+
+    @unittest.skipIf(os.name == "nt", "symlinks")
+    def test_project_park_through_a_symlinked_parent_is_refused(self) -> None:
+        real = self.tmp / "elsewhere"
+        real.mkdir()
+        fs.parked_dir().mkdir(parents=True)
+        self.park.symlink_to(real)
+        self.assertRefused(self.entry(project=str(self.proj),
+                                      origin=str(self.proj / ".claude/skills/demo-skill"),
+                                      parked_at=str(self.park / "skills-disabled/demo-skill")),
+                           "parked_at")
 
     def test_flag_file_outside_home(self) -> None:
         self.assertRefused(self.entry(mechanism="flag",

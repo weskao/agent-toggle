@@ -6,6 +6,7 @@ so locking, state saving, refusal checks and logging are shared with disable/ena
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from . import fs, ops, store
 from .harnesses import TYPES, harnesses
@@ -35,9 +36,13 @@ def _toggled(row: dict) -> bool:
 
 
 def _runnable(plan: list[ops.Op], table: dict, out: Result, dry_run: bool, batch: str) -> list[ops.Op]:
-    """Drop (as error rows) ops whose harness is unknown or whose home is gone."""
+    """Drop (as error rows) ops whose harness is unknown or whose home is gone.
+    Project ops pass through: ops.apply_plan validates the project dir itself."""
     keep = []
     for op in plan:
+        if op.project is not None:
+            keep.append(op)
+            continue
         h = table.get(op.harness)
         why = (f"unknown harness {op.harness!r}" if h is None
                else f"{op.harness} is not installed ({h.home} does not exist)"
@@ -70,14 +75,14 @@ def cmd_undo(dry_run: bool, harness: str | None, out: Result) -> None:
             if r.get("type") not in TYPES or not isinstance(r.get("name"), str):
                 raise CliError("bad type or name")
             validate_name(r["name"])
+            # Only scope=project is a --project change; it replays in THAT project
+            # (ops.apply_plan refuses $HOME, roots and dirs without .claude), never in
+            # user scope. Every other scope (user, claude mcp `local`) is user scope.
+            if r.get("scope") == "project" and not (
+                    isinstance(r.get("project"), str) and Path(r["project"]).is_absolute()):
+                raise CliError("bad project")
         except CliError:
             die(f"nothing to undo: corrupt log row for {r.get('type')!r} {r.get('name')!r}")
-    if any(r.get("scope") == "project" for r in batch_rows):
-        # claude local-scope mcp rows log scope=user, project=null: user scope. Only
-        # scope=project is a --project change, and it must never replay into user scope.
-        # Refuse the whole batch: a partial undo would bury the project rows.
-        die("nothing undone: the last batch holds project-scope changes "
-            "(undo with --project is not supported yet)", 2)
     seen = {r.get("batch") for r in rows}
     batch = store.BATCH
     if batch in seen:                 # only when several runs share one process (tests)
@@ -85,20 +90,27 @@ def cmd_undo(dry_run: bool, harness: str | None, out: Result) -> None:
     table, plan = harnesses(), []
     out.say(f"undoing batch {target} ({len(batch_rows)} change(s))")
     for r in reversed(batch_rows):
-        plan.append(ops.Op(r["harness"], r["type"], REVERSE[r["action"]], r["name"]))
+        plan.append(ops.Op(r["harness"], r["type"], REVERSE[r["action"]], r["name"],
+                           r["project"] if r.get("scope") == "project" else None))
     plan = _runnable(plan, table, out, dry_run, batch)
     if plan:
         ops.apply_plan(plan, out, dry_run, batch=batch, headers=True)
 
 
-def cmd_enable_all(harness: str | None, dry_run: bool, out: Result) -> None:
-    """Restore every user-scope state entry (optionally only one harness's)."""
+def cmd_enable_all(harness: str | None, dry_run: bool, out: Result,
+                   project: str | None = None) -> None:
+    """Restore every state entry, user and project scope, each in its own scope
+    (optionally only one harness's, or with `project` only that project's)."""
     table, plan, bad = harnesses(), [], []
+    want = store.project_digest(project) if project is not None else None
     for key, entry in store.load_state(write_back=False)["disabled"].items():
         try:
             h, digest, type_, name = store.parse_key(key)
-            if digest:                    # a project-scope entry belongs to --project
+            if project is not None and digest != want:
                 continue
+            pdir = entry.get("project") if digest and isinstance(entry, dict) else None
+            if digest and not (isinstance(pdir, str) and Path(pdir).is_absolute()):
+                raise ValueError("project-scope entry without an absolute project dir")
             if type_ not in TYPES:
                 raise ValueError(f"unknown type {type_!r}")
             validate_name(name)
@@ -108,7 +120,7 @@ def cmd_enable_all(harness: str | None, dry_run: bool, out: Result) -> None:
         shared = entry.get("shared_with") if isinstance(entry, dict) else None
         if harness and harness != h and harness not in (shared if isinstance(shared, list) else ()):
             continue
-        plan.append(ops.Op(h, type_, "enable", name))
+        plan.append(ops.Op(h, type_, "enable", name, pdir))
     for key, why in bad:
         out.row(None, None, key, "enable", "error", f"unusable state key: {why}")
     plan = _runnable(plan, table, out, dry_run, store.BATCH)

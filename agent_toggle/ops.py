@@ -6,12 +6,13 @@ harness MECHANISM table (Harness.mechanisms[type]), never by hard-coded types.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NamedTuple
 
 from . import fs
-from .harnesses import harnesses
+from .harnesses import harnesses, project_view
 from .mechanisms import fail_row, toggle_dir_type, toggle_mcp, toggle_plugin
-from .output import Result
+from .output import CliError, Result
 from .store import BATCH, load_state, save_state
 
 
@@ -20,24 +21,39 @@ class Op(NamedTuple):
     type: str
     action: str           # "disable" | "enable"
     name: str
+    project: str | None = None   # --project dir: project scope, never user scope
 
 
 def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: str,
               headers: bool) -> int:
     """Run the plan, grouped per harness/type/action in first-seen order."""
-    groups: dict[tuple[str, str, str], list[str]] = {}
+    groups: dict[tuple[str, str, str, str | None], list[str]] = {}
     for op in plan:
-        groups.setdefault((op.harness, op.type, op.action), []).append(op.name)
-    table = harnesses()
+        groups.setdefault((op.harness, op.type, op.action, op.project), []).append(op.name)
+    user = harnesses()
     fails = 0
-    for (harness, type_, action), names in groups.items():
+    for (harness, type_, action, project), names in groups.items():
+        table = user
+        if project is not None:
+            # project scope: only the claude dir types, through a project-only table,
+            # so no user-scope dir or entry can be reached (DESIGN s5.5)
+            try:
+                if harness != "claude":
+                    raise CliError(f"{harness} has no --project scope", 4)
+                table = {"claude": project_view(Path(project))}
+            except CliError as e:
+                for name in names:
+                    fails += fail_row(out, dry_run, harness, type_, action, name, e.msg,
+                                      batch=batch, project=project)
+                continue
         h = table[harness]
         mech = h.mechanisms.get(type_)
         if headers:
-            out.say(f"\n{action} {type_} on {harness}:")
+            out.say(f"\n{action} {type_} on {harness}"
+                    + (f" (project {h.project}):" if h.project else ":"))
         if mech == "move":
             fails += toggle_dir_type(action, type_, names, state, harness, h.home, out,
-                                     dry_run, batch=batch)
+                                     dry_run, batch=batch, table=table)
         elif mech == "native_cli" or (mech == "flag" and type_ == "plugin"):
             fails += toggle_plugin(action, names, state, harness, out, dry_run, batch=batch)
         elif mech == "remove_backup" or (mech == "flag" and type_ == "mcp"):
@@ -46,8 +62,9 @@ def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: st
         else:
             for name in names:
                 fails += fail_row(out, dry_run, harness, type_, action, name,
-                               f"{harness} has no {type_} support", "unsupported",
-                               batch=batch)
+                               f"{harness} has no {type_} support"
+                               + (" in project scope" if h.project else ""), "unsupported",
+                               batch=batch, project=project)
     return fails
 
 

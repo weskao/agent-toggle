@@ -67,7 +67,8 @@ def check_entry(entry: dict, table: dict, key: str | None = None) -> str | None:
     `project` comes from the same untrusted entry, so it is refused when it is
     a filesystem root, $HOME or an ancestor of it, and (given the state key)
     must hash to the key's project digest. Project dirs are `.<home name>`
-    (`.claude`, `.opencode`)."""
+    (`.claude`, `.opencode`); a project entry's origin must sit in one of them and
+    its parked_at under fs.parked_dir()/<sha8> (symlinked parents refused)."""
     if not isinstance(entry, dict):
         return "entry is not an object"
     hname = entry.get("harness")
@@ -100,24 +101,48 @@ def check_entry(entry: dict, table: dict, key: str | None = None) -> str | None:
             return str(e)
         if digest != (project_digest(project) if project else None):
             return f"project does not match the state key {key!r}"
-    bases = [h.home] + ([project / ("." + h.home.name.lstrip("."))] if project else [])
-    declared = [b / sub for b in bases for subs in h.dirs.values() for sub in subs]
     origin, parked = fields["origin"], fields["parked_at"]
-    if origin and not fs.contained(Path(origin), h.home, *declared,
-                                   *([project] if project else [])):
-        return f"origin outside the {h.name} home/project: {origin}"
-    if parked:
+    if project is not None:
+        # Project scope: items come from <project>/.<home name>/<declared dir> and park
+        # ONLY under parked_dir()/<sha8>, never inside the project (a repo is shared).
+        base = project / ("." + h.home.name.lstrip("."))
+        declared = [base / sub for subs in h.dirs.values() for sub in subs
+                    if not Path(sub).is_absolute()]
+        origin_ok = bool(origin) and fs.contained(Path(origin), *declared) \
+            and fs.contained(Path(origin), project)
+        parks = [fs.parked_dir() / project_digest(project)]
+    else:
+        declared = [h.home / sub for subs in h.dirs.values() for sub in subs]
+        origin_ok = bool(origin) and fs.contained(Path(origin), h.home, *declared)
+        # user scope parks only in the `*-disabled` siblings; parked_dir() is project-only
         parks = [d.with_name(d.name + "-disabled") for d in declared]
-        if not fs.contained(Path(parked), *parks, fs.parked_dir()):
-            return f"parked_at outside the -disabled dirs and {fs.parked_dir()}: {parked}"
+    if origin and not origin_ok:
+        return f"origin outside the {h.name} {'project' if project else 'home'}: {origin}"
+    if parked and not fs.contained(Path(parked), *parks):
+        return f"parked_at outside {' / '.join(map(str, parks))}: {parked}"
     ffile = fields.get("flag")
-    if ffile and not (fs.contained(Path(ffile), h.home, *declared, *([project] if project else []))
-                      or Path(ffile) in {fs.claude_json(), *([h.mcp.file] if h.mcp else [])}):
+    if ffile and not ((fs.contained(Path(ffile), base) and fs.contained(Path(ffile), project))
+                      if project is not None else
+                      (fs.contained(Path(ffile), h.home, *declared)
+                       or Path(ffile) in {fs.claude_json(), *([h.mcp.file] if h.mcp else [])})):
         return f"flag file outside the {h.name} home/project: {ffile}"
     backup = fields["backup"]
     if backup and not fs.contained(Path(backup), fs.backup_dir()):
         return f"backup outside {fs.backup_dir()}: {backup}"
     return None
+
+
+def scope_state(state: dict, project: Path | str | None = None) -> dict:
+    """`state` holding only one scope: user entries (project=None) or one project's."""
+    want = project_digest(project) if project is not None else None
+    keep = {}
+    for k, e in state["disabled"].items():
+        try:
+            if parse_key(k)[1] == want:
+                keep[k] = e
+        except ValueError:
+            pass
+    return {**state, "disabled": keep}
 
 
 def upgrade(state: dict) -> bool:

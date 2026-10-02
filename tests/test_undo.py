@@ -105,17 +105,16 @@ class UndoTest(UndoCase):
         self.assertEqual(self.run_cli("undo")[0], 0)
         self.assertTrue((self.home / "skills" / "demo-skill").exists())
 
-    def test_project_scope_rows_refuse_the_whole_batch(self) -> None:
+    def test_project_scope_rows_never_replay_into_user_scope(self) -> None:
         self.batch("b1", "disable", "skill", "demo-skill")
-        with fs.lock():                    # a later batch: one user row + one project row
-            store.log("disable", "agent", "demo-agent", "ok", harness="claude", batch="b2")
+        with fs.lock():                    # a later batch: a project row for a vanished project
             store.log("disable", "skill", "demo-skill", "ok", harness="claude", batch="b2",
                       project=str(self.tmp / "proj"), scope="project")
-        before = snapshot(self.tmp)
         rc, env = self.run_json("undo")
-        self.assertEqual(rc, 2)
-        self.assertIn("project-scope", env["results"][-1]["detail"])
-        self.assertEqual(snapshot(self.tmp), before)
+        self.assertEqual(rc, 1)
+        self.assertIn("no such directory", env["results"][-1]["detail"])
+        self.assertEqual(list(self.state()), ["claude:skill:demo-skill"])   # user entry kept
+        self.assertFalse((self.home / "skills" / "demo-skill").exists())
 
     def test_corrupt_log_rows_are_refused(self) -> None:
         fs.private_dir(fs.state_dir())
@@ -129,7 +128,8 @@ class UndoTest(UndoCase):
             self.assertIn("corrupt log row", env["results"][-1]["detail"])
 
     def test_user_scope_mcp_row_with_local_project_is_still_user_scope(self) -> None:
-        """claude local-scope mcp rows log scope=user, project=null; only scope=project is a --project undo."""
+        """A user-scope row (and claude mcp `local` rows) undo in user scope; only
+        scope=project is a --project undo."""
         with fs.lock():
             store.log("disable", "skill", "demo-skill", "ok", harness="claude", batch="b1")
         self.assertEqual(self.run_cli("undo", "--dry-run")[0], 1)    # only: skill not parked -> error row
@@ -173,15 +173,16 @@ class EnableAllTest(UndoCase):
         self.assertEqual(snapshot(self.tmp), before)
         self.assertEqual({r["action"] for r in env["results"]}, {"would-enable"})
 
-    def test_project_entries_are_left_alone(self) -> None:
+    def test_project_entries_never_restore_into_user_scope(self) -> None:
         self.batch("b1", "disable", "skill", "demo-skill")
         state = json.loads(fs.state_file().read_text(encoding="utf-8"))
         entry = state["disabled"].pop("claude:skill:demo-skill")
         key = store.make_key("claude", "skill", "demo-skill", self.tmp / "proj")
         state["disabled"][key] = dict(entry, project=str(self.tmp / "proj"))
         fs.state_file().write_text(json.dumps(state), encoding="utf-8")
-        self.assertEqual(self.run_cli("enable", "--all")[0], 0)
+        self.assertEqual(self.run_cli("enable", "--all")[0], 1)     # project dir is gone
         self.assertEqual(list(self.state()), [key])
+        self.assertFalse((self.home / "skills" / "demo-skill").exists())
 
     def test_missing_harness_home_is_an_error_row(self) -> None:
         self.disable_some()

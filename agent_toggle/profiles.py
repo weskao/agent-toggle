@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import cost, fs, ops, store
-from .harnesses import TYPES, harnesses
+from .harnesses import TYPES, harnesses, project_view
 from .mechanisms import validate_name
 from .output import Result, die
 
@@ -87,22 +87,33 @@ def _validate(doc) -> dict:
     return doc
 
 
-def _inventory(out: Result, plugins: bool) -> dict[tuple[str, str, str], bool]:
-    """(harness, type, name) -> live now, user scope only: project entries are never
-    a profile's business. Reuses the cost inventory (one owner per shared dir)."""
-    state = store.load_state(write_back=False)
-    user = {}
-    for k, e in state["disabled"].items():
-        try:
-            if store.parse_key(k)[1] is None:
-                user[k] = e
-        except ValueError:
-            pass
+def _inventory(out: Result, plugins: bool,
+               project: Path | None = None) -> dict[tuple[str, str, str], bool]:
+    """(harness, type, name) -> live now, in ONE scope: user scope, or (`project`, a
+    resolved --project dir) that project's .claude only -- the two never mix.
+    Reuses the cost inventory (one owner per shared dir)."""
+    state = store.scope_state(store.load_state(write_back=False), project)
+    table = {"claude": project_view(project)} if project else harnesses()
+    # a project dir symlinked out of the project (to ~/.claude/skills) is user scope
+    outside = {t for t, subs in table["claude"].dirs.items()
+               if any(not (table["claude"].home / s).resolve().is_relative_to(project)
+                      for s in subs)} if project else set()
     return {(i.harness, i.type, i.name): i.enabled
-            for i in cost.inventory({"disabled": user}, harnesses(), out.warn, plugins)}
+            for i in cost.inventory(state, table, out.warn, plugins and not project)
+            if i.type not in outside}
 
 
-def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result) -> None:
+def _project(arg: str | None, only: str | None) -> Path | None:
+    """The resolved --project dir (claude layout only, exit 4 otherwise), or None."""
+    if arg is None:
+        return None
+    if only not in (None, "claude"):
+        die(f"--project supports only the claude layout, not {only}", 4)
+    return project_view(arg).project
+
+
+def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result,
+             project: Path | None = None) -> None:
     if _is_path(arg):
         die(f"{arg!r} looks like a path: save <name> [--out <file>]", 2)
     path = _file_path(out_file) if out_file else _stored_path(arg)
@@ -110,7 +121,7 @@ def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result) -> N
         validate_name(arg)
         if path.is_dir() or not path.parent.is_dir():
             die(f"cannot write {path}: not a file in an existing directory", 2)
-    inv = _inventory(out, plugins=not only or only == "claude")
+    inv = _inventory(out, plugins=not only or only == "claude", project=project)
     items = [{"harness": h, "type": t, "name": n, "live": live}
              for (h, t, n), live in sorted(inv.items()) if not only or h == only]
     doc = {"version": VERSION, "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -123,9 +134,11 @@ def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result) -> N
             path=str(path), items=len(items))
 
 
-def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result) -> None:
+def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result,
+              project: Path | None = None) -> None:
     doc = _load(arg)
-    inv = _inventory(out, plugins=not dry_run and (not only or only == "claude"))  # dry run: no CLI
+    inv = _inventory(out, plugins=not dry_run and (not only or only == "claude"),  # dry run: no CLI
+                     project=project)
     plan, same, skipped = [], 0, 0
     for it in doc["items"]:
         h, t, n, live = it["harness"], it["type"], it["name"], it["live"]
@@ -139,7 +152,8 @@ def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result) -> None:
         elif inv[h, t, n] == live:
             same += 1
         else:
-            plan.append(ops.Op(h, t, "enable" if live else "disable", n))
+            plan.append(ops.Op(h, t, "enable" if live else "disable", n,
+                               str(project) if project else None))
     if plan:
         ops.apply_plan(plan, out, dry_run, batch=store.BATCH, headers=True)
     out.say(f"\n{len(plan)} {'to change' if dry_run else 'attempted'}, "
@@ -171,9 +185,12 @@ def cmd_profile(args, out: Result) -> None:
         die("--out only applies to `profile save`", 2)
     if args.dry_run and action not in ("apply", "diff"):
         die("--dry-run only applies to `profile apply` / `diff`", 2)
+    if args.project is not None and action == "list":
+        die("--project does not apply to `profile list`", 2)
+    project = _project(args.project, args.harness)
     if action == "save":
-        cmd_save(target, args.out, args.harness, out)
+        cmd_save(target, args.out, args.harness, out, project)
     elif action == "list":
         cmd_list(out)
     else:                                  # diff is apply, planned only
-        cmd_apply(target, args.harness, action == "diff" or args.dry_run, out)
+        cmd_apply(target, args.harness, action == "diff" or args.dry_run, out, project)

@@ -21,15 +21,18 @@ from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses
 from .output import Result, die
-from .store import BATCH, check_entry, log
+from .store import BATCH, check_entry, log, make_key, project_digest
 
 
 def fail_row(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
-          msg: str, status: str = "error", *, batch: str = BATCH) -> int:
+          msg: str, status: str = "error", *, batch: str = BATCH,
+          project: str | None = None) -> int:
     """Record one failed item (returns 1, the fail count to add)."""
-    out.row(harness, type_, name, f"would-{action}" if dry_run else action, status, msg)
+    out.row(harness, type_, name, f"would-{action}" if dry_run else action, status, msg,
+            **({"project": project} if project else {}))
     if not dry_run:
-        log(action, type_, name, status, msg, harness=harness, batch=batch)
+        log(action, type_, name, status, msg, harness=harness, batch=batch, project=project,
+            scope="project" if project else "user")
     return 1
 
 
@@ -315,17 +318,40 @@ def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness:
 
 def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                     harness: str, home: Path, out: Result | None = None,
-                    dry_run: bool = False, *, batch: str = BATCH) -> int:
-    """Park / restore skills, agents, commands. dry_run plans and writes nothing."""
+                    dry_run: bool = False, *, batch: str = BATCH,
+                    table: dict | None = None) -> int:
+    """Park / restore skills, agents, commands. dry_run plans and writes nothing.
+
+    `table` = {"claude": harnesses.project_view(dir)} runs in project scope: items
+    park under fs.parked_dir()/<sha8>/<sub>-disabled, NEVER inside the project, keys
+    are `claude@<sha8>:...`, and no user-scope dir is ever a view (no dir_view aliasing).
+    """
     out = out or Result()
-    table = harnesses()
+    table = table or harnesses()
+    proj = table[harness].project
+    pstr = str(proj) if proj else None
     fails = 0
+
+    def fail(name: str, msg: str) -> int:
+        return fail_row(out, dry_run, harness, type_, action, name, msg, batch=batch,
+                        project=pstr)
+
     if type_ in table[harness].flags:            # openclaw skill: flag when an entry exists
         fails, names = toggle_flag(action, type_, names, state, harness, out, dry_run,
                                    batch=batch, optional=True)
-    views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
+    if proj:
+        park = fs.parked_dir() / project_digest(proj)
+        subs = table[harness].dirs[type_]
+        views = [DirView(harness, home / sub, park / f"{sub}-disabled", [harness])
+                 for sub in subs if (home / sub).resolve().is_relative_to(proj)]
+        if not views:                            # e.g. .claude/skills -> ~/.claude/skills
+            for name in names:
+                fails += fail(name, f"{home / subs[0]} resolves outside the project {proj}")
+            return fails
+    else:
+        views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
 
-    if action == "disable" and names:
+    if action == "disable" and names and not proj:
         for v in views:
             ohome = home if v.owner == harness else table[v.owner].home
             if not gitignored(v.parked, ohome):
@@ -341,46 +367,62 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             v, src = next(((v, p) for v in views if (p := resolve_item(v.live, name))),
                           (views[0], None))
             if src is None:
-                fails += fail_row(out, dry_run, harness, type_, action, name,
-                               "not found under " + " or ".join(str(v.live) for v in views),
-                               batch=batch)
+                fails += fail(name, "not found under " + " or ".join(str(v.live) for v in views))
                 continue
-            key = f"{v.owner}:{type_}:{name}"
+            key = make_key(v.owner, type_, name, project=proj)
             others = [h for h in v.sharers if h != harness]        # relative to this request
             ohome = home if v.owner == harness else table[v.owner].home
             # Preserve nesting: commands/orch/batch.md parks as orch/batch.md,
             # so two different <group>/mcp.md cannot collide at the park root.
             rel = src.relative_to(v.live)
+            if proj and not fs.contained(v.parked / rel, fs.parked_dir()):
+                fails += fail(name, f"{fs.parked_dir()} is reached through a symlink -- refusing")
+                continue
+            if proj and not dry_run:
+                fs.private_dir(fs.parked_dir())
             try:
+                # ponytail: a project on another filesystem than ~/.agent-toggle makes
+                # shutil.move copy+delete (not atomic; symlinks kept as links, modes via
+                # copy2, ownership/xattrs may differ; a copy failing midway can leave a
+                # partial park target that later disables refuse to overwrite -- remove it
+                # by hand). Same-fs moves stay atomic renames.
                 target = move(src, (v.parked / rel).parent, dry_run)
             except (OSError, FileNotFoundError, FileExistsError, NotADirectoryError) as e:
-                fails += fail_row(out, dry_run, harness, type_, action, name, str(e), batch=batch)
+                fails += fail(name, str(e))
                 continue
             row = _ok(out, dry_run, harness, type_, action, name, _shared_text(
                       "disabled", v.owner, harness, others), parked_at=str(target),
                       **({"shared_with": others, "owner": v.owner} if others else {}))
-            companions = park_companions(target, ohome, key.replace(":", "_"), out,
-                                         dry_run, src if dry_run else None)
+            # project scope moves the item only: repo text must not steer other tracked
+            # files out of a shared repo (companions are a user-scope heuristic)
+            companions = [] if proj else park_companions(
+                target, ohome, key.replace(":", "_"), out, dry_run, src if dry_run else None)
             row["companions"] = companions
+            if proj:
+                row["project"] = pstr
+                out.warn(f"{src} {'would be' if dry_run else 'is'} a tracked deletion in git "
+                         f"status; restore with: "
+                         f"agent-toggle enable {type_} {name} --project {proj}")
             if not dry_run:
                 state["disabled"][key] = {
                     "mechanism": "move", "harness": v.owner, "type": type_, "name": name,
                     "parked_at": str(target), "origin": str(src),
-                    "companions": companions,
+                    "companions": companions, **({"project": pstr} if proj else {}),
                     **({"shared_with": [h for h in v.sharers if h != v.owner]}
                        if len(v.sharers) > 1 else {}),
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
-                log(action, type_, name, "ok", str(target), harness=harness, batch=batch)
+                log(action, type_, name, "ok", str(target), harness=harness, batch=batch,
+                    project=pstr, scope="project" if proj else "user")
         else:
             # The entry lives under the owning harness; a request through an alias
             # (or a pre-alias entry under the requested harness) finds the same one.
-            keys = dict.fromkeys([f"{v.owner}:{type_}:{name}" for v in views]
-                                 + [f"{harness}:{type_}:{name}"])
+            keys = dict.fromkeys([make_key(v.owner, type_, name, project=proj) for v in views]
+                                 + [make_key(harness, type_, name, project=proj)])
             key = next((k for k in keys if k in state["disabled"]), next(iter(keys)))
             entry = state["disabled"].get(key)
             if refused := _refusal(entry, table, key, ("parked_at", "origin")):
-                fails += fail_row(out, dry_run, harness, type_, action, name, refused, batch=batch)
+                fails += fail(name, refused)
                 continue
             if entry:
                 src = Path(entry["parked_at"])
@@ -389,8 +431,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 v, src = next(((v, p) for v in views if (p := resolve_item(v.parked, name))),
                               (views[0], None))
             if src is None or not (src.exists() or src.is_symlink()):
-                fails += fail_row(out, dry_run, harness, type_, action, name,
-                               "nothing parked to restore", batch=batch)
+                fails += fail(name, "nothing parked to restore")
                 continue
             others = [h for h in v.sharers if h != harness]
             dest_parent = (Path(entry["origin"]).parent if entry
@@ -398,19 +439,21 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             try:
                 target = move(src, dest_parent, dry_run)
             except (OSError, FileExistsError, NotADirectoryError) as e:
-                fails += fail_row(out, dry_run, harness, type_, action, name, str(e), batch=batch)
+                fails += fail(name, str(e))
                 continue
             if not dry_run:
                 prune_empty(src.parent, v.parked)
             _ok(out, dry_run, harness, type_, action, name,
                 _shared_text("enabled", v.owner, harness, others), restored_to=str(target),
-                **({"shared_with": others, "owner": v.owner} if others else {}))
+                **({"shared_with": others, "owner": v.owner} if others else {}),
+                **({"project": pstr} if proj else {}))
             if entry:
                 restore_companions(entry, out, dry_run)
                 if not dry_run:
                     state["disabled"].pop(key, None)
             if not dry_run:
-                log(action, type_, name, "ok", str(target), harness=harness, batch=batch)
+                log(action, type_, name, "ok", str(target), harness=harness, batch=batch,
+                    project=pstr, scope="project" if proj else "user")
     return fails
 
 
@@ -583,7 +626,11 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     "scope": scope, "project": project,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
-                log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch)
+                # claude local scope logs its real scope + cwd; undo treats every
+                # scope but `project` (a --project change) as user scope, which is right
+                # for local: the replay finds the user-keyed entry and its own cwd.
+                log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch,
+                    project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
                 f"removed{where} (config saved to {bp})",
                 scope=scope, project=project, backup=str(bp))
@@ -623,7 +670,8 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                         continue
             if not dry_run:
                 state["disabled"].pop(key, None)
-                log(action, "mcp", name, "ok", harness=harness, batch=batch)
+                log(action, "mcp", name, "ok", harness=harness, batch=batch,
+                    project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
                 "restored (open a NEW session for it to load)", backup=str(path))
     return fails

@@ -24,7 +24,7 @@ Rules:
   if the first argument is `--<command>` or bare `help` / `version`, rewrite it
   to the canonical form. Do not add per-command aliases.
 - Applies to commands only. Option flags (`--json`, `--dry-run`, `--harness`,
-  `-v`) keep the `--` form: a bare `json` or `dry-run` would collide with a
+  `--project`, `--all`, `-v`) keep the `--` form: a bare `json` or `dry-run` would collide with a
   resource name such as `disable skill json`.
 - Adding a command means adding it to the table above and to the test in
   `tests/test_cli_surface.py` that runs every command in both spellings and

@@ -37,6 +37,7 @@ class Harness:
     flags: Mapping[str, tuple] = field(default_factory=dict)
     editable: frozenset[str] = frozenset()   # files the tool may write
     aliases_from: tuple[str, ...] = ()
+    project: Path | None = None              # set only on a --project view (resolved dir)
 
     def __post_init__(self) -> None:
         # frozen only stops rebinding; wrap the dicts so they cannot be mutated either
@@ -131,6 +132,35 @@ def build(home: Path) -> dict[str, Harness]:
 def harnesses() -> dict[str, Harness]:
     """The table for the CURRENT home."""
     return build(fs.home())
+
+
+PROJECT_TYPES = ("skill", "agent", "command", "rule")
+
+
+def project_view(project: Path | str) -> Harness:
+    """The claude-shaped row for `--project <dir>` (DESIGN s5.5): home=<dir>/.claude,
+    dir types only. Refuses (CliError) a dir that is missing (4), has no .claude (4),
+    is a root / $HOME / an ancestor of $HOME / inside our state dir or a user harness
+    home, or whose .claude resolves outside it (2):
+    a project view must never address user-scope files."""
+    p = Path(project)
+    if not p.is_dir():
+        die(f"--project {project}: no such directory", 4)
+    p = p.resolve()
+    if p == Path(p.anchor) or fs.home().resolve().is_relative_to(p):
+        die(f"--project {p} is a root, $HOME or holds $HOME -- drop --project for user scope", 2)
+    for root in (fs.state_dir(), *(h.home for h in harnesses().values())):
+        if p.is_relative_to(root.resolve()):     # user-scope files under a project key
+            die(f"--project {p} is inside {root} -- not a project", 2)
+    claude = p / ".claude"
+    if not claude.is_dir():
+        die(f"--project {p} has no .claude directory", 4)
+    if not claude.resolve().is_relative_to(p):
+        die(f"--project {p}: .claude resolves outside the project ({claude.resolve()})", 2)
+    return Harness("claude", claude,
+                   dirs={"skill": ("skills",), "agent": ("agents",), "command": ("commands",),
+                         "rule": ("rules",)},
+                   mechanisms=dict.fromkeys(PROJECT_TYPES, "move"), project=p)
 
 
 def harness_of(name: str) -> Harness:
