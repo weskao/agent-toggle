@@ -88,7 +88,9 @@ def toggle_claudeai_connector(action: str, name: str,
 
     if not touched or dry_run:
         return True, touched
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    text = json.dumps(cfg, indent=2, ensure_ascii=False)
+    try:
+        fs.checked_write(path, text, fs.json_verify(text))
+    except fs.WriteError as e:                # rolled back to the previous bytes
+        return False, str(e)
     return True, touched

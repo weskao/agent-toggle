@@ -35,11 +35,11 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, fs, store
+from . import __version__, cost, fs, ops, store
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses
-from .mechanisms import dir_view, toggle_dir_type, toggle_mcp, toggle_plugin, validate_name
+from .mechanisms import dir_view, validate_name
 from .output import CliError, Result, die
 from .store import load_state, save_state
 
@@ -184,29 +184,6 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
             total_tokens=live, saved_tokens=saved, formula=cost.FORMULA)
 
 
-def apply_changes(changes: list, state: dict, out: Result | None = None,
-                  dry_run: bool = False) -> int:
-    """Run the staged picker changes, batched per harness/type/direction."""
-    out = out or Result()
-    batches: dict[tuple[str, str, str], list[str]] = {}
-    for row in changes:
-        action = "enable" if row.staged else "disable"
-        batches.setdefault((row.harness, row.type, action), []).append(row.name)
-
-    table = harnesses()
-    fails = 0
-    for (harness, type_, action), names in sorted(batches.items()):
-        h = table[harness]
-        out.say(f"\n{action} {type_} on {harness}:")
-        if type_ in h.dirs:
-            fails += toggle_dir_type(action, type_, names, state, harness, h.home, out, dry_run)
-        elif type_ == "plugin":
-            fails += toggle_plugin(action, names, state, harness, out, dry_run)
-        elif type_ == "mcp":
-            fails += toggle_mcp(action, names, state, harness, h.home, h.backend, out, dry_run)
-    return fails
-
-
 def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
     try:
         from .ui import picker as ui
@@ -219,16 +196,13 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
     if not changes:
         out.say("no changes")
         return
-    if dry_run:                     # plan only: no lock, no state write, no log
-        apply_changes(changes, load_state(write_back=False), out, True)
+    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name)
+                   for r in changes), key=lambda op: op[:3])
+    # the picker's state copy may be stale: apply_plan re-reads it under the lock
+    ops.apply_plan(plan, out, dry_run, batch=store.BATCH, headers=True)
+    if dry_run:
         out.say("\ndry run -- nothing changed")
         return
-    with fs.lock():
-        state = load_state()          # re-read: the picker's copy may be stale
-        try:
-            apply_changes(changes, state, out)
-        finally:
-            save_state(state)         # keep what already moved even if a later item crashed
     if any(r.type in ("mcp", "plugin") for r in changes):
         out.say("\nMCP/plugin changed -- open a NEW session for it to take effect.")
 
@@ -244,23 +218,8 @@ def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     if type_ not in supported:
         die(f"{harness} has no {type_} support (it has: {', '.join(supported)})", 4)
 
-    def run(state: dict) -> None:
-        if type_ in h.dirs:
-            toggle_dir_type(action, type_, names, state, harness, home, out, args.dry_run)
-        elif type_ == "plugin":
-            toggle_plugin(action, names, state, harness, out, args.dry_run)
-        else:
-            toggle_mcp(action, names, state, harness, home, h.backend, out, args.dry_run)
-
-    if args.dry_run:                # no lock, no state write, no log: plan only
-        run(load_state(write_back=False))
-        return
-    with fs.lock():
-        state = load_state()
-        try:
-            run(state)
-        finally:
-            save_state(state)       # keep what already moved even if a later item crashed
+    ops.apply_plan([ops.Op(harness, type_, action, n) for n in names], out, args.dry_run,
+                   batch=store.BATCH)
 
 
 def cmd_migrate(out: Result) -> None:

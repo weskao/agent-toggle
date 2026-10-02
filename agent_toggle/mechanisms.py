@@ -20,16 +20,66 @@ from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses
 from .output import Result, die
-from .store import log
+from .store import BATCH, check_entry, log
 
 
-def _fail(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
-          msg: str, status: str = "error") -> int:
+def fail_row(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
+          msg: str, status: str = "error", *, batch: str = BATCH) -> int:
     """Record one failed item (returns 1, the fail count to add)."""
     out.row(harness, type_, name, f"would-{action}" if dry_run else action, status, msg)
     if not dry_run:
-        log(action, type_, name, status, msg)
+        log(action, type_, name, status, msg, harness=harness, batch=batch)
     return 1
+
+
+def _refusal(entry: dict | None, table: dict, key: str, need: tuple[str, ...]) -> str | None:
+    """`refused: <reason>` when a state entry must not be replayed (DESIGN s6.1 row 2).
+
+    store.check_entry covers the path fields; this adds what the replay itself
+    reads: the entry must be the one its key names, carry the `need` fields the
+    mechanism dereferences, and its companions must stay in their own roots."""
+    if not entry:
+        return None
+    reason = _entry_reason(entry, table, key, need)
+    return f"refused: {reason}" if reason else None
+
+
+def _abs_path(value) -> bool:
+    return isinstance(value, str) and bool(value) and Path(value).is_absolute() \
+        and ".." not in Path(value).parts
+
+
+def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> str | None:
+    if not isinstance(entry, dict):
+        return "entry is not an object"
+    head, _, rest = key.partition(":")
+    type_, _, name = rest.partition(":")
+    if (entry.get("harness"), entry.get("type"), entry.get("name")) != \
+            (head.partition("@")[0], type_, name):
+        return f"entry does not match its key {key!r}"
+    for f in need:
+        if not isinstance(entry.get(f), str) or not entry.get(f):
+            return f"missing {f}"
+    if entry.get("backend") == "claude-json" and entry.get("scope") in ("user", "local"):
+        if entry["scope"] == "local":
+            # `project` here is the claude local-scope cwd, not a --project scope
+            proj = entry.get("project")
+            if not _abs_path(proj) or Path(proj) == Path(Path(proj).anchor):
+                return f"local-scope project is not a usable dir: {proj!r}"
+            entry = {k: v for k, v in entry.items() if k != "project"}
+    elif entry.get("backend") == "claude-json" and entry.get("scope") is not None:
+        return f"unknown mcp scope {entry.get('scope')!r}"
+    comps = entry.get("companions") or []
+    if not isinstance(comps, list):
+        return "companions is not a list"
+    home = table[entry["harness"]].home if entry["harness"] in table else None
+    for c in comps:
+        src, dst = (c.get("to"), c.get("from")) if isinstance(c, dict) else (None, None)
+        if not (_abs_path(src) and fs.contained(Path(src), fs.companion_dir())):
+            return f"companion outside {fs.companion_dir()}: {src!r}"
+        if not (home and _abs_path(dst) and fs.contained(Path(dst), home)):
+            return f"companion origin outside the harness home: {dst!r}"
+    return check_entry(entry, table, key=key)
 
 
 def _ok(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
@@ -143,7 +193,7 @@ def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> Dir
 
 def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                     harness: str, home: Path, out: Result | None = None,
-                    dry_run: bool = False) -> int:
+                    dry_run: bool = False, *, batch: str = BATCH) -> int:
     """Park / restore skills, agents, commands. dry_run plans and writes nothing."""
     out = out or Result()
     table = harnesses()
@@ -166,8 +216,9 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             v, src = next(((v, p) for v in views if (p := resolve_item(v.live, name))),
                           (views[0], None))
             if src is None:
-                fails += _fail(out, dry_run, harness, type_, action, name,
-                               "not found under " + " or ".join(str(v.live) for v in views))
+                fails += fail_row(out, dry_run, harness, type_, action, name,
+                               "not found under " + " or ".join(str(v.live) for v in views),
+                               batch=batch)
                 continue
             key = f"{v.owner}:{type_}:{name}"
             others = [h for h in v.sharers if h != harness]        # relative to this request
@@ -178,7 +229,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             try:
                 target = move(src, (v.parked / rel).parent, dry_run)
             except (OSError, FileNotFoundError, FileExistsError, NotADirectoryError) as e:
-                fails += _fail(out, dry_run, harness, type_, action, name, str(e))
+                fails += fail_row(out, dry_run, harness, type_, action, name, str(e), batch=batch)
                 continue
             row = _ok(out, dry_run, harness, type_, action, name, _shared_text(
                       "disabled", v.owner, harness, others), parked_at=str(target),
@@ -195,7 +246,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                        if len(v.sharers) > 1 else {}),
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
-                log(action, type_, name, "ok", harness)
+                log(action, type_, name, "ok", str(target), harness=harness, batch=batch)
         else:
             # The entry lives under the owning harness; a request through an alias
             # (or a pre-alias entry under the requested harness) finds the same one.
@@ -203,6 +254,9 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                                  + [f"{harness}:{type_}:{name}"])
             key = next((k for k in keys if k in state["disabled"]), next(iter(keys)))
             entry = state["disabled"].get(key)
+            if refused := _refusal(entry, table, key, ("parked_at", "origin")):
+                fails += fail_row(out, dry_run, harness, type_, action, name, refused, batch=batch)
+                continue
             if entry:
                 src = Path(entry["parked_at"])
                 v = next((v for v in views if src.is_relative_to(v.parked)), views[0])
@@ -210,8 +264,8 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 v, src = next(((v, p) for v in views if (p := resolve_item(v.parked, name))),
                               (views[0], None))
             if src is None or not (src.exists() or src.is_symlink()):
-                fails += _fail(out, dry_run, harness, type_, action, name,
-                               "nothing parked to restore")
+                fails += fail_row(out, dry_run, harness, type_, action, name,
+                               "nothing parked to restore", batch=batch)
                 continue
             others = [h for h in v.sharers if h != harness]
             dest_parent = (Path(entry["origin"]).parent if entry
@@ -219,7 +273,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             try:
                 target = move(src, dest_parent, dry_run)
             except (OSError, FileExistsError, NotADirectoryError) as e:
-                fails += _fail(out, dry_run, harness, type_, action, name, str(e))
+                fails += fail_row(out, dry_run, harness, type_, action, name, str(e), batch=batch)
                 continue
             if not dry_run:
                 prune_empty(src.parent, v.parked)
@@ -231,7 +285,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 if not dry_run:
                     state["disabled"].pop(key, None)
             if not dry_run:
-                log(action, type_, name, "ok", harness)
+                log(action, type_, name, "ok", str(target), harness=harness, batch=batch)
     return fails
 
 
@@ -243,14 +297,15 @@ def _shared_text(verb: str, owner: str, harness: str, others: list[str]) -> str:
 
 
 def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
-                  out: Result | None = None, dry_run: bool = False) -> int:
+                  out: Result | None = None, dry_run: bool = False, *,
+                  batch: str = BATCH) -> int:
     """Claude Code has a native, fully reversible plugin disable -- drive it."""
     out = out or Result()
     if harness != "claude":
         for name in names:
-            _fail(out, dry_run, harness, "plugin", action, name,
+            fail_row(out, dry_run, harness, "plugin", action, name,
                   f"{harness} has no plugin CLI -- park it as a skill instead",
-                  "unsupported")
+                  "unsupported", batch=batch)
         return len(names)
     fails = 0
     for name in names:
@@ -259,13 +314,13 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
             if claude_bin():
                 _ok(out, dry_run, harness, "plugin", action, name, "")
             else:
-                fails += _fail(out, dry_run, harness, "plugin", action, name,
-                               "claude CLI not found")
+                fails += fail_row(out, dry_run, harness, "plugin", action, name,
+                               "claude CLI not found", batch=batch)
             continue
         ok, res = run_cli(claude_bin(), ["plugin", action, name])
         if not ok:
-            fails += _fail(out, dry_run, harness, "plugin", action, name,
-                           res.splitlines()[-1] if res else "failed")
+            fails += fail_row(out, dry_run, harness, "plugin", action, name,
+                           res.splitlines()[-1] if res else "failed", batch=batch)
             continue
         key = f"{harness}:plugin:{name}"
         if action == "disable":
@@ -277,20 +332,21 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
         else:
             state["disabled"].pop(key, None)
         _ok(out, dry_run, harness, "plugin", action, name, f"{action}d")
-        log(action, "plugin", name, "ok")
+        log(action, "plugin", name, "ok", harness=harness, batch=batch)
     return fails
 
 
 def toggle_mcp(action: str, names: list[str], state: dict,
                harness: str, home: Path, backend: str | None,
-               out: Result | None = None, dry_run: bool = False) -> int:
+               out: Result | None = None, dry_run: bool = False, *,
+               batch: str = BATCH) -> int:
     """Remove / re-add MCP servers. dry_run plans and writes nothing."""
     out = out or Result()
     if backend is None:
         for name in names:
-            _fail(out, dry_run, harness, "mcp", action, name,
+            fail_row(out, dry_run, harness, "mcp", action, name,
                   f"{harness} stores MCP outside a togglable config "
-                  f"(sqlite / none) -- not supported", "unsupported")
+                  f"(sqlite / none) -- not supported", "unsupported", batch=batch)
         return len(names)
 
     backup_dir = fs.backup_dir()
@@ -299,11 +355,17 @@ def toggle_mcp(action: str, names: list[str], state: dict,
     fails = 0
 
     def fail(name: str, msg: str) -> int:
-        return _fail(out, dry_run, harness, "mcp", action, name, msg)
+        return fail_row(out, dry_run, harness, "mcp", action, name, msg, batch=batch)
 
+    table = harnesses()
     for name in names:
         fs.refresh_lock()
         key = f"{harness}:mcp:{name}"
+        entry = state["disabled"].get(key)
+        need = () if (entry or {}).get("connector") else ("backup",)
+        if action == "enable" and (refused := _refusal(entry, table, key, need)):
+            fails += fail(name, refused)
+            continue
 
         if backend == "claude-json" and name in claudeai_connector_names():
             ok, detail = toggle_claudeai_connector(action, name, dry_run)
@@ -331,7 +393,8 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     f"(open a NEW session for it to load)",
                     connector=True, projects=detail)
             if not dry_run:
-                log(action, "mcp", name, "ok", json.dumps(detail))
+                log(action, "mcp", name, "ok", json.dumps(detail), harness=harness,
+                    batch=batch)
             continue
 
         bp = backup_dir / f"{harness}__{name.replace('/', '_')}.json"
@@ -368,13 +431,20 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                         continue
             else:  # toml
                 config = home / "config.toml"
-                block = codex_mcp_remove(config, name, dry_run) if config.exists() else None
+                # plan first, back up, THEN edit: the block is never only in memory
+                block = codex_mcp_remove(config, name, True) if config.exists() else None
                 if block is None:
                     fails += fail(name, f"no [mcp_servers.{name}] in {config}")
                     continue
                 if not dry_run:
                     fs.atomic_write(bp, json.dumps({"toml": block}, ensure_ascii=False,
                                                    indent=2))
+                    try:
+                        codex_mcp_remove(config, name)
+                    except fs.WriteError as e:      # config rolled back; drop the backup
+                        bp.unlink(missing_ok=True)
+                        fails += fail(name, str(e))
+                        continue
 
             where = f" [{scope}{f': {project}' if project else ''}]"
             if not dry_run:
@@ -384,7 +454,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     "scope": scope, "project": project,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
-                log(action, "mcp", name, "ok", str(bp))
+                log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch)
             _ok(out, dry_run, harness, "mcp", action, name,
                 f"removed{where} (config saved to {bp})",
                 scope=scope, project=project, backup=str(bp))
@@ -397,7 +467,11 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             payload = path.read_text(encoding="utf-8")
             if (entry or {}).get("backend", backend) == "toml":
                 if not dry_run:
-                    codex_mcp_add(home / "config.toml", json.loads(payload)["toml"])
+                    try:
+                        codex_mcp_add(home / "config.toml", json.loads(payload)["toml"])
+                    except fs.WriteError as e:
+                        fails += fail(name, str(e))
+                        continue
             else:
                 # Entries parked before scope tracking have neither field;
                 # they were user-scope by construction, so that is the default.
@@ -420,7 +494,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                         continue
             if not dry_run:
                 state["disabled"].pop(key, None)
-                log(action, "mcp", name, "ok")
+                log(action, "mcp", name, "ok", harness=harness, batch=batch)
             _ok(out, dry_run, harness, "mcp", action, name,
                 "restored (open a NEW session for it to load)", backup=str(path))
     return fails

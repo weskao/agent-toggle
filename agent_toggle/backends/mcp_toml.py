@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import fs
+
 
 def toml_block(text: str, name: str) -> tuple[int, int] | None:
     """Line span of `[mcp_servers.<name>]` and its sub-tables, or None.
@@ -37,7 +39,8 @@ def codex_mcp_remove(config: Path, name: str, dry_run: bool = False) -> str | No
     block = "".join(lines[span[0]:span[1]])
     if dry_run:
         return block
-    config.write_text("".join(lines[:span[0]] + lines[span[1]:]), encoding="utf-8")
+    after = "".join(lines[:span[0]] + lines[span[1]:])
+    fs.checked_write(config, after, fs.toml_verify(after))    # raises fs.WriteError, rolled back
     return block
 
 
@@ -48,4 +51,5 @@ def codex_mcp_add(config: Path, block: str) -> None:
     # Removal leaves the blank line that separated the block from its neighbour;
     # not adding a second one makes disable -> enable byte-identical for a last block.
     sep = "" if not text or text.endswith("\n\n") else "\n"
-    config.write_text(text + sep + block.rstrip("\n") + "\n", encoding="utf-8")
+    after = text + sep + block.rstrip("\n") + "\n"
+    fs.checked_write(config, after, fs.toml_verify(after))    # raises fs.WriteError, rolled back

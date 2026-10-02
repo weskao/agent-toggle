@@ -1,6 +1,8 @@
 """Storage safety: lock, 0600 writes, state schema v3 migration."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import time
@@ -256,3 +258,193 @@ class SchemaV3Test(SandboxCase):
         mechanisms.toggle_dir_type("disable", "skill", ["demo-skill"], state,
                                    "claude", self.home)
         self.assertEqual(state["disabled"]["claude:skill:demo-skill"]["mechanism"], "move")
+
+
+class EnableRefusesTamperedStateTest(SandboxCase):
+    """DESIGN s6.1 row 2: enable never replays a tampered origin / parked_at / backup."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("skills/demo-skill/SKILL.md", "demo")
+        self.assertEqual(cli.main(["disable", "skill", "demo-skill"]), 0)
+        self.key = "claude:skill:demo-skill"
+        self.parked = Path(store.load_state()["disabled"][self.key]["parked_at"])
+
+    def tamper(self, **fields) -> dict:
+        state = store.load_state()
+        state["disabled"][self.key].update(fields)
+        store.save_state(state)
+        return state["disabled"][self.key]
+
+    def enable_json(self, *argv: str) -> tuple[int, dict]:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli.main([*argv, "--json"])
+        return rc, json.loads(buf.getvalue())
+
+    def assert_refused(self, entry: dict, *argv: str) -> None:
+        argv = argv or ("enable", "skill", "demo-skill")
+        before = fs.state_file().read_bytes()
+        rc, env = self.enable_json(*argv)
+        self.assertEqual(rc, 1)
+        row = env["results"][0]
+        self.assertEqual(row["status"], "error")
+        self.assertTrue(row["detail"].startswith("refused: "), row["detail"])
+        self.assertEqual(fs.state_file().read_bytes(), before)     # state untouched
+        self.assertEqual(store.load_state()["disabled"][self.key], entry)
+
+    def test_origin_outside_the_home_is_refused(self) -> None:
+        elsewhere = self.tmp / "elsewhere" / "demo-skill"
+        entry = self.tamper(origin=str(elsewhere))
+        self.assert_refused(entry)
+        self.assertTrue(self.parked.is_dir())                      # nothing moved
+        self.assertFalse(elsewhere.parent.exists())
+
+    def test_dotdot_origin_is_refused(self) -> None:
+        entry = self.tamper(origin=str(self.home / "skills" / ".." / ".." / "demo-skill"))
+        self.assert_refused(entry)
+        self.assertTrue(self.parked.is_dir())
+
+    def test_parked_at_outside_the_park_dirs_is_refused(self) -> None:
+        victim = self.tmp / "outside" / "demo-skill"
+        victim.mkdir(parents=True)
+        entry = self.tamper(parked_at=str(victim))
+        self.assert_refused(entry)
+        self.assertTrue(victim.is_dir())
+        self.assertFalse((self.home / "skills" / "demo-skill").exists())
+
+    def test_companion_outside_its_roots_is_refused(self) -> None:
+        secret = self.tmp / "secret.txt"
+        secret.write_text("s", encoding="utf-8")
+        entry = self.tamper(companions=[{"to": str(secret),
+                                         "from": str(self.tmp / "planted" / "x.txt")}])
+        self.assert_refused(entry)
+        self.assertTrue(secret.is_file())
+        self.assertFalse((self.tmp / "planted").exists())
+
+    def test_missing_parked_at_is_refused_not_a_crash(self) -> None:
+        state = store.load_state()
+        del state["disabled"][self.key]["parked_at"]
+        store.save_state(state)
+        self.assert_refused(state["disabled"][self.key])
+
+    def test_entry_for_another_harness_is_refused(self) -> None:
+        entry = self.tamper(harness="codex")
+        self.assert_refused(entry)
+
+    def test_dry_run_reports_the_refusal_too(self) -> None:
+        self.tamper(origin=str(self.tmp / "elsewhere" / "demo-skill"))
+        rc, env = self.enable_json("enable", "skill", "demo-skill", "--dry-run")
+        self.assertEqual(rc, 1)
+        self.assertTrue(env["results"][0]["detail"].startswith("refused: "))
+
+    def test_legit_entry_still_restores(self) -> None:
+        self.assertEqual(cli.main(["enable", "skill", "demo-skill"]), 0)
+        self.assertEqual((self.home / "skills/demo-skill/SKILL.md").read_text(encoding="utf-8"),
+                         "demo")
+        self.assertEqual(store.load_state()["disabled"], {})
+
+    def test_mcp_backup_outside_the_backup_dir_is_refused(self) -> None:
+        codex = self.tmp / ".codex"
+        codex.mkdir()
+        cfg = codex / "config.toml"
+        cfg.write_text('[mcp_servers.example-mcp]\ncommand = "x"\n', encoding="utf-8")
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+        evil = self.tmp / "evil.json"
+        evil.write_text(json.dumps({"toml": "[mcp_servers.evil]\ncommand = \"y\"\n"}),
+                        encoding="utf-8")
+        self.key = "codex:mcp:example-mcp"
+        entry = self.tamper(backup=str(evil))
+        before = cfg.read_bytes()
+        self.assert_refused(entry, "enable", "mcp", "example-mcp", "--harness", "codex")
+        self.assertEqual(cfg.read_bytes(), before)
+
+    def test_local_scope_claude_mcp_entry_still_restores(self) -> None:
+        # `project` on a claude mcp entry is the local-scope cwd, not --project scope
+        proj = self.tmp / "work"
+        proj.mkdir()
+        fs.backup_dir().mkdir(parents=True, exist_ok=True)
+        bp = fs.backup_dir() / "claude__example-mcp.json"
+        bp.write_text('{"type": "http"}', encoding="utf-8")
+        state = store.load_state()
+        state["disabled"]["claude:mcp:example-mcp"] = {
+            "mechanism": "remove_backup", "harness": "claude", "type": "mcp",
+            "name": "example-mcp", "backend": "claude-json", "backup": str(bp),
+            "scope": "local", "project": str(proj), "at": "2026-01-01T00:00:00+0000"}
+        store.save_state(state)
+        self.cli_rc = 0
+        self.assertEqual(cli.main(["enable", "mcp", "example-mcp"]), 0)
+        self.assertEqual(self.cli_calls[-1][1], str(proj))
+
+    def test_local_scope_root_project_is_refused(self) -> None:
+        fs.backup_dir().mkdir(parents=True, exist_ok=True)
+        bp = fs.backup_dir() / "claude__example-mcp.json"
+        bp.write_text('{"type": "http"}', encoding="utf-8")
+        self.key = "claude:mcp:example-mcp"
+        state = store.load_state()
+        state["disabled"][self.key] = {
+            "mechanism": "remove_backup", "harness": "claude", "type": "mcp",
+            "name": "example-mcp", "backend": "claude-json", "backup": str(bp),
+            "scope": "local", "project": Path(str(self.tmp)).anchor,
+            "at": "2026-01-01T00:00:00+0000"}
+        store.save_state(state)
+        self.cli_rc = 0
+        self.assert_refused(state["disabled"][self.key], "enable", "mcp", "example-mcp")
+        self.assertEqual(self.cli_calls, [])
+
+
+class CheckedConfigWriteTest(SandboxCase):
+    """codex config.toml and ~/.claude.json edits are verified and rolled back."""
+
+    @staticmethod
+    def failing_verify(expected=None):
+        def verify(before: str, after: str) -> str:
+            raise ValueError("forced verify failure")
+        return verify
+
+    def setUp(self) -> None:
+        super().setUp()
+        codex = self.tmp / ".codex"
+        codex.mkdir()
+        self.cfg = codex / "config.toml"
+        self.cfg.write_bytes(b'model = "m"\r\n\r\n[mcp_servers.example-mcp]\r\ncommand = "x"\r\n')
+
+    def test_bad_toml_remove_is_rolled_back(self) -> None:
+        before = self.cfg.read_bytes()
+        with mock.patch.object(fs, "toml_verify", self.failing_verify):
+            rc = cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.cfg.read_bytes(), before)
+        self.assertEqual(store.load_state()["disabled"], {})
+        self.assertFalse(list(fs.backup_dir().glob("*.json")))
+
+    def test_bad_toml_add_is_rolled_back_and_entry_kept(self) -> None:
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+        before = self.cfg.read_bytes()
+        with mock.patch.object(fs, "toml_verify", self.failing_verify):
+            rc = cli.main(["enable", "mcp", "example-mcp", "--harness", "codex"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.cfg.read_bytes(), before)
+        self.assertIn("codex:mcp:example-mcp", store.load_state()["disabled"])
+        self.assertEqual(cli.main(["enable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+
+    def test_bad_connector_write_is_rolled_back(self) -> None:
+        cj = self.tmp / ".claude.json"
+        cj.write_bytes(b'{"claudeAiMcpEverConnected": ["claude.ai Demo"],\n'
+                       b' "projects": {"/p": {"disabledMcpServers": []}}}')
+        before = cj.read_bytes()
+        with mock.patch.object(fs, "json_verify", self.failing_verify):
+            rc = cli.main(["disable", "mcp", "claude.ai Demo"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(cj.read_bytes(), before)
+        self.assertEqual(store.load_state()["disabled"], {})
+
+
+class LogRowsCarryHarnessAndBatchTest(SandboxCase):
+    def test_toggle_rows(self) -> None:
+        (self.tmp / ".codex" / "skills" / "demo-skill").mkdir(parents=True)
+        self.assertEqual(cli.main(["disable", "skill", "demo-skill", "--harness", "codex"]), 0)
+        self.assertEqual(cli.main(["enable", "skill", "demo-skill", "--harness", "codex"]), 0)
+        rows = [json.loads(x) for x in fs.log_file().read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(r["harness"], r["batch"], r["action"]) for r in rows],
+                         [("codex", store.BATCH, "disable"), ("codex", store.BATCH, "enable")])
