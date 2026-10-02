@@ -1,10 +1,12 @@
 # TODO
 
-What is left after phases 0-2 (all merged to `main`, CI green on macOS, Linux and
-Windows). Source of truth for scope and acceptance criteria: `docs/DESIGN.md` §8.
+What is left after phases 0-2 (merged to `main`, CI green on macOS, Linux and Windows)
+and phase 3 (done on branch `phase-3`, not yet pushed or run on CI). Source of truth for
+scope and acceptance criteria: `docs/DESIGN.md` §8.
 
-Every item is `- [ ]`. Change it to `- [x]` only when its acceptance criterion holds
-on CI, and tick the matching box in `docs/DESIGN.md` §7/§8 in the same commit.
+Finished items are `- [x]`, open ones `- [ ]`. Change an item to `- [x]` only when its
+acceptance criterion holds on CI, and tick the matching box in `docs/DESIGN.md` §7/§8 in
+the same commit.
 
 ## Roadmap phases
 
