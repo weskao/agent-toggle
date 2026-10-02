@@ -665,7 +665,13 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             if (entry or {}).get("backend", backend) == "toml":
                 if not dry_run:
                     try:
-                        codex_mcp_add(home / "config.toml", json.loads(payload)["toml"])
+                        block = json.loads(payload)["toml"]
+                        if not isinstance(block, str):
+                            raise TypeError("toml is not text")
+                        codex_mcp_add(home / "config.toml", block)
+                    except (ValueError, KeyError, TypeError) as e:
+                        fails += fail(name, f"backup {path} is unusable ({type(e).__name__}: {e})")
+                        continue
                     except fs.WriteError as e:
                         fails += fail(name, str(e))
                         continue

@@ -13,6 +13,7 @@ from unittest import mock
 from base import SandboxCase
 
 from agent_toggle import cli, fs, mechanisms, store
+from agent_toggle.backends import mcp_toml
 
 FIXTURE = Path(__file__).parent / "fixtures" / "state-v2" / "state.json"
 POSIX = os.name != "nt"
@@ -427,6 +428,65 @@ class CheckedConfigWriteTest(SandboxCase):
         self.assertEqual(self.cfg.read_bytes(), before)
         self.assertIn("codex:mcp:example-mcp", store.load_state()["disabled"])
         self.assertEqual(cli.main(["enable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+
+    def test_crlf_toml_round_trips_byte_identical(self) -> None:
+        before = self.cfg.read_bytes()
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+        self.assertEqual(self.cfg.read_bytes(), b'model = "m"\r\n\r\n')
+        self.assertEqual(cli.main(["enable", "mcp", "example-mcp", "--harness", "codex"]), 0)
+        self.assertEqual(self.cfg.read_bytes(), before)
+
+    def test_toml_edited_between_read_and_write_is_not_overwritten(self) -> None:
+        real = mcp_toml.toml_block
+
+        def racing(text, name):
+            span = real(text, name)
+            # another tool writes after our read
+            self.cfg.write_bytes(self.cfg.read_bytes() + b'[other]\r\nx = 1\r\n')
+            return span
+        with mock.patch.object(mcp_toml, "toml_block", racing):
+            with self.assertRaises(fs.WriteError):
+                mcp_toml.codex_mcp_remove(self.cfg, "example-mcp")
+        self.assertTrue(self.cfg.read_bytes().endswith(b'[other]\r\nx = 1\r\n'))
+        self.assertIn(b"[mcp_servers.example-mcp]", self.cfg.read_bytes())
+
+    def test_toml_verify_checks_the_edit_itself_not_a_copy_of_it(self) -> None:
+        text = 'a = 1\n\n[mcp_servers.x]\nk = 1\n'
+        block = "[mcp_servers.x]\nk = 1\n"
+        ok = mcp_toml.remove_verify(text, "x", block)
+        self.assertIn(ok(text, "a = 1\n\n"), ("", "unverified (no tomllib)"))
+        for bad_after in ("a = 1\n", text, "a = 1\n\n[mcp_servers.x]\n"):
+            with self.assertRaises(ValueError, msg=bad_after):
+                mcp_toml.remove_verify(text, "x", block)(text, bad_after)
+        with self.assertRaises(ValueError):                    # file moved under us
+            ok(text + "# new\n", "a = 1\n\n# new\n")
+        added = mcp_toml.add_verify("a = 1\n", block)
+        with self.assertRaises(ValueError):
+            added("a = 1\n", "a = 1\n" + "[mcp_servers.y]\n")
+        with self.assertRaises(ValueError):
+            added("a = 1\n# new\n", "a = 1\n# new\n\n" + block)
+
+    def test_toml_verify_is_unverified_without_tomllib(self) -> None:
+        text, block = 'a = 1\n\n[mcp_servers.x]\nk = 1\n', "[mcp_servers.x]\nk = 1\n"
+        with mock.patch.object(fs, "_tomllib", lambda: None):
+            self.assertEqual(mcp_toml.remove_verify(text, "x", block)(text, "a = 1\n\n"),
+                             "unverified (no tomllib)")
+            self.assertEqual(mcp_toml.add_verify("a = 1\n", block)("a = 1\n", "a = 1\n\n" + block),
+                             "unverified (no tomllib)")
+
+    def test_corrupt_backup_fails_the_row_not_the_batch(self) -> None:
+        self.cfg.write_bytes(self.cfg.read_bytes()
+                             + b'\r\n[mcp_servers.second-mcp]\r\ncommand = "y"\r\n')
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "second-mcp",
+                                   "--harness", "codex"]), 0)
+        entry = store.load_state()["disabled"]["codex:mcp:example-mcp"]
+        for payload in ("{}", '{"toml": 5}', "[]", "not json"):
+            Path(entry["backup"]).write_text(payload, encoding="utf-8")
+            rc = cli.main(["enable", "mcp", "example-mcp", "second-mcp", "--harness", "codex"])
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(list(store.load_state()["disabled"]), ["codex:mcp:example-mcp"])
+            self.assertIn(b"[mcp_servers.second-mcp]", self.cfg.read_bytes())    # batch went on
+            self.assertEqual(cli.main(["disable", "mcp", "second-mcp", "--harness", "codex"]), 0)
 
     def test_bad_connector_write_is_rolled_back(self) -> None:
         cj = self.tmp / ".claude.json"
