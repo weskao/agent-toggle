@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from . import fs, ops, store
-from .harnesses import TYPES, harnesses
+from .harnesses import TYPES, harnesses, project_view
 from .mechanisms import fail_row, validate_name
 from .output import CliError, Result, die
 
@@ -102,6 +102,8 @@ def cmd_enable_all(harness: str | None, dry_run: bool, out: Result,
     """Restore every state entry, user and project scope, each in its own scope
     (optionally only one harness's, or with `project` only that project's)."""
     table, plan, bad = harnesses(), [], []
+    if project is not None:
+        project = str(project_view(project).project)       # exit 4 like disable --project
     want = store.project_digest(project) if project is not None else None
     for key, entry in store.load_state(write_back=False)["disabled"].items():
         try:

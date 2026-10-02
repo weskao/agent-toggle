@@ -60,27 +60,36 @@ def project_of(key: str, entry: dict) -> str | None:
     return str(entry.get("project")) if scoped else None
 
 
+def _list_of(v: dict, key: str) -> list:
+    """A state entry's list field; a hand-edited non-list counts as empty."""
+    x = v.get(key)
+    return x if isinstance(x, list) else []
+
+
 def cmd_list(type_filter: str | None, state: dict, out: Result,
              harness: str | None = None, project: str | None = None) -> None:
     if project is not None:                  # one project's entries only
+        project = str(project_view(project).project)       # exit 4 like disable --project
         state = store.scope_state(state, project)
     items = [(project_of(k, v), v) for k, v in state["disabled"].items()
-             if (not type_filter or v["type"] == type_filter)
-             and (not harness or harness in (v.get("harness"), *v.get("shared_with", ())))]
+             if (not type_filter or v.get("type") == type_filter)
+             and (not harness or harness in (v.get("harness"), *_list_of(v, "shared_with")))]
     if not items:
         out.say("nothing disabled")
         return
-    for proj, v in sorted(items, key=lambda x: (x[1].get("harness", ""), x[1]["type"],
-                                                 x[1]["name"], x[0] or "")):
-        extra = f"  +{len(v['companions'])} files" if v.get("companions") else ""
-        extra += f"  shared with {', '.join(v['shared_with'])}" if v.get("shared_with") else ""
+    for proj, v in sorted(items, key=lambda x: (str(x[1].get("harness", "")), str(x[1].get("type")),
+                                                 str(x[1].get("name")), x[0] or "")):
+        shared = ", ".join(map(str, _list_of(v, "shared_with")))
+        extra = f"  +{len(_list_of(v, 'companions'))} files" if _list_of(v, "companions") else ""
+        extra += f"  shared with {shared}" if shared else ""
         extra += f"  project {proj}" if proj else ""
-        out.say(f"  {v.get('harness', '?'):<9} {v['type']:<8} {v['name']:<36} "
-                f"since {v['at'][:10]}{extra}")
-        out.row(v.get("harness"), v["type"], v["name"], "list", "disabled",
-                f"since {v['at'][:10]}", show=False, at=v["at"],
-                mechanism=v.get("mechanism"), companions=len(v.get("companions") or []),
-                shared_with=v.get("shared_with") or [], **({"project": proj} if proj else {}))
+        at = str(v.get("at", "?"))
+        out.say(f"  {v.get('harness', '?')!s:<9} {v.get('type')!s:<8} {v.get('name')!s:<36} "
+                f"since {at[:10]}{extra}")
+        out.row(v.get("harness"), v.get("type"), v.get("name"), "list", "disabled",
+                f"since {at[:10]}", show=False, at=v.get("at"),
+                mechanism=v.get("mechanism"), companions=len(_list_of(v, "companions")),
+                shared_with=_list_of(v, "shared_with"), **({"project": proj} if proj else {}))
     out.say(f"\n{len(items)} disabled")
 
 

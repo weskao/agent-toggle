@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from base import SandboxCase
+from test_cli_surface import CliCase
 
 from agent_toggle import fs, harnesses, store
 
@@ -63,6 +64,35 @@ class LogSchemaTest(SandboxCase):
         a, b = self.rows()
         self.assertEqual(a["batch"], b["batch"])
         self.assertTrue(a["batch"].endswith(f"-{os.getpid()}"), a["batch"])
+
+
+class BadStateTest(CliCase):
+    """A hand-edited state file gives a named error or a row, never a TypeError/KeyError."""
+
+    def save(self, disabled: dict) -> None:
+        fs.private_dir(fs.state_dir())
+        fs.state_file().write_text(json.dumps({"version": 3, "disabled": disabled}),
+                                   encoding="utf-8")
+
+    def test_a_non_object_entry_names_its_key(self) -> None:
+        self.save({"claude:skill:x": 5})
+        for argv in (("list",), ("status",), ("cost",), ("enable", "--all"),
+                     ("profile", "save", "p")):
+            rc, env = self.run_json(*argv)
+            self.assertEqual(rc, 1, argv)
+            self.assertIn("claude:skill:x", json.dumps(env), argv)
+            self.assertNotIn("TypeError", json.dumps(env), argv)
+
+    def test_entries_with_bad_field_types_still_list(self) -> None:
+        self.save({"claude:skill:x": {"mechanism": "move", "harness": "claude", "type": "skill",
+                                      "name": "x", "shared_with": 5, "companions": 3, "at": 7},
+                   "claude:skill:y": {"mechanism": "move", "harness": "claude", "type": "skill",
+                                      "name": "y"}})
+        for argv in (("list",), ("status",), ("cost",), ("profile", "save", "p")):
+            rc, env = self.run_json(*argv)
+            self.assertEqual(rc, 0, (argv, env))
+        rc, env = self.run_json("list")
+        self.assertEqual(sorted(r["name"] for r in env["results"]), ["x", "y"])
 
 
 class KeyTest(unittest.TestCase):

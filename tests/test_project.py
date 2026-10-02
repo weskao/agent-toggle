@@ -276,6 +276,15 @@ class ProjectBatchTest(ProjectCase):
         self.assertEqual(rc, 1)
         self.assertEqual(list(self.state()), [self.key])
 
+    def test_list_and_enable_all_refuse_a_missing_project_like_disable_does(self) -> None:
+        gone = self.tmp / "work" / "gone"
+        self.assertEqual(self.p("disable", "skill", "demo-skill", project=gone)[0], 4)
+        before = snapshot(self.tmp)
+        for argv in (("list",), ("enable", "--all")):
+            rc, env = self.p(*argv, project=gone)
+            self.assertEqual(rc, 4, (argv, env))
+        self.assertEqual(snapshot(self.tmp), before)
+
     def test_profile_save_and_apply_in_project_scope(self) -> None:
         self.assertEqual(self.p("profile", "save", "proj")[0], 0)
         doc = json.loads((fs.profiles_dir() / "proj.json").read_text(encoding="utf-8"))

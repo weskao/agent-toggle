@@ -181,6 +181,9 @@ def load_state(write_back: bool = True) -> dict:
         die(f"state file malformed ({state_file}): version must be an integer")
     if not isinstance(state.get("disabled", {}), dict):
         die(f"state file malformed ({state_file}): disabled must be an object")
+    for key, entry in state.get("disabled", {}).items():
+        if not isinstance(entry, dict):
+            die(f"state file malformed ({state_file}): entry {key!r} must be an object")
     if upgrade(state) and write_back:
         save_state(state)
     return state

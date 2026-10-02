@@ -272,14 +272,15 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
 
     for e in state.get("disabled", {}).values():
         h, t, n = e.get("harness", "claude"), e.get("type"), e.get("name")
-        if not t or not n:
-            continue
+        if not all(isinstance(x, str) and x for x in (h, t, n)):
+            continue                      # hand-edited entry: doctor reports it
         if t == "mcp":
             est = mcp_estimate(h, backup_tools(e))
         elif t == "plugin":
             est = (0, None, "not in plugin list")
         else:
             parked = e.get("parked_at")
-            est = file_estimate(t, n, Path(parked) if parked else None)
-        add(h, t, n, False, est, e.get("shared_with") or ())
+            est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)
+        shared = e.get("shared_with")
+        add(h, t, n, False, est, shared if isinstance(shared, list) else ())
     return items
