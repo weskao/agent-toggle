@@ -3,9 +3,9 @@
 Skills, agents, commands, rules, plugins and MCP servers can all be parked and put
 back. Nothing is ever deleted.
 
-Supported harnesses: claude (Claude Code), codex, grok, opencode, openclaw.
-Not every harness has every resource type; unsupported pairs fail loudly
-instead of silently doing nothing.
+Supported harnesses: claude (Claude Code), codex, grok, opencode, openclaw, copilot,
+vibe, devin, agy. Not every harness has every resource type; unsupported pairs fail
+loudly instead of silently doing nothing.
 
 State lives in ONE place ($HOME/.agent-toggle/), never as sidecar files next
 to the targets -- a user's `git status` must not change because of our
@@ -128,7 +128,8 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
             continue
         bits = [t for t in h.types
                 if t not in h.dirs or any((home / s).is_dir() for s in h.dirs[t])]
-        out.say(f"{hname:<9} {home}  types: {','.join(bits)}  mcp: {backend or '-'}")
+        shown = ",".join(bits) if h.types else "(found, nothing supported yet)"
+        out.say(f"{hname:<9} {home}  types: {shown}  mcp: {backend or '-'}")
         info: dict = {}
         for t in bits:
             if t not in h.dirs:
@@ -264,7 +265,8 @@ def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
     if not home.is_dir():
         die(f"{harness} is not installed ({home} does not exist)", 4)
     if type_ not in supported:
-        die(f"{harness} has no {type_} support (it has: {', '.join(supported)})", 4)
+        have = f"it has: {', '.join(supported)}" if supported else "no supported types"
+        die(f"{harness} has no {type_} support ({have})", 4)
 
     ops.apply_plan([ops.Op(harness, type_, action, n) for n in names], out, args.dry_run,
                    batch=store.BATCH)

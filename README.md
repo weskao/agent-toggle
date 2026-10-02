@@ -1,8 +1,9 @@
 # agent-toggle
 
 Temporarily disable and restore AI-agent resources — skills, agents, commands,
-rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode and
-OpenClaw — and show what each one costs at session start.
+rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode,
+OpenClaw, Copilot, Vibe, Devin and Antigravity — and show what each one costs at
+session start.
 
 **Nothing is ever deleted.** Everything is parked and recorded, and `enable`
 puts it back where it came from.
@@ -72,8 +73,8 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 Flags accepted by every command, before or after the subcommand:
 
-- `--harness claude|codex|grok|opencode|openclaw` picks the target (default
-  `claude`; on `list` / `status` / `cost` it filters when given).
+- `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy` picks the
+  target (default `claude`; on `list` / `status` / `cost` it filters when given).
 - `--json` prints exactly one JSON document and nothing else on stdout:
   `{"ok", "command", "results": [{harness, type, name, action, status, detail, ...}],
   "warnings", "needs_new_session"}`. Errors -- including unexpected ones, as
@@ -185,11 +186,16 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 | grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
 | opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | ✓ `opencode.json` (flag, *assumed*) |
 | openclaw | `~/.openclaw` | ✓ (dir move, or flag when `skills.entries.<name>` exists, *assumed*) | ✓ | — | — | ✓ `openclaw.json` (flag, *assumed*) | — (sqlite) |
+| copilot | `~/.copilot` | ✓ | ✓ | — | — | — | ✓ `mcp-config.json` |
+| vibe | `~/.vibe` | ✓ | — | — | — | — | — |
+| devin | `~/.devin` | — | — | — | — | — | — |
+| agy | `~/.antigravity` | — | — | — | — | — | — |
 
-`claude` plugins are toggled through `claude plugin enable/disable`; `openclaw`
-plugins through a config flag (see [Assumed formats](#assumed-formats)).
-Codex has no plugin CLI this tool can drive: `disable plugin x --harness codex`
-exits `4`, which is why the matrix leaves it unchecked.
+Copilot's `config.json` is machine-managed and never edited by this tool; Copilot
+plugins are not yet supported. `claude` plugins are toggled through `claude
+plugin enable/disable`; `openclaw` plugins through a config flag (see [Assumed
+formats](#assumed-formats)). Codex has no plugin CLI this tool can drive: `disable
+plugin x --harness codex` exits `4`, which is why the matrix leaves it unchecked.
 
 Flag items (openclaw plugins and flagged skills, opencode mcp) are toggled with
 `disable` / `enable`, `undo` and `enable --all`. The picker, `cost` and `profile`

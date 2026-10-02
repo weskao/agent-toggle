@@ -50,7 +50,7 @@ first push.
 
 | area | state |
 |---|---|
-| harnesses | claude, codex, grok, opencode, openclaw — one `Harness` record each in `harnesses.py` |
+| harnesses | claude, codex, grok, opencode, openclaw, copilot, vibe, devin (explicit not applicable), agy (table row only) — one `Harness` record each in `harnesses.py` |
 | types | skill, agent, command, rule (move to `*-disabled/`), plugin (claude CLI only), mcp (remove + verbatim backup) |
 | safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; park dirs checked for gitignore; symlinks and broken links handled; `0600` state/backups, lock per batch |
 | state | `~/.agent-toggle/state.json` (schema v3, atomic write), `log.jsonl`, `mcp-backups/`, `companions/`, `lock` |
@@ -217,10 +217,13 @@ class Harness:
 `harnesses.py`, and alias detection itself is path-based (`dir_view()` resolves
 every candidate dir and groups the harnesses that land on the same real path).
 
-Adding Copilot is one record: `dirs={"skill": ("skills",), "agent": ("agents",)}`,
+Adding Copilot is one table record plus `toggle_json_mcp` (a user-scope
+strict-JSON backend in `mechanisms.py`, dispatched from `ops.py` on the table's
+backend id; the file always comes from the table, never the state entry):
+`dirs={"skill": ("skills",), "agent": ("agents",)}`,
 `mechanisms={"skill": "move", "agent": "move", "mcp": "remove_backup"}`,
-`mcp=McpSpec("json", "mcp-config.json", ["mcpServers"])`,
-`editable={"mcp-config.json"}`. No new code.
+`mcp=McpSpec("json", "mcp-config.json", ("mcpServers",))`,
+`editable={"mcp-config.json"}`.
 
 ### 5.3 The three protocols
 
@@ -536,7 +539,8 @@ Phase status (tick a phase only once its acceptance criteria hold):
 - [x] Phase 0 — public readiness (local gate and CI green on macOS, Linux, Windows)
 - [x] Phase 1 — cost + structure (local gate and CI green on macOS, Linux, Windows)
 - [x] Phase 2 — profiles + scope (local gate and CI green on macOS, Linux, Windows)
-- [ ] Phase 3 — remaining harnesses
+- [x] Phase 3 — remaining harnesses
+- [ ] Phase 3.5 — colorful CLI
 - [ ] Phase 4 — PyPI release
 - [ ] Phase 5 — Linux + Windows
 - [ ] Phase 6 — CI hardening + Telegram failure alerts
@@ -547,6 +551,7 @@ Phase status (tick a phase only once its acceptance criteria hold):
 | **1 — cost + structure** | package split (§5.1), `--json`, lock, exit codes, `cost` command + picker column, `rule` type, grok MCP via TOML backend, OpenCode adapter with alias detection, plugins in picker, `--dry-run`, 0600 backups | `cost` sorts a fixture home correctly; alias fixture reports "also affects"; v2 state migrates; shims use `--json` |
 | **2 — profiles + scope** | profiles (§5.7), `--project`, flag mechanism (openclaw skills/plugins, opencode mcp), `undo`, `enable --all`, `doctor` | profile round-trip on fixtures; project-scope disable prints the git warning; flag toggles leave the rest of the JSON byte-identical except the flag; a profile or `state.json` entry with `..` or an out-of-root path is refused; a post-write parse check rolls back a broken edit |
 | **3 — remaining harnesses** | copilot (skills, agents, mcp-config.json), vibe (skills), devin (explicit N/A), agy (table row; adapter once layout observed) | each has a fixture home and passes the shared conformance test |
+| **3.5 — colorful CLI** | ANSI color for human output only (stdlib, no dependency): `status`, `list`, `cost`, `disable`/`enable` results, `doctor`, warnings and errors; `--color auto\|always\|never` option flag; `NO_COLOR`, `FORCE_COLOR` and `TERM=dumb` honored; picker uses curses color pairs and falls back to today's monochrome when `curses.has_colors()` is false; Windows enables virtual-terminal processing or stays plain | stdout that is not a TTY, `--json`, and `NO_COLOR=1` output contain zero escape bytes and are byte-identical to the pre-3.5 output; a forced-color test asserts colored `status` and `cost`; picker still passes its scripted tests with colors off; exit codes and the `--<command>` spellings unchanged; CI green on 3 OSes |
 | **4 — PyPI release** | publish `agent-toggle` to PyPI (trusted publishing from a tag via GitHub Actions), README install switches to `uv tool install agent-toggle` | tagged release installs from PyPI on a clean macOS runner and passes the phase-0 smoke test; the publish job uses OIDC with no stored PyPI token; all workflow actions are pinned by SHA |
 | **5 — Linux + Windows** | platform table (§5.11) filled from real installs, `windows-curses` extra, menu fallback, path/case/symlink behaviour tested on CI; plugin ids with shell metacharacters are refused on the Windows runner | full suite green on Windows runner including picker fallback; documented harness homes per OS |
 | **6 — CI hardening + Telegram alerts** | §8.1: bring `.github/workflows/ci.yml` up to the aicp CI pattern — `permissions: contents: read`, per-ref `concurrency` with cancel-in-progress, `PYTHONUTF8=1`, job `timeout-minutes`, `fail-fast: false`, and a `notify-telegram` job; README "CI notifications" section with the two `gh secret set` commands | a forced test failure on a push sends one Telegram message naming repo, branch, short SHA and the run URL; with the secrets unset the notify job exits 0 with a `::notice::`; PRs never notify; no token or chat id appears in the repo |

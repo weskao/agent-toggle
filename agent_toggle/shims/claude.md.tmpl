@@ -1,6 +1,6 @@
 ---
 name: agent-toggle
-description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode and OpenClaw. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "停用這個 skill" / "關掉某個 MCP" / "把它加回來".
+description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "停用這個 skill" / "關掉某個 MCP" / "把它加回來".
 ---
 
 # agent-toggle
@@ -18,7 +18,7 @@ python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> --json   # if agent-togg
 Commands: `status` (run first), `doctor` (read-only health check), `list [type]`,
 `cost [--type T]` (startup token estimates, biggest first), `disable <type> <name>...`,
 `enable <type> <name>...`, `enable --all`, `undo` (reverse the last batch),
-`profile save|apply|diff <name>`, `profile list`, `migrate`; add `--harness claude|codex|grok|opencode|openclaw`
+`profile save|apply|diff <name>`, `profile list`, `migrate`; add `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`
 (default `claude`) and `--dry-run` to preview (always preview `enable --all`, `undo`,
 `profile apply`). `--project <dir>` targets a repo's own `.claude/` and `.mcp.json`
 (warn the user: git shows the deletion). `<type>` = `skill` / `agent` /

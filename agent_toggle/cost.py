@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import fs
+from .backends.mcp_json import ProjectMcpError, read_project_mcp
 from .backends.plugin_cli import claude_bin, run_cli
 from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
 
@@ -130,6 +131,8 @@ def mcp_estimate(harness: str, tools: int | None) -> Estimate:
 
 def _entry_tools(entry) -> int | None:
     tools = entry.get("tools") if isinstance(entry, dict) else None
+    if tools == ["*"]:                  # "all tools": a wildcard, not a count (flat estimate)
+        return None
     return len(tools) if isinstance(tools, (list, dict)) and tools else None
 
 
@@ -150,6 +153,12 @@ def mcp_tool_counts(h) -> dict[str, int]:
             if isinstance(pdata, dict):
                 for n, e in (pdata.get("mcpServers") or {}).items():
                     servers.setdefault(n, e)
+        return {n: c for n, e in servers.items() if (c := _entry_tools(e))}
+    if h.backend == "json":
+        try:
+            servers = read_project_mcp(h.mcp.file)[1]["mcpServers"]
+        except ProjectMcpError:
+            return {}
         return {n: c for n, e in servers.items() if (c := _entry_tools(e))}
     return {}
 
@@ -179,6 +188,8 @@ def backup_tools(entry: dict) -> int | None:
         raw = json.loads(Path(entry["backup"]).read_text(encoding="utf-8"))
     except (KeyError, OSError, ValueError, TypeError):
         return None
+    if isinstance(raw, dict) and isinstance(raw.get("json"), dict):   # json-backend payload
+        return _entry_tools(raw["json"].get("entry"))
     if isinstance(raw, dict) and "toml" in raw:
         return len(TOOL_SECTION.findall(str(raw["toml"]))) or None
     return _entry_tools(raw)
