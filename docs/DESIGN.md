@@ -501,8 +501,8 @@ Each phase ends with its acceptance criteria met on CI, not by inspection.
 
 Phase status (tick a phase only once its acceptance criteria hold):
 
-- [x] Phase 0 — public readiness (local gate green; CI pending first push)
-- [x] Phase 1 — cost + structure (local gate green; CI pending first push)
+- [x] Phase 0 — public readiness (local gate and CI green on macOS, Linux, Windows)
+- [x] Phase 1 — cost + structure (local gate and CI green on macOS, Linux, Windows)
 - [ ] Phase 2 — profiles + scope
 - [ ] Phase 3 — remaining harnesses
 - [ ] Phase 4 — PyPI release
