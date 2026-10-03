@@ -1,10 +1,9 @@
 """Names are validated at the CLI boundary and items must sit inside their harness dir."""
 from __future__ import annotations
 
-import os
 import unittest
 
-from base import SandboxCase
+from base import CAN_SYMLINK, SandboxCase
 
 from agent_toggle import cli
 
@@ -63,7 +62,7 @@ class NameValidationTest(SandboxCase):
         self.assertEqual(cli.main(["disable", "command", "demo:batch"]), 0)
 
 
-@unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+@unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
 class SymlinkItemTest(SandboxCase):
     def test_symlinked_item_is_moved_as_a_link_not_followed(self) -> None:
         target = self.tmp / "elsewhere" / "linked-skill"

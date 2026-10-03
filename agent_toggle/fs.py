@@ -96,6 +96,25 @@ def contained(path: Path, *roots: Path) -> bool:
 
 # ------------------------------------------------- lock + private atomic write
 
+WIN = os.name == "nt"
+REPLACE_TRIES = 3
+
+
+def replace(src: Path, dst: Path) -> None:
+    """os.replace. On Windows it fails while another program holds `dst` open, so
+    retry briefly, then fail loudly (DESIGN s5.11); elsewhere a failure is final."""
+    for attempt in range(1, REPLACE_TRIES + 1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            if not WIN:
+                raise
+            if attempt == REPLACE_TRIES:
+                raise PermissionError(
+                    f"{dst} is in use by another program (tried {REPLACE_TRIES}x): {e}") from e
+            time.sleep(0.1 * attempt)
+
 LOCK_WAIT = 5.0           # seconds a second run waits before giving up
 LOCK_STALE = 600.0        # a lock older than this is a crashed run's leftover
 
@@ -202,7 +221,7 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -222,7 +241,7 @@ def _replace_bytes(path: Path, data: bytes, mode: int) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)                  # os.open's mode is umask-filtered
-        os.replace(tmp, path)
+        replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

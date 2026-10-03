@@ -11,6 +11,22 @@ from pathlib import Path
 from agent_toggle.backends import plugin_cli
 
 
+def _can_symlink() -> bool:
+    """Windows needs privilege / Developer Mode to create symlinks; probe, don't assume."""
+    d = Path(tempfile.mkdtemp(prefix="agent-toggle-symlink-probe-"))
+    try:
+        (d / "t").mkdir()
+        (d / "l").symlink_to(d / "t", target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+CAN_SYMLINK = _can_symlink()
+
+
 class SandboxCase(unittest.TestCase):
     """A throwaway HOME / USERPROFILE with a fake ~/.claude tree.
 

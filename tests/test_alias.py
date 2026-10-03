@@ -11,6 +11,7 @@ import shutil
 import unittest
 from pathlib import Path
 
+from base import CAN_SYMLINK
 from test_cli_surface import CliCase
 from test_conformance import file_bytes
 
@@ -98,14 +99,14 @@ class AliasBehaviour:
                             for w in self.run_json("status")[1]["warnings"]))
 
 
-@unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+@unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
 class SymlinkAliasTest(AliasBehaviour, AliasBase):
     def setUp(self) -> None:
         super().setUp()
         (self.oc / "skills").symlink_to(self.tmp / ".claude" / "skills", target_is_directory=True)
 
 
-@unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+@unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
 class DotfilesAliasTest(AliasBehaviour, AliasBase):
     """Both harnesses symlink to a third dir: the owner must not depend on who asks."""
 

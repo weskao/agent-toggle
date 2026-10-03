@@ -12,7 +12,7 @@ to the targets -- a user's `git status` must not change because of our
 bookkeeping.
 
 Usage:
-    agent_toggle.py ui [--dry-run]             # interactive picker (curses)
+    agent_toggle.py ui [--dry-run]             # interactive picker (curses, else numbered menu)
     agent_toggle.py cost [--type T]            # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
@@ -228,8 +228,8 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
 def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
     try:
         from .ui import picker as ui
-    except ImportError as e:                 # no curses build (rare)
-        die(f"interactive UI unavailable: {e}")
+    except ImportError:                      # no curses (Windows without windows-curses)
+        from .ui import menu as ui
     changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run,
                       color=use_color(sys.stdout, out.color))
     if changes is None:

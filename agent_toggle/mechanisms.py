@@ -147,6 +147,15 @@ def validate_name(name: str) -> None:
         die(f"invalid name {name!r}: use plain names, `a:b` for nesting", 2)
 
 
+# Plugin ids reach `claude plugin ...`; on Windows that is claude.cmd under cmd.exe,
+# where `&` or `%` in an argument would run commands (DESIGN s6.1 row 5).
+PLUGIN_ID_RE = re.compile(r"[A-Za-z0-9._@:/-]+")
+
+
+def valid_plugin_id(name: str) -> bool:
+    return PLUGIN_ID_RE.fullmatch(name) is not None
+
+
 def _valid_name(name: str) -> bool:
     try:
         validate_name(name)
@@ -186,7 +195,7 @@ def live_names(base: Path, type_: str) -> list[str]:
             continue
         if p.suffix in (".md", ".toml", ".yaml", ".yml") or p.is_symlink() or (p.is_file() and not p.suffix):
             rel = p.relative_to(base).with_suffix("")
-            names.append(str(rel).replace("/", ":"))
+            names.append(rel.as_posix().replace("/", ":"))
     return sorted(set(names))
 
 
@@ -513,6 +522,11 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
     fails = 0
     for name in names:
         fs.refresh_lock()
+        if not valid_plugin_id(name):
+            fails += fail_row(out, dry_run, harness, "plugin", action, name,
+                              "refused: plugin id has characters outside [A-Za-z0-9._@:/-]",
+                              batch=batch)
+            continue
         if dry_run:
             if claude_bin():
                 _ok(out, dry_run, harness, "plugin", action, name, "")
