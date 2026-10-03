@@ -72,6 +72,9 @@ hardening and the notify job; only the live forced-failure check is left.
       `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from secrets, exits 0 with a
       `::notice::` when unset, escapes `&`, `<`, `>`
 - [x] README "CI notifications" section with the two `gh secret set` commands
+- [x] `agent-toggle config [test|sync-ci]`: bot token in the OS credential store and chat id
+      in `config.json` through telegram-kit (optional `telegram` extra), README Install and
+      CI notifications updated (`tests/test_config.py`)
 - [ ] forced failure on a push sends one message (repo, branch, short SHA, run URL);
       PRs never notify; no token or chat id in the repo
 
