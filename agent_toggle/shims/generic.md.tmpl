@@ -36,6 +36,20 @@ change affects them too, so say so. `ui` is an interactive picker for the user, 
   `undo`, `profile apply`, or several names at once.
 - A `rule` may carry safety constraints; say so before disabling one.
 
+## `doctor`: "parked but has no state entry"
+
+Something was moved into a park dir by hand. Each such row carries `orphan`,
+and its `detail` names the exact fix. Get the user's go-ahead before moving
+anything, and move to the Trash rather than deleting:
+
+| `orphan` | meaning | fix |
+|---|---|---|
+| `identical` | the live copy has the same content | delete the parked copy |
+| `differs` | a different live copy exists | compare, keep the wanted one live, delete the parked copy |
+| `parked-only` | no live copy | keep disabled: move it back, then `disable` it so state records it; restore: just move it back |
+
+Re-run `doctor` afterwards; the warning count should be 0.
+
 ## Read the result
 
 `--json` prints one envelope on stdout: `ok`, `command`, `results` (one row

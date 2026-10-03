@@ -492,6 +492,11 @@ Only `error` makes the exit code `1`; each problem row names the command that
 fixes it. `--harness X` for a harness that is not installed is a `note` (exit
 `0`). Companion files are not checked.
 
+A harness item parked with no state entry also carries `orphan`, and its fix
+follows from it: `identical` (the live copy has the same content: delete the
+parked copy), `differs` (a different live copy exists: compare, keep one), or
+`parked-only` (move it back, then `disable` it so the state records it).
+
 ## Assumed formats
 
 Two config shapes came from the design survey (`docs/DESIGN.md` §4 / §11). Both

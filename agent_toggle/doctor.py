@@ -7,6 +7,7 @@ the command that fixes it; nothing is deleted for you.
 """
 from __future__ import annotations
 
+import filecmp
 import json
 import re
 from pathlib import Path
@@ -224,6 +225,34 @@ def _untracked(root: Path, tracked: set[str]) -> list[Path]:
     return found
 
 
+def _same(a: Path, b: Path) -> bool:
+    """Same bytes in both: a dir is compared file by file, links followed, dotfiles ignored."""
+    if a.is_dir() and b.is_dir():
+        def files(root: Path) -> set[Path]:
+            return {p.relative_to(root) for p in root.rglob("*")
+                    if p.is_file() and not p.name.startswith(".")}
+        fa = files(a)
+        return fa == files(b) and all(filecmp.cmp(a / f, b / f, shallow=False) for f in fa)
+    return a.is_file() and b.is_file() and filecmp.cmp(a, b, shallow=False)
+
+
+def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel: Path) -> None:
+    """One untracked parked item; the fix depends on whether a live copy exists and matches."""
+    head = f"{p} is parked but has no state entry (parked outside this tool); fix: "
+    if live.exists() or live.is_symlink():
+        if _same(p, live):
+            kind, fix = "identical", "the live copy is identical; delete the parked copy"
+        else:
+            kind, fix = "differs", (f"a different live copy exists at {live}; compare, keep "
+                                    f"the one you want live, delete the parked copy")
+    else:
+        name = (rel if p.is_dir() else rel.with_suffix("")).as_posix().replace("/", ":")
+        kind, fix = "parked-only", (f"to keep it disabled, move it back to {live}, then "
+                                    f"`agent-toggle disable {type_} {name}` to record it; "
+                                    f"to restore it, just move it back")
+    _row(out, harness, type_, p.name, "warn", head + fix, orphan=kind)
+
+
 def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> None:
     entries = state["disabled"].values()
     tracked = {e["parked_at"] for e in entries
@@ -234,13 +263,14 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
             continue
         for type_, subs in h.dirs.items():
             for sub in subs:
-                parked = dir_view(table, h.name, type_, h.home, sub).parked
+                view = dir_view(table, h.name, type_, h.home, sub)
+                parked = view.parked
                 if parked in seen:
                     continue
                 seen.add(parked)
                 for p in _untracked(parked, tracked):
-                    _row(out, h.name, type_, p.name, "warn", f"{p} is parked but has no state "
-                         f"entry (parked outside this tool); fix: move it back by hand")
+                    _orphan_row(out, h.name, type_, p, view.live / p.relative_to(parked),
+                                p.relative_to(parked))
     if only:
         return
     digests = set()

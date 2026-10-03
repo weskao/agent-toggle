@@ -300,6 +300,25 @@ class StateTest(DoctorCase):
             self.assertIn(needle, text)
         self.assertTrue(orphan.exists() and stray.exists())
 
+    def test_orphan_fix_depends_on_the_live_copy(self) -> None:
+        for n, text in (("same", "a"), ("drift", "old")):
+            self.write(f"skills-disabled/{n}/SKILL.md", text)
+            self.write(f"skills/{n}/SKILL.md", "a" if n == "same" else "new")
+        self.write("skills-disabled/solo/SKILL.md")
+        self.write("agents-disabled/solo-agent.md")
+        rc, rows = self.doctor("--harness", "claude")
+        self.assertEqual(rc, 0, rows)
+        got = {r["name"]: r for r in self.rows(rows, "warn") if r.get("orphan")}
+        self.assertEqual({n: r["orphan"] for n, r in got.items()},
+                         {"same": "identical", "drift": "differs", "solo": "parked-only",
+                          "solo-agent.md": "parked-only"})
+        self.assertIn("delete the parked copy", got["same"]["detail"])
+        self.assertIn("compare", got["drift"]["detail"])
+        # parked-only: put it back, then re-park through the tool so state records it
+        self.assertIn("`agent-toggle disable skill solo`", got["solo"]["detail"])
+        self.assertIn("`agent-toggle disable agent solo-agent`", got["solo-agent.md"]["detail"])
+        self.assertTrue((self.home / "skills-disabled/same").exists())    # still read-only
+
 
 class ReadOnlyTest(DoctorCase):
     def test_doctor_writes_nothing(self) -> None:
