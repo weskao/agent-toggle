@@ -1,3 +1,47 @@
+## [0.2.0] - 2026-10-03
+
+### 🚀 Features
+
+- **platform:** Numbered-menu fallback, plugin id validation, replace retry
+- **config:** Telegram settings for CI alerts via telegram-kit (optional extra)
+- **completions:** Generate bash/zsh/fish completions at release; pin README git installs to a tag
+- **install-shims:** Per-harness shim templates; refuse to overwrite files without the shim marker
+- **ops:** Warn that rules may carry safety constraints when disabling one
+- **status:** Report state entries whose parked item is gone
+- **doctor:** Classify orphan parked items with actionable fix
+
+### 🐛 Bug Fixes
+
+- **install-shims:** Recognise shims written before the marker so upgrades are not refused
+- **mcp:** Mask backed-up config values in claude CLI error output
+- **status:** Skip dotfiles in park dirs
+
+### 📚 Documentation
+
+- Mark phases 3.5 and 4 complete after v0.1.0
+- Numbered menu, harness homes per OS, plugin id rule
+- README says the alert covers the test matrix; refresh stale Phase 6 TODO prose
+- Record the config command as done in the Phase 6 checklist
+- **security:** Scope statement and supported versions
+- **harnesses:** Add harness survey with verified-against versions
+- **readme:** Link the harness matrix to docs/harnesses.md
+- Tick the security, docs and housekeeping items done on 2026-10-03
+- Windows CI now runs the symlink tests; shims reinstalled
+- **harnesses:** Openclaw version read from the CLI on Node 25.9
+- Tick Phase 6 after the forced-failure check
+
+### 🧪 Testing
+
+- **picker:** Run data tests without curses; tick phase 5 items done on CI
+- Output audit for backed-up MCP secrets (DESIGN s6.1 row 3)
+- **fs:** Run the symlink containment tests wherever symlinks can be created
+
+### ⚙️ Miscellaneous Tasks
+
+- Harden workflow and add Telegram failure alert (phase 6)
+- Dependabot for github-actions; document least-privilege release permissions
+- Enable symlink creation on Windows runners before tests
+- **harnesses:** Openclaw verified against 2026.9.2
 ## [0.1.0] - 2026-10-02
 
 ### 🚀 Features
