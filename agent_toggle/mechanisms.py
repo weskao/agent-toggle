@@ -44,6 +44,30 @@ def fail_row(out: Result, dry_run: bool, harness: str, type_: str, action: str, 
     return 1
 
 
+def redact(text: str, config) -> str:
+    """`text` with every string value of `config` (a raw MCP entry, or its JSON text)
+    masked as `***`. CLI output can echo the config it was handed, and output shows
+    names and paths, never backed-up values (DESIGN s6.1 row 3). Mask BEFORE truncating.
+    ponytail: values under 4 chars stay (masking them would garble the message)."""
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except ValueError:
+            config = [config]
+    vals, todo = set(), [config]
+    while todo:
+        x = todo.pop()
+        if isinstance(x, dict):
+            todo += x.values()
+        elif isinstance(x, list):
+            todo += x
+        elif isinstance(x, str) and len(x) >= 4:
+            vals |= {x, json.dumps(x)[1:-1]}          # as given, and JSON-escaped
+    for v in sorted(vals, key=len, reverse=True):
+        text = text.replace(v, "***")
+    return text
+
+
 def _refusal(entry: dict | None, table: dict, key: str, need: tuple[str, ...]) -> str | None:
     """`refused: <reason>` when a state entry must not be replayed (DESIGN s6.1 row 2).
 
@@ -651,7 +675,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     ok, res = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
                                       cwd=project)
                     if not ok:
-                        fails += fail(name, res[:100])
+                        fails += fail(name, redact(res, raw)[:100])
                         continue
             else:  # toml
                 config = home / "config.toml"
@@ -729,7 +753,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                                       ["mcp", "add-json", "--scope", scope, name, payload],
                                       cwd=project)
                     if not ok:
-                        fails += fail(name, res[:120])
+                        fails += fail(name, redact(res, payload)[:120])
                         continue
             if not dry_run:
                 state["disabled"].pop(key, None)
