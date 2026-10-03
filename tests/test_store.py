@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from base import SandboxCase
+from base import CAN_SYMLINK, SandboxCase
 from test_cli_surface import CliCase
 
 from agent_toggle import fs, harnesses, store
@@ -212,7 +212,7 @@ class CheckEntryTest(SandboxCase):
             self.assertRefused(self.entry(project=str(self.proj), origin=str(bad),
                                           parked_at=str(self.park / "x")), "origin")
 
-    @unittest.skipIf(os.name == "nt", "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_project_park_through_a_symlinked_parent_is_refused(self) -> None:
         real = self.tmp / "elsewhere"
         real.mkdir()

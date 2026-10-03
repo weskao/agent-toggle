@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import file_bytes
 
@@ -141,7 +142,7 @@ class ProjectDisableTest(ProjectCase):
         self.assertEqual(rc, 0, env)
         self.assertIn(self.key, self.state())
 
-    @unittest.skipIf(os.name == "nt", "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_symlinked_project_dirs_into_user_scope_are_refused(self) -> None:
         shutil.rmtree(self.pclaude / "skills")
         (self.pclaude / "skills").symlink_to(self.home / "skills")
@@ -419,7 +420,7 @@ class ProjectMcpTest(ProjectCase):
         self.assertEqual(rc, 1)
         self.assertIn("not found", env["results"][0]["detail"])
 
-    @unittest.skipIf(os.name == "nt", "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_symlinked_mcp_json_is_never_written_through(self) -> None:
         target = self.tmp / "elsewhere.json"
         target.write_text(self.text, encoding="utf-8")

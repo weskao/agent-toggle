@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import unittest
 from unittest import mock
 
+from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
 
@@ -245,7 +245,7 @@ class StateTest(DoctorCase):
         self.assertEqual(rc, 0, rows)
         self.assertEqual(self.rows(rows, "warn"), [])
 
-    @unittest.skipIf(os.name == "nt", "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_stray_file_and_dangling_link_in_parked_are_still_warned(self) -> None:
         fs.private_dir(fs.state_dir())
         fs.private_dir(fs.parked_dir())

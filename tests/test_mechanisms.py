@@ -1,11 +1,10 @@
 """Park / restore of dir-type resources, and the harness/backend gates."""
 from __future__ import annotations
 
-import os
 import unittest
 from pathlib import Path
 
-from base import SandboxCase
+from base import CAN_SYMLINK, SandboxCase
 
 from agent_toggle import mechanisms as mech
 
@@ -46,7 +45,7 @@ class DirTypeTest(SandboxCase):
         # missing item resolves to None
         self.assertIsNone(mech.resolve_item(self.home / "agents", "nope"))
 
-    @unittest.skipIf(os.name == "nt", "symlinks need privilege / Developer Mode on Windows")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_symlink_disable_roundtrip(self) -> None:
         live = self.home / "skills"
         link = live / "broken-symlink"

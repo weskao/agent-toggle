@@ -1,7 +1,6 @@
 """Picker data gathering and filtering (no curses screen is opened)."""
 from __future__ import annotations
 
-import os
 import unittest
 from unittest import mock
 
@@ -18,7 +17,6 @@ except ImportError:              # no curses build (Windows without windows-curs
 
 @unittest.skipIf(picker is None, "curses unavailable")
 class PickerTest(SandboxCase):
-    @unittest.skipIf(os.name == "nt", "live_names joins nesting with os.sep; Windows port pending")
     def test_live_names_addresses_nesting_with_colon(self) -> None:
         self.write("commands/google.md")
         self.write("commands/news-briefing/ai.md")
