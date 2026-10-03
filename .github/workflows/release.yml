@@ -5,6 +5,8 @@ on:
     tags: ["v*"]
 
 # Least privilege by default; only the publish job is granted id-token.
+# Nothing here needs contents: write: no job creates a GitHub Release (the
+# completion files go out as a workflow artifact, see the build job).
 permissions:
   contents: read
 
@@ -34,6 +36,15 @@ jobs:
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
+      # Static bash/zsh/fish completions built from the argparse parser. No job
+      # creates a GitHub Release, so they ship as a workflow artifact.
+      - name: Generate shell completions
+        run: python tools/gen_completions.py completions
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: completions
+          path: completions/
           if-no-files-found: error
 
   publish:
