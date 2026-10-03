@@ -28,6 +28,14 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
+      # Windows creates symlinks only with Developer Mode (or an elevated
+      # privilege); without it tests/base.py CAN_SYMLINK is False and the
+      # symlink tests skip. The registry flag is read at os.symlink() time, so
+      # no reboot is needed. The skipUnless guards stay for local Windows users.
+      - name: Enable symlink creation (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
       - run: pip install -e .
       - run: python -m unittest discover -s tests -v
 
