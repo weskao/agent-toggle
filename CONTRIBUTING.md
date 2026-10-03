@@ -62,6 +62,7 @@ To release a new version:
 6. Watch the `smoke` job in the workflow run. It installs the published version
    from PyPI on macOS and verifies a `disable` / `enable` round trip.
 
-**Action pins:** GitHub Actions in `ci.yml` are pinned by full commit SHA with a
-`# vX.Y.Z` comment that notes the semantic version. Action pins are updated
-deliberately (not automatically) when you decide to upgrade.
+**Action pins:** GitHub Actions in the workflows are pinned by full commit SHA
+with a `# vX.Y.Z` comment that notes the semantic version. Dependabot
+(`.github/dependabot.yml`, weekly) opens PRs that bump both; review them like
+any other change.

@@ -27,23 +27,24 @@ uv tool install agent-toggle
 agent-toggle --version
 ```
 
-Pre-release versions from this repository:
+Straight from this repository, pinned to a release tag (`v0.1.0` is the current one;
+an unpinned `git+` URL installs whatever is on the default branch):
 
 ```sh
-uv tool install git+<repo-url>
+uv tool install git+https://github.com/weskao/agent-toggle@v0.1.0
 agent-toggle --version
 ```
 
 Alternatively, use `pipx`:
 
 ```sh
-pipx install agent-toggle             # from PyPI; or: pipx install git+<repo-url>
+pipx install agent-toggle             # from PyPI; or: pipx install git+https://github.com/weskao/agent-toggle@v0.1.0
 ```
 
 From a checkout, either install it editable or run it in place:
 
 ```sh
-git clone <repo-url> agent-toggle
+git clone https://github.com/weskao/agent-toggle agent-toggle
 cd agent-toggle
 pip install -e .                       # puts the `agent-toggle` console script on PATH
 python3 agent_toggle.py status         # no install needed; same CLI
@@ -74,6 +75,19 @@ agent-toggle config sync-ci                  # set the two GitHub repository sec
 ```
 
 Without the extra everything else works exactly as before; only `config` asks for it.
+
+## Shell completion
+
+Each release publishes static completion files for bash, zsh and fish as the
+`completions` artifact of its Release workflow run. They are generated from the
+CLI parser; to build them from a checkout:
+
+```sh
+python3 tools/gen_completions.py completions   # agent-toggle.bash, _agent-toggle (zsh), agent-toggle.fish
+```
+
+Source `agent-toggle.bash` from `~/.bashrc`, put `_agent-toggle` on your zsh
+`fpath`, or copy `agent-toggle.fish` to `~/.config/fish/completions/`.
 
 ## Usage
 
@@ -593,8 +607,9 @@ prints a `::notice::` and exits 0, so it never adds a second red X.
 A release is a git tag `vX.Y.Z` (where `X.Y.Z` must match `agent_toggle.__version__`).
 Pushing the tag triggers `.github/workflows/release.yml`:
 
-1. **Build** job checks that the tag matches `__version__` and builds a wheel and
-   source distribution.
+1. **Build** job checks that the tag matches `__version__`, builds a wheel and
+   source distribution, and generates the shell completion files (uploaded as the
+   `completions` artifact; the workflow does not create a GitHub Release).
 2. **Publish** job uploads to PyPI using
    [trusted publishing](https://docs.pypi.org/trusted-publishers/),
    with no stored tokens—only the `pypi` environment and OIDC setup.
