@@ -27,18 +27,18 @@ uv tool install agent-toggle
 agent-toggle --version
 ```
 
-Straight from this repository, pinned to a release tag (`v0.1.0` is the current one;
+Straight from this repository, pinned to a release tag (`v0.2.0` is the current one;
 an unpinned `git+` URL installs whatever is on the default branch):
 
 ```sh
-uv tool install git+https://github.com/weskao/agent-toggle@v0.1.0
+uv tool install git+https://github.com/weskao/agent-toggle@v0.2.0
 agent-toggle --version
 ```
 
 Alternatively, use `pipx`:
 
 ```sh
-pipx install agent-toggle             # from PyPI; or: pipx install git+https://github.com/weskao/agent-toggle@v0.1.0
+pipx install agent-toggle             # from PyPI; or: pipx install git+https://github.com/weskao/agent-toggle@v0.2.0
 ```
 
 From a checkout, either install it editable or run it in place:
