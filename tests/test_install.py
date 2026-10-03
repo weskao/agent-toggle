@@ -112,6 +112,17 @@ class InstallShimsCase(SandboxCase):
         self.assertEqual(rc, 0)
         self.assertEqual(dest.read_text(encoding="utf-8"), cli.shim_text("claude"))
 
+    def test_pre_marker_shim_is_recognised_and_upgraded(self) -> None:
+        dest = shim(self.tmp / ".claude")
+        dest.parent.mkdir(parents=True)
+        dest.write_text("---\nname: agent-toggle\ndescription: old\n---\n\n# agent-toggle\n\nold\n",
+                        encoding="utf-8")
+        self.assertEqual(self.run_cli("--harness", "claude")[0], 0)
+        self.assertIn(cli.SHIM_MARKER, dest.read_text(encoding="utf-8"))
+        # a user's own skill that merely borrows the name is still refused
+        dest.write_text("---\nname: agent-toggle\n---\nmine\n", encoding="utf-8")
+        self.assertEqual(self.run_cli("--harness", "claude")[0], 1)
+
     @unittest.skipUnless(CAN_SYMLINK, "needs symlink privilege")
     def test_symlinked_shim_is_refused(self) -> None:
         target = self.tmp / "elsewhere.md"

@@ -329,9 +329,12 @@ def shim_refusal(dest: Path) -> str | None:
     if not dest.exists():
         return None
     try:
-        ours = SHIM_MARKER in dest.read_text(encoding="utf-8")
+        text = dest.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        ours = False
+        text = ""
+    # Shims from before the marker existed: our frontmatter name plus our heading.
+    legacy = text.startswith("---\nname: agent-toggle\n") and "\n# agent-toggle\n" in text
+    ours = SHIM_MARKER in text or legacy
     return None if ours else "exists and lacks the agent-toggle shim marker"
 
 
