@@ -543,7 +543,7 @@ Phase status (tick a phase only once its acceptance criteria hold):
 - [x] Phase 3.5 — colorful CLI
 - [x] Phase 4 — PyPI release
 - [ ] Phase 5 — Linux + Windows
-- [ ] Phase 6 — CI hardening + Telegram failure alerts
+- [x] Phase 6 — CI hardening + Telegram failure alerts
 
 | phase | content | acceptance |
 |---|---|---|

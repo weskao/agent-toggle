@@ -75,8 +75,8 @@ hardening and the notify job; only the live forced-failure check is left.
 - [x] `agent-toggle config [test|sync-ci]`: bot token in the OS credential store and chat id
       in `config.json` through telegram-kit (optional `telegram` extra), README Install and
       CI notifications updated (`tests/test_config.py`)
-- [ ] forced failure on a push sends one message (repo, branch, short SHA, run URL);
-      PRs never notify; no token or chat id in the repo
+- [x] forced failure on a push sends one message (repo, branch, short SHA, run URL);
+      PRs never notify; no token or chat id in the repo (verified 2026-10-04, run 37144727572)
 
 ## Security and design items still planned (`docs/DESIGN.md` §5, §6, §6.1)
 
