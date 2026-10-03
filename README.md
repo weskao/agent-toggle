@@ -198,6 +198,10 @@ instead of fighting curses for the terminal.
 
 Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
+Without curses, `ui` falls back to a numbered menu with the same staging and the
+same result: type row numbers (`1 3 5-7`) to tick or untick, `/text` to filter,
+`s` / `h` / `t` to sort and cycle the harness and type filters, `a` to apply, `q`
+(or end of input) to cancel.
 
 ## What each harness supports
 
@@ -212,6 +216,19 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 | vibe | `~/.vibe` | ✓ | — | — | — | — | — |
 | devin | `~/.devin` | — | — | — | — | — | — |
 | agy | `~/.antigravity` | — | — | — | — | — | — |
+
+**Homes per OS.** Every `~` above is Python's `Path.home()`: `$HOME` on macOS and
+Linux, `%USERPROFILE%` on Windows (so `~/.claude` is `C:\Users\<you>\.claude`).
+opencode honours an absolute `$XDG_CONFIG_HOME` on every OS and otherwise uses
+`~/.config/opencode`, Windows included; the tool does not look in `%APPDATA%`. This
+tool's own state lives in `~/.agent-toggle/`. The Linux and Windows locations
+follow the harnesses' documentation and have not yet been checked against real
+installs there; if a harness keeps its files elsewhere, `status` shows it as not
+installed.
+
+Plugin ids are passed to `claude plugin ...`, which on Windows runs through
+`cmd.exe`. An id with anything outside `A-Z a-z 0-9 . _ @ : / -` (for example `&`,
+`%`, `|` or a space) is refused on every OS before any command runs.
 
 Copilot's `config.json` is machine-managed and never edited by this tool; Copilot
 plugins are not yet supported. `claude` plugins are toggled through `claude
