@@ -189,6 +189,14 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     for (hname, proj), n in sorted(projects.items(), key=str):
         out.say(f"project {proj}  ({n} parked under {fs.parked_dir()})")
         out.row(hname, None, None, "status", "project", "", show=False, project=proj, parked=n)
+    # the inverse of `untracked`: a state entry whose parked item is gone (DESIGN s6)
+    for k, e in state["disabled"].items():
+        if only and only not in (e.get("harness"), *_list_of(e, "shared_with")):
+            continue
+        if gone := doctor.missing_parked(k, e):
+            out.say(f"WARNING {e.get('harness')} {e.get('type')} {e.get('name')}: {gone}", warn=True)
+            out.row(e.get("harness"), e.get("type"), e.get("name"), "status", "stale", gone,
+                    show=False, parked_at=e.get("parked_at"))
 
 
 def parked_drift(items: list[Path], parked: Path, live: Path,

@@ -141,6 +141,28 @@ def _check_layout(out: Result, h: Harness, table: dict) -> None:
         _row(out, h.name, None, None, "ok", "layout matches the table row")
 
 
+def enable_cmd(key: str, e: dict) -> str:
+    """The `agent-toggle enable ...` line that targets this state entry."""
+    hname, digest, type_, name = store.parse_key(key)
+    return (f"agent-toggle enable {type_} {name}"
+            + (f" --harness {hname}" if hname != "claude" else "")
+            + (f" --project {e.get('project')}" if digest else ""))
+
+
+def missing_parked(key: str, e: dict) -> str | None:
+    """'parked item missing ...; fix: ...' when the entry's `parked_at` is gone, else
+    None. Read-only; shared by doctor (an error row) and status (a warning)."""
+    parked = e.get("parked_at") if isinstance(e, dict) else None
+    if not isinstance(parked, str) or Path(parked).exists() or Path(parked).is_symlink():
+        return None
+    try:
+        enable = enable_cmd(key, e)
+    except ValueError:                          # malformed key: doctor reports it on its own
+        return None
+    return (f"parked item missing: {parked}; fix: put it back there and run `{enable}`, "
+            f"or remove the entry from {fs.state_file()}")
+
+
 def _check_entry(out: Result, key: str, e: dict, table: dict) -> None:
     sf = fs.state_file()
     try:
@@ -159,7 +181,7 @@ def _check_entry(out: Result, key: str, e: dict, table: dict) -> None:
         _row(out, *ident, "error", f"{why}; entry fails the tamper checks, fix: inspect {sf} "
              f"and remove the entry by hand if it is not yours")
         return
-    enable = f"agent-toggle enable {type_} {name}"
+    enable = enable_cmd(key, e)
     project = e.get("project") if digest else None
     if project and not Path(project).is_dir():
         _row(out, *ident, "error", f"project dir gone: {project}; fix: recreate it, then "
@@ -168,9 +190,8 @@ def _check_entry(out: Result, key: str, e: dict, table: dict) -> None:
         return
     flag = e.get("flag") if mech == "flag" and not e.get("connector") else None
     if mech == "move":
-        if not Path(e["parked_at"]).exists() and not Path(e["parked_at"]).is_symlink():
-            _row(out, *ident, "error", f"parked item missing: {e['parked_at']}; fix: put it back "
-                 f"there and run `{enable}`, or remove the entry from {sf}")
+        if gone := missing_parked(key, e):
+            _row(out, *ident, "error", gone)
         elif not Path(e["origin"]).parent.is_dir():
             _row(out, *ident, "error", f"origin dir gone: {Path(e['origin']).parent}; "
                  f"fix: recreate it, then `{enable}`")

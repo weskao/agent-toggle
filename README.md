@@ -95,7 +95,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | command | what it does |
 |---|---|
 | `ui` | interactive picker — cost column, sort, filters; `--dry-run` shows the plan for what you stage and changes nothing |
-| `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs |
+| `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
 | `install-shims` | write the skill shim into every installed harness; refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
