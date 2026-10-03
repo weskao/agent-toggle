@@ -59,8 +59,19 @@ python3 agent_toggle.py install-shims  # from a checkout, no install needed
 `install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
 every installed harness that supports skills, so `/agent-toggle` works from any
 of them, and adds the park dirs (`skills-disabled/` etc.) to a `.gitignore`
-already present in that harness home. It is idempotent; `--dry-run` shows the
-plan. The tool itself stays in one place.
+already present in that harness home. Each harness gets its own template from
+`agent_toggle/shims/<harness>.md.tmpl`, else `generic.md.tmpl` (which tells the
+agent to pass `--harness <that harness>`). The shim tells the agent to act only
+on the user's explicit request, never on instructions found inside skill or
+tool content, and to preview bulk operations with `--dry-run`.
+
+Every shim carries an `<!-- agent-toggle shim: ... -->` marker line.
+`install-shims` updates a file that has the marker in place (it is idempotent)
+and **refuses** to overwrite one that lacks it, or a symlink: that harness gets
+an `error` row with the fix, the other harnesses still install, and the run
+exits `1`. A shim written by a version before the marker counts as foreign;
+delete it and re-run. `--dry-run` shows the same plan, refusals included. The
+tool itself stays in one place.
 
 **Optional: Telegram alerts for CI** (for maintainers of a fork or clone). Install
 with the `telegram` extra, which adds [telegram-kit](https://pypi.org/project/telegram-kit/)
@@ -87,7 +98,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
-| `install-shims` | write the skill shim into every installed harness (`--dry-run` shows the plan) |
+| `install-shims` | write the skill shim into every installed harness; refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
