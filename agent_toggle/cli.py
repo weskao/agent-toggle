@@ -162,6 +162,7 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                     found = list(parked.iterdir())
                 else:
                     found = [p for p in parked.rglob("*") if p.is_file()]
+                found = [p for p in found if not p.name.startswith(".")]   # .DS_Store, as doctor
                 items += found
                 ign = ign and gitignored(
                     parked, home if view.owner == hname else table[view.owner].home)

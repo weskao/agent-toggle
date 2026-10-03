@@ -80,6 +80,16 @@ class StatusTest(SandboxCase):
         # only the live-twin is reported as a twin
         self.assertEqual(twins, ["twin"])
 
+    def test_status_skips_dotfiles_in_park_dir(self) -> None:
+        self.write("skills-disabled/.DS_Store")
+        self.write("skills-disabled/orphan/SKILL.md")
+        self.write("skills/.DS_Store")
+        out = Result()
+        cli.cmd_status(store.load_state(), out)
+        info = next(r for r in out.rows if r.get("home") == str(self.home))["parked"]["skill"]
+        # .DS_Store is neither a parked item nor a live twin, matching doctor
+        self.assertEqual((info["parked"], info["untracked"], info["live_twins"]), (1, 1, []))
+
     def test_status_script_exits_zero_with_temp_home(self) -> None:
         # HOME / USERPROFILE already point at the sandbox and are inherited.
         p = subprocess.run([sys.executable, str(REPO / "agent_toggle.py"), "status"],
