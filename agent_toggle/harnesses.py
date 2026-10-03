@@ -131,7 +131,7 @@ def build(home: Path) -> dict[str, Harness]:
                 mechanisms={"skill": "move", "agent": "move", "plugin": "flag"},
                 flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
                        "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
-                editable=frozenset({"openclaw.json"}), verified="2026.7.1-2"),
+                editable=frozenset({"openclaw.json"}), verified="2026.9.2"),
         # DESIGN s4: `mcp-config.json -> mcpServers`, strict JSON, backend "json". Its
         # `config.json` is machine-managed JSONC: never listed, never in `editable`.
         Harness("copilot", home / ".copilot",

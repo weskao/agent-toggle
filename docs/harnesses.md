@@ -23,7 +23,7 @@ nothing to check.
 | codex | 0.160.0 | `codex --version` |
 | grok | 1.0.44 | `version` key of `~/.grok/version.json` (the `grok` binary was not runnable) |
 | opencode | 2.0.22 | `opencode --version` |
-| openclaw | 2026.7.1-2 | `openclaw --version` (needs Node ≥ 25.9; run on 25.9.0) |
+| openclaw | 2026.9.2 | `openclaw --version` (needs Node ≥ 25.9; run on 25.9.0) |
 | copilot | 1.0.90 | `copilot --version` |
 | vibe | 2.25.8 | `vibe --version` |
 | devin | unverified | `devin --version` did not return within 10 s; the row has nothing to check |
