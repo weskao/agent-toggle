@@ -36,6 +36,7 @@ Changelog = "https://github.com/weskao/agent-toggle/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 windows = ["windows-curses; sys_platform == 'win32'"]
+telegram = ["telegram-kit>=0.2.0,<0.3"]
 
 [project.scripts]
 agent-toggle = "agent_toggle.cli:main"

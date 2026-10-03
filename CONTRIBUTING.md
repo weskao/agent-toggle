@@ -2,6 +2,8 @@
 
 Thanks for helping. agent-toggle is stdlib-only at runtime and supports
 Python 3.10 and newer; please keep it that way.
+The one exception is `agent-toggle config`, which imports telegram-kit from the
+optional `telegram` extra; keep that import inside `agent_toggle/config.py`.
 
 ## Adding a harness
 

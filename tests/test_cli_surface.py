@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -259,6 +260,13 @@ class SpellingTest(CliCase):
         self.assertEqual(self.run_cli("--harness=codex", "--list"),
                          self.run_cli("--harness=codex", "list"))
         self.assertEqual(self.run_cli("--pick", "--json"), self.run_cli("pick", "--json"))
+
+    def test_config_accepts_a_leading_double_dash(self) -> None:
+        with mock.patch.dict(sys.modules, {"telegram_kit": None}):     # never the real keychain
+            for argv in (["config"], ["config", "test"], ["config", "sync-ci", "--dry-run"]):
+                plain = self.run_cli(*argv, "--json")
+                self.assertEqual(plain, self.run_cli(f"--{argv[0]}", *argv[1:], "--json"), argv)
+                self.assertEqual(plain[0], 4)
 
     def test_color_flag_before_a_double_dash_command(self) -> None:
         self.write("skills/demo-skill/SKILL.md")

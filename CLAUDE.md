@@ -19,6 +19,7 @@ behave identically (same output, same exit code):
 | `profile` | `--profile` |
 | `undo` | `--undo` |
 | `doctor` | `--doctor` |
+| `config` | `--config` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:
