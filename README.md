@@ -62,6 +62,19 @@ of them, and adds the park dirs (`skills-disabled/` etc.) to a `.gitignore`
 already present in that harness home. It is idempotent; `--dry-run` shows the
 plan. The tool itself stays in one place.
 
+**Optional: Telegram alerts for CI** (for maintainers of a fork or clone). Install
+with the `telegram` extra, which adds [telegram-kit](https://pypi.org/project/telegram-kit/)
+(itself stdlib-only), then run the setup once; see [CI notifications](#ci-notifications):
+
+```sh
+uv tool install "agent-toggle[telegram]"     # or: pipx install "agent-toggle[telegram]"
+pip install -e ".[telegram]"                 # from a checkout
+agent-toggle config                          # bot token + chat id
+agent-toggle config sync-ci                  # set the two GitHub repository secrets
+```
+
+Without the extra everything else works exactly as before; only `config` asks for it.
+
 ## Usage
 
 ```sh
@@ -80,6 +93,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
+| `config [test\|sync-ci]` | Telegram settings for the CI failure alerts; see [CI notifications](#ci-notifications) |
 | `doctor` | read-only check of each harness layout and of `state.json` against disk; exit `1` only on an `error` row |
 | `migrate` | import an older `~/.claude-toggle/` state |
 
@@ -544,19 +558,35 @@ throwaway temp `HOME` and a stubbed `claude` CLI.
 ## CI notifications
 
 `.github/workflows/ci.yml` can send a Telegram message when the test matrix fails on a
-push (a lint-only failure does not page).
-Set two repository secrets (the commands prompt for the value, so nothing lands
-in your shell history or the repo):
+push (a lint-only failure does not page). Alerts never fire for pull requests or green
+runs. The message names the repository, branch, 7-character commit and a link to the run.
+
+Set it up once, with the `telegram` extra installed (see [Install](#install)):
+
+```sh
+agent-toggle config            # prompts for the bot token (hidden) and the chat id
+agent-toggle config test       # send one test message
+agent-toggle config sync-ci    # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on the repo
+```
+
+`config` works like aicp's `--config`: Enter keeps the current value, `-` clears it.
+The bot token is kept only in the OS credential store (macOS Keychain, Linux Secret
+Service, Windows DPAPI) through telegram-kit, never in a file or on a command line, and
+is shown masked. With no credential store it refuses to store the token; set
+`TG_BOT_TOKEN` in the environment instead (`TG_CHAT_ID` likewise for the chat id). The
+chat id is ordinary configuration in `~/.agent-toggle/config.json`: a number, `-100...`
+for a group, or an `@channel`. `config sync-ci` needs the GitHub CLI (`gh`) signed in; it
+passes both values on stdin, and `--repo OWNER/REPO` / `--dry-run` work as elsewhere.
+
+To skip the tool, set the secrets by hand (each command prompts for the value):
 
 ```sh
 gh secret set TELEGRAM_BOT_TOKEN
 gh secret set TELEGRAM_CHAT_ID
 ```
 
-Alerts fire only for failed pushes, never for pull requests or green runs. The
-message names the repository, branch, 7-character commit and a link to the run.
-With either secret unset (a fork, or a clone you have not configured) the notify
-job prints a `::notice::` and exits 0, so it never adds a second red X.
+With either secret unset (a fork, or a clone you have not configured) the notify job
+prints a `::notice::` and exits 0, so it never adds a second red X.
 
 ## Releasing
 

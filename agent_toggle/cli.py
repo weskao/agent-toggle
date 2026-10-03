@@ -26,6 +26,7 @@ Usage:
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
     agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
+    agent_toggle.py config [test|sync-ci]      # Telegram settings for CI failure alerts
 
     <type> = skill | agent | command | rule | plugin | mcp
     --json prints exactly one JSON document; exit codes: 0 ok, 1 partial
@@ -41,7 +42,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, cost, doctor, fs, ops, profiles, store, undo
+from . import __version__, config, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
@@ -348,7 +349,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims", "profile", "undo", "doctor")
+            "install-shims", "profile", "undo", "doctor", "config")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -427,6 +428,12 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
     sub.add_parser("doctor", parents=[common],
                    help="read-only check of harness layouts and state against disk")
+    cf = sub.add_parser("config", parents=[common],
+                        help="Telegram settings for the CI failure alerts (needs the telegram extra)")
+    cf.add_argument("action", nargs="?", choices=("test", "sync-ci"),
+                    help="test: send one message | sync-ci: set the GitHub repo secrets")
+    cf.add_argument("--repo", metavar="OWNER/REPO", help="sync-ci: repository (default: this one)")
+    cf.add_argument("--dry-run", action="store_true", help="sync-ci: show the plan; set nothing")
     up2 = sub.add_parser("undo", parents=[common], help="reverse the last logged batch")
     up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
@@ -471,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
             profiles.cmd_profile(args, out)
         elif cmd == "doctor":
             doctor.cmd_doctor(args.harness, out)
+        elif cmd == "config":
+            config.cmd_config(args, out)
         elif cmd == "undo":
             undo.cmd_undo(args.dry_run, args.harness, out)
         elif cmd == "enable" and args.all:
