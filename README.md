@@ -543,7 +543,8 @@ throwaway temp `HOME` and a stubbed `claude` CLI.
 
 ## CI notifications
 
-`.github/workflows/ci.yml` can send a Telegram message when CI fails on a push.
+`.github/workflows/ci.yml` can send a Telegram message when the test matrix fails on a
+push (a lint-only failure does not page).
 Set two repository secrets (the commands prompt for the value, so nothing lands
 in your shell history or the repo):
 

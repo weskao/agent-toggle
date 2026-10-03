@@ -62,8 +62,8 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
 
 ### Phase 6 — CI hardening + Telegram failure alerts
 
-Model on the aicp workflow (`docs/DESIGN.md` §8.1). `.github/workflows/ci.yml`
-currently has only `fail-fast: false`.
+Model on the aicp workflow (`docs/DESIGN.md` §8.1). `.github/workflows/ci.yml` has the
+hardening and the notify job; only the live forced-failure check is left.
 
 - [x] `permissions: contents: read`
 - [x] per-ref `concurrency` with `cancel-in-progress: true`
