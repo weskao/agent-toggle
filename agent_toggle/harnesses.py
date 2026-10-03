@@ -38,6 +38,9 @@ class Harness:
     editable: frozenset[str] = frozenset()   # files the tool may write
     aliases_from: tuple[str, ...] = ()
     project: Path | None = None              # set only on a --project view (resolved dir)
+    # harness version this row's layout was last checked against (docs/harnesses.md);
+    # "unverified" = no version found, or nothing in the row to check
+    verified: str = "unverified"
 
     def __post_init__(self) -> None:
         # frozen only stops rebinding; wrap the dicts so they cannot be mutated either
@@ -93,19 +96,22 @@ def build(home: Path) -> dict[str, Harness]:
                       "rule": ("rules",)},
                 mechanisms={"skill": "move", "agent": "move", "command": "move",
                             "rule": "move", "plugin": "native_cli", "mcp": "remove_backup"},
-                mcp=McpSpec("claude-json", home / ".claude.json", ("mcpServers",))),
+                mcp=McpSpec("claude-json", home / ".claude.json", ("mcpServers",)),
+                verified="2.1.288"),
         Harness("codex", codex,
                 dirs={"skill": ("skills",), "agent": ("agents",),
                       "command": ("commands", "prompts")},
                 mechanisms={"skill": "move", "agent": "move", "command": "move",
                             "plugin": "native_cli", "mcp": "remove_backup"},
-                mcp=McpSpec("toml", codex / "config.toml", ("mcp_servers",))),
+                mcp=McpSpec("toml", codex / "config.toml", ("mcp_servers",)),
+                verified="0.160.0"),
         # DESIGN §4 survey: grok keeps `[mcp_servers.<name>]` blocks in config.toml,
         # the same shape as codex, so the existing TOML backend serves it.
         Harness("grok", grok,
                 dirs={"skill": ("skills",)},
                 mechanisms={"skill": "move", "mcp": "remove_backup"},
-                mcp=McpSpec("toml", grok / "config.toml", ("mcp_servers",))),
+                mcp=McpSpec("toml", grok / "config.toml", ("mcp_servers",)),
+                verified="1.0.44"),
         # DESIGN s4: command/*.md; skills may be redirected by opencode.json.
         # Assumption (DESIGN s11 q2): with no skills.paths, `skills/` is its own dir.
         Harness("opencode", oc,
@@ -115,7 +121,7 @@ def build(home: Path) -> dict[str, Harness]:
                 mechanisms={"skill": "move", "command": "move", "mcp": "flag"},
                 flags={"mcp": ("opencode.json", ("mcp", "<name>", "enabled"))},
                 editable=frozenset({"opencode.json"}),
-                aliases_from=("skills.paths",)),
+                aliases_from=("skills.paths",), verified="2.0.22"),
         # ASSUMED shapes (DESIGN s4/s11, not verified on a real install):
         # `skills.entries.<name>.enabled` and `plugins.entries.<name>.enabled` in
         # openclaw.json. A skill uses the flag only when its entry exists, else
@@ -125,18 +131,18 @@ def build(home: Path) -> dict[str, Harness]:
                 mechanisms={"skill": "move", "agent": "move", "plugin": "flag"},
                 flags={"skill": ("openclaw.json", ("skills", "entries", "<name>", "enabled")),
                        "plugin": ("openclaw.json", ("plugins", "entries", "<name>", "enabled"))},
-                editable=frozenset({"openclaw.json"})),
+                editable=frozenset({"openclaw.json"}), verified="2026.7.1-2"),
         # DESIGN s4: `mcp-config.json -> mcpServers`, strict JSON, backend "json". Its
         # `config.json` is machine-managed JSONC: never listed, never in `editable`.
         Harness("copilot", home / ".copilot",
                 dirs={"skill": ("skills",), "agent": ("agents",)},
                 mechanisms={"skill": "move", "agent": "move", "mcp": "remove_backup"},
                 mcp=McpSpec("json", home / ".copilot" / "mcp-config.json", ("mcpServers",)),
-                editable=frozenset({"mcp-config.json"})),
+                editable=frozenset({"mcp-config.json"}), verified="1.0.90"),
         # DESIGN s4: vibe keeps skills/<name>/SKILL.md; no MCP config found.
         Harness("vibe", home / ".vibe",
                 dirs={"skill": ("skills",)},
-                mechanisms={"skill": "move"}),
+                mechanisms={"skill": "move"}, verified="2.25.8"),
         # DESIGN s4: nothing togglable locally (resources are cloud-side). An
         # explicit not-applicable row: no dirs, no mechanisms, so every type
         # exits 4 through the ops dispatch.

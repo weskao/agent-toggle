@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from pathlib import Path
 
 from base import SandboxCase
@@ -32,6 +33,11 @@ class HarnessTableTest(SandboxCase):
     def test_supported_pairs_match_today(self) -> None:
         pairs = {(n, t) for n, h in build(self.tmp).items() for t in h.types}
         self.assertEqual(pairs, TODAY)
+
+    def test_docs_mirror_the_verified_versions(self) -> None:
+        doc = (Path(__file__).resolve().parent.parent / "docs" / "harnesses.md").read_text(encoding="utf-8")
+        for n, h in build(self.tmp).items():
+            self.assertRegex(doc, rf"(?m)^\| {n} \| {re.escape(h.verified)} \|", n)
 
     def test_every_move_pair_has_dirs(self) -> None:
         for n, h in build(self.tmp).items():
