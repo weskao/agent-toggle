@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest import mock
 
-from base import SandboxCase
+from base import CAN_SYMLINK, SandboxCase
 
 from agent_toggle import fs
 
@@ -63,7 +63,7 @@ class ContainedTest(SandboxCase):
         self.assertFalse(fs.contained(self.home / "skills" / ".." / ".." / "x",
                                       self.home / "skills"))
 
-    @unittest.skipIf(not POSIX, "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_symlinked_parent_escaping_the_root_is_refused(self) -> None:
         outside = self.tmp / "outside"
         (outside / "demo-skill").mkdir(parents=True)
@@ -71,14 +71,14 @@ class ContainedTest(SandboxCase):
         self.assertFalse(fs.contained(self.home / "skills" / "link" / "demo-skill",
                                       self.home / "skills"))
 
-    @unittest.skipIf(not POSIX, "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_item_symlink_is_not_followed(self) -> None:
         outside = self.tmp / "outside"
         outside.mkdir()
         (self.home / "skills" / "demo-skill").symlink_to(outside)
         self.assertTrue(fs.contained(self.home / "skills" / "demo-skill", self.home / "skills"))
 
-    @unittest.skipIf(not POSIX, "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_parked_dir_reached_through_a_symlink_is_refused(self) -> None:
         real = self.tmp / "real-state"
         (real / "parked").mkdir(parents=True)
@@ -133,7 +133,7 @@ class CheckedWriteTest(SandboxCase):
             fs.checked_write(new, "{not json", fs.json_verify())
         self.assertFalse(new.exists())
 
-    @unittest.skipIf(not POSIX, "symlinks")
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
     def test_symlinked_config_is_written_through(self) -> None:
         link = self.home / "linked.json"
         link.symlink_to(self.cfg)
