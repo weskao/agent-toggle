@@ -4,9 +4,20 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +33,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -29,3 +41,40 @@ jobs:
           python-version: "3.13"
       - run: pip install ruff
       - run: ruff check .
+
+  # Failure-only pager: a green run sends nothing, on purpose. Credentials live
+  # in repo secrets, never in this file; see README "CI notifications".
+  notify-telegram:
+    needs: test
+    if: ${{ failure() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notify Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # Unset secrets are a valid state (a fork, or an owner who never set
+          # them). Skip instead of adding a second, misleading red X.
+          if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set, skipping notification"
+            exit 0
+          fi
+          # parse_mode=HTML: an unescaped < & > in a branch name makes Telegram
+          # answer 400. Escape & first so the later entities are not re-escaped.
+          esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          ci_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          message="🚨 <b>CI failed</b>
+
+          <b>Repository:</b> <code>$(esc "$GITHUB_REPOSITORY")</code>
+          <b>Branch:</b> <code>$(esc "$GITHUB_REF_NAME")</code>
+          <b>Commit:</b> <code>$(esc "${GITHUB_SHA::7}")</code>
+
+          <a href=\"$ci_url\">Open failed CI run</a>"
+          curl --fail --silent --show-error --max-time 30 \
+            --data-urlencode "chat_id=$CHAT_ID" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=$message" \
+            "https://api.telegram.org/bot$TOKEN/sendMessage"

@@ -65,13 +65,13 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
 Model on the aicp workflow (`docs/DESIGN.md` §8.1). `.github/workflows/ci.yml`
 currently has only `fail-fast: false`.
 
-- [ ] `permissions: contents: read`
-- [ ] per-ref `concurrency` with `cancel-in-progress: true`
-- [ ] `PYTHONUTF8=1`, job `timeout-minutes`
-- [ ] `notify-telegram` job: `needs: test`, `failure() && push` only, reads
+- [x] `permissions: contents: read`
+- [x] per-ref `concurrency` with `cancel-in-progress: true`
+- [x] `PYTHONUTF8=1`, job `timeout-minutes`
+- [x] `notify-telegram` job: `needs: test`, `failure() && push` only, reads
       `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from secrets, exits 0 with a
       `::notice::` when unset, escapes `&`, `<`, `>`
-- [ ] README "CI notifications" section with the two `gh secret set` commands
+- [x] README "CI notifications" section with the two `gh secret set` commands
 - [ ] forced failure on a push sends one message (repo, branch, short SHA, run URL);
       PRs never notify; no token or chat id in the repo
 

@@ -541,6 +541,22 @@ ruff check .
 stdlib `unittest`, no fixtures, no network. Every test runs against a
 throwaway temp `HOME` and a stubbed `claude` CLI.
 
+## CI notifications
+
+`.github/workflows/ci.yml` can send a Telegram message when CI fails on a push.
+Set two repository secrets (the commands prompt for the value, so nothing lands
+in your shell history or the repo):
+
+```sh
+gh secret set TELEGRAM_BOT_TOKEN
+gh secret set TELEGRAM_CHAT_ID
+```
+
+Alerts fire only for failed pushes, never for pull requests or green runs. The
+message names the repository, branch, 7-character commit and a link to the run.
+With either secret unset (a fork, or a clone you have not configured) the notify
+job prints a `::notice::` and exits 0, so it never adds a second red X.
+
 ## Releasing
 
 A release is a git tag `vX.Y.Z` (where `X.Y.Z` must match `agent_toggle.__version__`).
