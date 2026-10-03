@@ -53,8 +53,8 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
       guesses (open question 4)
 - [x] `windows-curses` extra and the numbered-menu fallback for the picker
       (`ui/menu.py`, `tests/test_menu.py`; green on the Windows runner)
-- [ ] path, case and symlink behaviour tested on CI (done on macOS and Linux; the
-      Windows runner cannot create symlinks, so those tests skip there)
+- [x] path, case and symlink behaviour tested on CI (the Windows runner enables
+      Developer Mode first, so the symlink tests run there too)
 - [x] plugin ids with shell metacharacters refused on the Windows runner
       (`tests/test_platform.py`)
 - [x] documented harness homes per OS (README; Linux and Windows values are from
@@ -142,6 +142,6 @@ Fix only if one bites; none blocks a phase.
 
 ## Housekeeping
 
-- [ ] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
-      up `profile`, `undo` and `doctor`
+- [x] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
+      up `profile`, `undo` and `doctor` (done 2026-10-03, 7 harnesses)
 - [x] delete the merged branches (`phase-1`..`phase-6`, `ci-telegram-setup`; local and `origin`)
