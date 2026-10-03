@@ -231,6 +231,9 @@ same result: type row numbers (`1 3 5-7`) to tick or untick, `/text` to filter,
 | devin | `~/.devin` | — | — | — | — | — | — |
 | agy | `~/.antigravity` | — | — | — | — | — | — |
 
+Per-harness locations, mechanisms and the harness versions this was checked
+against are in [docs/harnesses.md](docs/harnesses.md).
+
 **Homes per OS.** Every `~` above is Python's `Path.home()`: `$HOME` on macOS and
 Linux, `%USERPROFILE%` on Windows (so `~/.claude` is `C:\Users\<you>\.claude`).
 opencode honours an absolute `$XDG_CONFIG_HOME` on every OS and otherwise uses
