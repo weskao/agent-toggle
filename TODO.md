@@ -80,37 +80,37 @@ hardening and the notify job; only the live forced-failure check is left.
 
 ## Security and design items still planned (`docs/DESIGN.md` §5, §6, §6.1)
 
-Checked against the code on 2026-10-02; §6.1 rows 1, 2 and 6 are done.
+Checked against the code on 2026-10-03; every §6.1 row is done.
 
-- [ ] §6.1 row 3: output audit, so `log.jsonl`, `--json`, `-v`, `--dry-run` and
+- [x] §6.1 row 3: output audit, so `log.jsonl`, `--json`, `-v`, `--dry-run` and
       tracebacks never show backed-up values
-- [ ] §6.1 row 4: shim text says to act only on the user's request, and disabling a
-      `rule` prints a warning that rules may carry safety constraints (neither is in
-      the code yet)
+- [x] §6.1 row 4: shim text says to act only on the user's request, and disabling a
+      `rule` prints a warning that rules may carry safety constraints
 - [x] §6.1 row 5: validate plugin ids against `[A-Za-z0-9._@:/-]+` (with phase 5)
-- [ ] §6.1 row 8: Dependabot for workflow actions, only the publish job gets
+- [x] §6.1 row 8: Dependabot for workflow actions, only the publish job gets
       `id-token: write`, README pins installs to a tag (`git+<repo-url>@vX.Y.Z`)
-- [ ] §6.1 row 9: `install-shims` refuses to overwrite a file that lacks the shim
-      marker (confirm against the current code first)
-- [ ] `SECURITY.md`: add the scope statement and a supported-versions line
+- [x] §6.1 row 9: `install-shims` refuses to overwrite a file that lacks the shim
+      marker (shims written before the marker are recognised and upgraded)
+- [x] `SECURITY.md`: add the scope statement and a supported-versions line
 - [x] `ui/menu.py` numbered-prompt fallback for Windows (§5.10) and its scripted-stdin
       test (§9)
-- [ ] one shim template per harness in `agent_toggle/shims/` (§5.9; only
-      `claude.md.tmpl` exists)
-- [ ] `docs/harnesses.md`, the survey table kept current (§6 Documentation)
-- [ ] `status` reports state entries whose `parked_at` no longer exists, with the fix
-      command (§6 Stale state; confirm whether `doctor` already covers it)
-- [ ] each harness row records the harness version it was verified against (§6
+- [x] one shim template per harness in `agent_toggle/shims/` (§5.9): `claude.md.tmpl`
+      plus `generic.md.tmpl` rendered per harness; a `<harness>.md.tmpl` overrides it
+- [x] `docs/harnesses.md`, the survey table kept current (§6 Documentation)
+- [x] `status` reports state entries whose `parked_at` no longer exists, with the fix
+      command (§6 Stale state; shares `doctor.missing_parked`)
+- [x] each harness row records the harness version it was verified against (§6
       Harness drift)
-- [ ] shell completion files generated at release time (§6; with phase 4)
+- [x] shell completion files generated at release time (§6): `tools/gen_completions.py`,
+      uploaded as a release-workflow artifact
 
 ## Needs a real install to settle (`docs/DESIGN.md` §11)
 
 - [ ] OpenCode `skills.paths` default when unset (q2)
 - [ ] copilot `installed-plugins/` entry format once a plugin is installed (q3)
-- [ ] openclaw flag shape `skills.entries.<name>.enabled` /
+- [x] openclaw flag shape `skills.entries.<name>.enabled` /
       `plugins.entries.<name>.enabled`, and whether `openclaw.json` is strict JSON (q5)
-- [ ] opencode `mcp.<name>.enabled`, and whether `opencode.json` is JSONC (q6)
+- [x] opencode `mcp.<name>.enabled`, and whether `opencode.json` is JSONC (q6)
 
 ## Known gaps (non-critical, `docs/DESIGN.md` §8.2)
 
@@ -144,4 +144,4 @@ Fix only if one bites; none blocks a phase.
 
 - [ ] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
       up `profile`, `undo` and `doctor`
-- [ ] delete the merged branches `phase-1` and `phase-2` (local and `origin`)
+- [x] delete the merged branches (`phase-1`..`phase-6`, `ci-telegram-setup`; local and `origin`)

@@ -488,13 +488,13 @@ directories, and the promise that a disable never loses data.
 |---|---|---|---|
 | 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
 | 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
-| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | modes and warning done; output audit planned |
-| 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | planned: shim text, rule warning |
+| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs |
+| 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | done: both shim templates carry a Safety section; `ops` warns when a plan disables a `rule` |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | done: argv form, and `mechanisms.valid_plugin_id` refuses any other id before `claude plugin ...` runs (`tests/test_platform.py`) |
 | 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the TOML check is textual only (see §8.2) |
 | 7 | **Races and links** | one lock per batch; `safe_move` on one filesystem; refuse a park dir reached through a symlinked parent; same-user attackers are out of scope | lock and `safe_move` done |
-| 8 | **Supply chain** | zero runtime dependencies; PyPI trusted publishing (OIDC, no stored token); GitHub Actions pinned by commit SHA and kept current by Dependabot; workflows default to `contents: read` and only the publish job gets `id-token: write`; README pins installs to a tag, `git+<repo-url>@vX.Y.Z` | planned for phases 0, 4 and 6 |
-| 9 | **Installer overwrites**: `install-shims` writes into harness dirs | writes only its own shim files under `$HOME`-relative paths and refuses to overwrite a file that lacks the shim marker | planned; confirm against the current `install-shims` |
+| 8 | **Supply chain** | zero runtime dependencies; PyPI trusted publishing (OIDC, no stored token); GitHub Actions pinned by commit SHA and kept current by Dependabot; workflows default to `contents: read` and only the publish job gets `id-token: write`; README pins installs to a tag, `git+<repo-url>@vX.Y.Z` | done: `.github/dependabot.yml`, workflows default to `contents: read`, only `publish` has `id-token: write`, README pins git installs to a tag |
+| 9 | **Installer overwrites**: `install-shims` writes into harness dirs | writes only its own shim files under `$HOME`-relative paths and refuses to overwrite a file that lacks the shim marker | done: `cli.SHIM_MARKER`; a file without it (or a symlink) is refused, a pre-marker shim is recognised (`tests/test_install.py`) |
 
 Disclosure: `SECURITY.md` already covers what is stored, file modes and
 private reporting through GitHub advisories. Extend it with the scope
@@ -693,8 +693,12 @@ Known gaps added by phase 2:
    fill §5.11 from docs at phase 5, not from guesses.
 5. openclaw: are `skills.entries.<name>.enabled` and
    `plugins.entries.<name>.enabled` in `openclaw.json` the real flag shape, and
-   is the file strict JSON on a real install (not JSON5)? The flag mechanism
-   assumes yes and refuses anything else (phase 2; not verified).
+   is the file strict JSON on a real install (not JSON5)? Answered on openclaw
+   2026.7.1-2: `skills.entries.<name>.enabled` is a boolean; `plugins.entries.<name>`
+   carries `enabled` only on some entries (the tool already lists only those);
+   the file was strict JSON.
 6. opencode: is `mcp.<name>.enabled` in `opencode.json` the real flag, and does
    a real `opencode.json` stay free of comments and trailing commas (it may be
-   JSONC)? Assumed, refused otherwise (phase 2; not verified).
+   JSONC)? Answered on opencode 2.0.22: `mcp.<name>.enabled` is a boolean on every
+   server and the file was strict JSON; JSONC stays refused in case another install
+   uses it.

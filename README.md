@@ -494,8 +494,9 @@ fixes it. `--harness X` for a harness that is not installed is a `note` (exit
 
 ## Assumed formats
 
-Two config shapes come from the design survey (`docs/DESIGN.md` §4 / §11) and
-were **not verified on a real install**:
+Two config shapes came from the design survey (`docs/DESIGN.md` §4 / §11). Both
+were since seen on one real install each (openclaw 2026.7.1-2, opencode 2.0.22; see
+`docs/harnesses.md`), but the tool still treats them defensively:
 
 - `openclaw.json`: `skills.entries.<name>.enabled` and
   `plugins.entries.<name>.enabled`
