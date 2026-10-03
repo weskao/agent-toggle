@@ -1,5 +1,17 @@
 # Security policy
 
+## Scope
+
+agent-toggle is a same-user, local tool. It defends against **untrusted
+input** (names from the CLI, an agent or a profile file; resource contents; a
+tampered `state.json`) and against **accidental exposure** (secrets, supply
+chain). It does not defend against malware running as the same user or against
+root; that actor can already edit every file the tool touches.
+
+## Supported versions
+
+Only the latest minor release (currently 0.1.x) receives security fixes.
+
 ## What agent-toggle stores
 
 All bookkeeping lives under `~/.agent-toggle/`:
