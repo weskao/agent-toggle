@@ -51,10 +51,14 @@ Source: `docs/DESIGN.md` §8, Phase 3.5. Human output only; never color `--json`
 
 - [ ] fill the platform table (`docs/DESIGN.md` §5.11) from real installs, not
       guesses (open question 4)
-- [ ] `windows-curses` extra and the numbered-menu fallback for the picker
-- [ ] path, case and symlink behaviour tested on CI
-- [ ] plugin ids with shell metacharacters refused on the Windows runner
-- [ ] documented harness homes per OS
+- [x] `windows-curses` extra and the numbered-menu fallback for the picker
+      (`ui/menu.py`, `tests/test_menu.py`; green on the Windows runner)
+- [ ] path, case and symlink behaviour tested on CI (done on macOS and Linux; the
+      Windows runner cannot create symlinks, so those tests skip there)
+- [x] plugin ids with shell metacharacters refused on the Windows runner
+      (`tests/test_platform.py`)
+- [x] documented harness homes per OS (README; Linux and Windows values are from
+      harness docs, not yet checked on real installs)
 
 ### Phase 6 — CI hardening + Telegram failure alerts
 
@@ -80,14 +84,14 @@ Checked against the code on 2026-10-02; §6.1 rows 1, 2 and 6 are done.
 - [ ] §6.1 row 4: shim text says to act only on the user's request, and disabling a
       `rule` prints a warning that rules may carry safety constraints (neither is in
       the code yet)
-- [ ] §6.1 row 5: validate plugin ids against `[A-Za-z0-9._@:/-]+` (with phase 5)
+- [x] §6.1 row 5: validate plugin ids against `[A-Za-z0-9._@:/-]+` (with phase 5)
 - [ ] §6.1 row 8: Dependabot for workflow actions, only the publish job gets
       `id-token: write`, README pins installs to a tag (`git+<repo-url>@vX.Y.Z`)
 - [ ] §6.1 row 9: `install-shims` refuses to overwrite a file that lacks the shim
       marker (confirm against the current code first)
 - [ ] `SECURITY.md`: add the scope statement and a supported-versions line
-- [ ] `ui/menu.py` numbered-prompt fallback for Windows (§5.10; file does not exist)
-      and its scripted-`input()` test (§9)
+- [x] `ui/menu.py` numbered-prompt fallback for Windows (§5.10) and its scripted-stdin
+      test (§9)
 - [ ] one shim template per harness in `agent_toggle/shims/` (§5.9; only
       `claude.md.tmpl` exists)
 - [ ] `docs/harnesses.md`, the survey table kept current (§6 Documentation)

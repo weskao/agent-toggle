@@ -1,4 +1,6 @@
-"""Picker data gathering and filtering (no curses screen is opened)."""
+"""Picker data gathering and filtering (no curses screen is opened).
+
+The data tests use `ui.model`, so they run where curses does not exist (Windows)."""
 from __future__ import annotations
 
 import unittest
@@ -8,6 +10,7 @@ from base import SandboxCase
 
 from agent_toggle import mechanisms
 from agent_toggle.harnesses import build
+from agent_toggle.ui import model
 
 try:
     from agent_toggle.ui import picker
@@ -15,7 +18,6 @@ except ImportError:              # no curses build (Windows without windows-curs
     picker = None
 
 
-@unittest.skipIf(picker is None, "curses unavailable")
 class PickerTest(SandboxCase):
     def test_live_names_addresses_nesting_with_colon(self) -> None:
         self.write("commands/google.md")
@@ -51,7 +53,7 @@ class PickerTest(SandboxCase):
             "claude:plugin:x": {"harness": "claude", "type": "plugin",
                                 "name": "x", "at": "2026-09-19"},
         }}
-        rows = picker.collect(state, {"claude": build(self.tmp)["claude"]})
+        rows = model.collect(state, {"claude": build(self.tmp)["claude"]})
         by_name = {r.name: r for r in rows}
         # live item present and ticked
         self.assertIs(by_name["live-one"].enabled, True)
@@ -61,20 +63,20 @@ class PickerTest(SandboxCase):
         self.assertIs(by_name["x"].enabled, False)
 
     def test_match_filters_on_all_terms(self) -> None:
-        rows = [picker.Row("claude", "command", "orch:batch", True),
-                picker.Row("codex", "skill", "orch-helper", True),
-                picker.Row("claude", "skill", "unrelated", True)]
+        rows = [model.Row("claude", "command", "orch:batch", True),
+                model.Row("codex", "skill", "orch-helper", True),
+                model.Row("claude", "skill", "unrelated", True)]
         # single term filters
-        self.assertEqual(len(picker.match(rows, "orch")), 2)
+        self.assertEqual(len(model.match(rows, "orch")), 2)
         # terms are ANDed
-        self.assertEqual(len(picker.match(rows, "orch claude")), 1)
+        self.assertEqual(len(model.match(rows, "orch claude")), 1)
         # match is case-insensitive
-        self.assertEqual(len(picker.match(rows, "ORCH")), 2)
+        self.assertEqual(len(model.match(rows, "ORCH")), 2)
         # empty query returns everything
-        self.assertEqual(len(picker.match(rows, "")), 3)
+        self.assertEqual(len(model.match(rows, "")), 3)
 
     def test_row_tracks_staged_change(self) -> None:
-        r = picker.Row("claude", "skill", "demo", True)
+        r = model.Row("claude", "skill", "demo", True)
         # unchanged row reports no change
         self.assertFalse(r.changed)
         r.staged = False
@@ -85,30 +87,30 @@ class PickerTest(SandboxCase):
 
     def test_collect_carries_cost(self) -> None:
         self.write("skills/big/SKILL.md", "---\nname: big\ndescription: " + "d" * 396 + "\n---\nbody")
-        rows = {r.name: r for r in picker.collect({"disabled": {}}, build(self.tmp))}
+        rows = {r.name: r for r in model.collect({"disabled": {}}, build(self.tmp))}
         # name (3) + description (396) = 399 chars -> 100 tokens
         self.assertEqual(rows["big"].tokens, 100)
 
     def test_visible_filters_and_sorts(self) -> None:
-        rows = [picker.Row("claude", "skill", "a", True, 5),
-                picker.Row("codex", "skill", "b", True, 50, shared=("opencode",)),
-                picker.Row("claude", "agent", "c", True, 20),
-                picker.Row("claude", "skill", "d", False, 0, 99)]
+        rows = [model.Row("claude", "skill", "a", True, 5),
+                model.Row("codex", "skill", "b", True, 50, shared=("opencode",)),
+                model.Row("claude", "agent", "c", True, 20),
+                model.Row("claude", "skill", "d", False, 0, 99)]
         # name order is the input order; cost order is biggest live first, parked last
-        self.assertEqual([r.name for r in picker.visible(rows, sort="cost")], ["b", "c", "a", "d"])
+        self.assertEqual([r.name for r in model.visible(rows, sort="cost")], ["b", "c", "a", "d"])
         # harness chip matches the owner and the sharers
-        self.assertEqual([r.name for r in picker.visible(rows, harness="opencode")], ["b"])
+        self.assertEqual([r.name for r in model.visible(rows, harness="opencode")], ["b"])
         # type chip and text query combine
-        self.assertEqual([r.name for r in picker.visible(rows, "claude", type_="skill")], ["a", "d"])
+        self.assertEqual([r.name for r in model.visible(rows, "claude", type_="skill")], ["a", "d"])
 
     def test_cycle_wraps_and_recovers(self) -> None:
-        self.assertEqual(picker.cycle(("name", "cost"), "name"), "cost")
-        self.assertEqual(picker.cycle(("name", "cost"), "cost"), "name")
-        self.assertEqual(picker.cycle(["all", "x"], "gone"), "all")
+        self.assertEqual(model.cycle(("name", "cost"), "name"), "cost")
+        self.assertEqual(model.cycle(("name", "cost"), "cost"), "name")
+        self.assertEqual(model.cycle(["all", "x"], "gone"), "all")
 
     def test_cost_cell_shows_saving_for_parked(self) -> None:
-        self.assertEqual(picker.Row("claude", "skill", "a", True, 12).cost_cell, "12")
-        self.assertEqual(picker.Row("claude", "skill", "a", False, 0, 7).cost_cell, "(7)")
+        self.assertEqual(model.Row("claude", "skill", "a", True, 12).cost_cell, "12")
+        self.assertEqual(model.Row("claude", "skill", "a", False, 0, 7).cost_cell, "(7)")
 
 
 class FakeWin:
