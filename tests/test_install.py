@@ -9,7 +9,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from base import SandboxCase
+from base import CAN_SYMLINK, SandboxCase
 
 from agent_toggle import cli
 from agent_toggle.harnesses import harnesses
@@ -80,6 +80,70 @@ class InstallShimsCase(SandboxCase):
             self.assertEqual(lines.count(d), 1, d)
         self.assertIn("keep", lines)
         self.assertFalse((self.tmp / ".codex" / ".gitignore").exists())   # never created
+
+    def test_foreign_file_is_refused_others_proceed(self) -> None:
+        mine = shim(self.tmp / ".claude")
+        mine.parent.mkdir(parents=True)
+        mine.write_text("my own skill\n", encoding="utf-8")
+        for dry in ((), ("--dry-run",)):            # the dry run reports the same plan
+            rc, env = self.run_cli(*dry)
+            self.assertEqual(rc, 1)
+            self.assertFalse(env["ok"])
+            (bad,) = [r for r in env["results"] if r["status"] == "error"]
+            self.assertEqual(bad["harness"], "claude")
+            self.assertIn("lacks the agent-toggle shim marker", bad["detail"])
+            self.assertIn("fix:", bad["detail"])
+            ok = {r["harness"] for r in env["results"] if r["status"] in ("ok", "planned")}
+            self.assertEqual(ok, {"codex"})
+        self.assertEqual(mine.read_text(encoding="utf-8"), "my own skill\n")
+        self.assertTrue(shim(self.tmp / ".codex").is_file())
+
+    def test_every_harness_refused_is_exit_1_not_4(self) -> None:
+        for h in (".claude", ".codex"):
+            shim(self.tmp / h).parent.mkdir(parents=True)
+            shim(self.tmp / h).write_text("x", encoding="utf-8")
+        self.assertEqual(self.run_cli()[0], 1)
+
+    def test_marked_file_is_updated_in_place(self) -> None:
+        dest = shim(self.tmp / ".claude")
+        dest.parent.mkdir(parents=True)
+        dest.write_text(f"old text\n{cli.SHIM_MARKER}\n", encoding="utf-8")
+        rc, _ = self.run_cli("--harness", "claude")
+        self.assertEqual(rc, 0)
+        self.assertEqual(dest.read_text(encoding="utf-8"), cli.shim_text("claude"))
+
+    @unittest.skipUnless(CAN_SYMLINK, "needs symlink privilege")
+    def test_symlinked_shim_is_refused(self) -> None:
+        target = self.tmp / "elsewhere.md"
+        target.write_text(cli.SHIM_MARKER, encoding="utf-8")
+        shim(self.tmp / ".claude").parent.mkdir(parents=True)
+        shim(self.tmp / ".claude").symlink_to(target)
+        rc, env = self.run_cli("--harness", "claude")
+        self.assertEqual(rc, 1)
+        self.assertIn("symlink", env["results"][0]["detail"])
+        self.assertEqual(target.read_text(encoding="utf-8"), cli.SHIM_MARKER)
+
+    def test_shim_is_picked_per_harness(self) -> None:
+        self.run_cli()
+        claude = shim(self.tmp / ".claude").read_text(encoding="utf-8")
+        codex = shim(self.tmp / ".codex").read_text(encoding="utf-8")
+        self.assertIn("--project", claude)                  # claude.md.tmpl
+        self.assertIn("--harness codex --json", codex)       # generic.md.tmpl, harness filled in
+        self.assertNotIn("__HARNESS__", codex)
+        for text in (claude, codex):
+            self.assertIn(cli.SHIM_MARKER, text)
+            self.assertTrue(text.startswith("---\nname: agent-toggle\n"))   # frontmatter first
+
+    def test_every_template_carries_marker_and_safety_text(self) -> None:
+        tmpls = sorted((Path(cli.__file__).parent / "shims").glob("*.md.tmpl"))
+        self.assertIn("generic.md.tmpl", [t.name for t in tmpls])
+        for t in tmpls:
+            text = t.read_text(encoding="utf-8")
+            self.assertIn(cli.SHIM_MARKER, text, t.name)
+            self.assertIn("explicit request", text, t.name)
+            self.assertIn("never disable", text.lower(), t.name)
+            self.assertIn("--dry-run", text, t.name)
+            self.assertIn("safety constraints", text, t.name)
 
     def test_template_in_package_dir(self) -> None:
         self.assertTrue((Path(cli.__file__).parent / "shims" / "claude.md.tmpl").is_file())

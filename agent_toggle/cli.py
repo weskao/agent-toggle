@@ -189,6 +189,14 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
     for (hname, proj), n in sorted(projects.items(), key=str):
         out.say(f"project {proj}  ({n} parked under {fs.parked_dir()})")
         out.row(hname, None, None, "status", "project", "", show=False, project=proj, parked=n)
+    # the inverse of `untracked`: a state entry whose parked item is gone (DESIGN s6)
+    for k, e in state["disabled"].items():
+        if only and only not in (e.get("harness"), *_list_of(e, "shared_with")):
+            continue
+        if gone := doctor.missing_parked(k, e):
+            out.say(f"WARNING {e.get('harness')} {e.get('type')} {e.get('name')}: {gone}", warn=True)
+            out.row(e.get("harness"), e.get("type"), e.get("name"), "status", "stale", gone,
+                    show=False, parked_at=e.get("parked_at"))
 
 
 def parked_drift(items: list[Path], parked: Path, live: Path,
@@ -290,13 +298,17 @@ def cmd_migrate(out: Result) -> None:
     out.row(None, None, None, "migrate", "ok", "; ".join(lines), show=False)
 
 
-SHIM_TEMPLATE = Path(__file__).with_name("shims") / "claude.md.tmpl"
+SHIMS = Path(__file__).with_name("shims")
+# Every template carries this line; install-shims only overwrites a file that has it.
+SHIM_MARKER = ("<!-- agent-toggle shim: written by `agent-toggle install-shims`; "
+               "re-running it overwrites this file -->")
 
 
-def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
-    """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
-    supports skills; keep park dirs out of an existing harness-home .gitignore."""
-    template = SHIM_TEMPLATE.read_text(encoding="utf-8")
+def shim_text(harness: str) -> str:
+    """The shim for `harness`: shims/<harness>.md.tmpl, else shims/generic.md.tmpl."""
+    tmpl = SHIMS / f"{harness}.md.tmpl"
+    template = (tmpl if tmpl.is_file() else SHIMS / "generic.md.tmpl").read_text(encoding="utf-8")
+    template = template.replace("__HARNESS__", harness)
     root = Path(__file__).resolve().parent.parent
     if (root / "agent_toggle.py").is_file():
         # Harness dirs often sync across machines: write `~`-relative under $HOME.
@@ -304,16 +316,35 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
             shown = "~/" + root.relative_to(fs.home()).as_posix()
         except ValueError:
             shown = str(root)
-        text = template.replace("__AGENT_TOGGLE_ROOT__", shown)
-    else:                                 # installed package: no checkout to point at
-        text = "".join(ln for ln in template.splitlines(keepends=True)
-                       if "__AGENT_TOGGLE_ROOT__" not in ln)
+        return template.replace("__AGENT_TOGGLE_ROOT__", shown)
+    # installed package: no checkout to point at
+    return "".join(ln for ln in template.splitlines(keepends=True)
+                   if "__AGENT_TOGGLE_ROOT__" not in ln)
+
+
+def shim_refusal(dest: Path) -> str | None:
+    """Why `dest` must not be overwritten (it is not a shim we wrote), else None."""
+    if dest.is_symlink() or (dest.exists() and not dest.is_file()):
+        return "is a symlink or not a regular file"
+    if not dest.exists():
+        return None
+    try:
+        ours = SHIM_MARKER in dest.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        ours = False
+    return None if ours else "exists and lacks the agent-toggle shim marker"
+
+
+def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
+    """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
+    supports skills; keep park dirs out of an existing harness-home .gitignore.
+    A file there that is not our shim (no SHIM_MARKER) is refused, never overwritten."""
     table = harnesses()
     park = sorted({f"{sub}-disabled" for h in table.values()
                    for subs in h.dirs.values() for sub in subs
                    if not Path(sub).is_absolute()})     # skills.paths redirects live elsewhere
     verb = "would install" if args.dry_run else "installed"
-    installed = 0
+    installed = found = 0
     for hname, h in table.items():
         home = h.home
         if args.harness and hname != args.harness:
@@ -323,10 +354,17 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     "not installed" if not home.is_dir() else "no skill support",
                     show=False, home=str(home))
             continue
+        found += 1
         dest = home / h.dirs["skill"][0] / "agent-toggle" / "SKILL.md"
+        if why := shim_refusal(dest):
+            fix = (f"refused: {dest} {why}; fix: move it aside (or delete it if it is an "
+                   f"older agent-toggle shim), then re-run install-shims")
+            out.row(hname, None, None, "install-shims", "error", fix, show=False, home=str(home))
+            out.say(f"  {fix}", style="red")
+            continue
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(text, encoding="utf-8")
+            dest.write_text(shim_text(hname), encoding="utf-8")
         out.row(hname, None, None, "install-shims", "planned" if args.dry_run else "ok",
                 str(dest), show=False, home=str(home))
         out.say(f"  {verb}  {dest}")
@@ -343,7 +381,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                              + "".join(f"{m}\n" for m in missing))
             if missing:
                 out.say(f"  gitignore  {ignore}: {' '.join(missing)}")
-    if not installed:
+    if not found:
         die("no harness found", 4)
     out.say(f"{installed} harness(es) {'planned' if args.dry_run else 'installed'}")
 

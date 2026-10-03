@@ -78,10 +78,11 @@ class HarnessTableTest(SandboxCase):
         self.assertEqual(t["opencode"].flags["mcp"], ("opencode.json", ("mcp", "<name>", "enabled")))
 
     def test_shim_lists_every_type_and_harness(self) -> None:
-        shim = (Path(hz.__file__).parent / "shims" / "claude.md.tmpl").read_text(encoding="utf-8")
-        for t in hz.TYPES:
-            self.assertIn(f"`{t}`", shim)
-        self.assertIn("--harness " + "|".join(build(self.tmp)), shim)
+        for tmpl in ("claude.md.tmpl", "generic.md.tmpl"):
+            shim = (Path(hz.__file__).parent / "shims" / tmpl).read_text(encoding="utf-8")
+            for t in hz.TYPES:
+                self.assertIn(f"`{t}`", shim, tmpl)
+            self.assertIn("--harness " + "|".join(build(self.tmp)), shim, tmpl)
 
     def test_harnesses_honours_sandbox_home(self) -> None:
         self.assertEqual(hz.harnesses()["codex"].home, self.tmp / ".codex")

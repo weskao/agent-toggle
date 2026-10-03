@@ -160,6 +160,27 @@ class StateTest(DoctorCase):
         self.assertIn("parked item missing", bad["detail"])
         self.assertIn("agent-toggle", bad["detail"])
 
+    def test_status_reports_missing_parked_item_read_only(self) -> None:
+        self.run_cli("disable", "skill", "demo-skill")
+        self.run_cli("disable", "skill", "demo-skill", "--harness", "codex")
+        rc, env = self.run_json("status")
+        self.assertEqual(self.rows(env["results"], "stale"), [])
+        shutil.rmtree(self.tmp / ".codex" / "skills-disabled" / "demo-skill")
+        before = snapshot(self.tmp)
+        rc, env = self.run_json("status")
+        self.assertEqual(rc, 0)                      # a health report, not a failure
+        self.assertEqual(snapshot(self.tmp), before)
+        (row,) = self.rows(env["results"], "stale")
+        self.assertEqual((row["harness"], row["type"], row["name"]), ("codex", "skill", "demo-skill"))
+        self.assertIn("fix:", row["detail"])
+        self.assertIn("agent-toggle enable skill demo-skill --harness codex", row["detail"])
+        self.assertTrue(any("parked item missing" in w for w in env["warnings"]))
+        rc, env = self.run_json("status", "--harness", "claude")    # filtered out
+        self.assertEqual(self.rows(env["results"], "stale"), [])
+        rc, rows = self.doctor()                     # doctor shares the same check and text
+        (bad,) = self.rows(rows, "error", name="demo-skill")
+        self.assertEqual(bad["detail"], row["detail"])
+
     def test_missing_origin_dir_is_an_error(self) -> None:
         self.run_cli("disable", "skill", "demo-skill")
         shutil.rmtree(self.home / "skills")

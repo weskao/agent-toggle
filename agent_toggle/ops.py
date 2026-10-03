@@ -22,6 +22,9 @@ from .mechanisms import (
 from .output import CliError, Result
 from .store import BATCH, load_state, save_state
 
+RULE_WARNING = ("rules may carry safety constraints (guardrails the agent follows); "
+                "disable one only on purpose -- `enable rule <name>` or `undo` restores it")
+
 
 class Op(NamedTuple):
     harness: str
@@ -37,6 +40,8 @@ def _dispatch(plan: list[Op], state: dict, out: Result, dry_run: bool, batch: st
     groups: dict[tuple[str, str, str, str | None], list[str]] = {}
     for op in plan:
         groups.setdefault((op.harness, op.type, op.action, op.project), []).append(op.name)
+    if any(op.type == "rule" and op.action == "disable" for op in plan):
+        out.warn(RULE_WARNING)
     user = harnesses()
     fails = 0
     for (harness, type_, action, project), names in groups.items():
