@@ -392,6 +392,22 @@ class UnexpectedErrorTest(CliCase):
         self.assertIn("claude:skill:demo-skill", json.loads(fs.state_file().read_text(encoding="utf-8"))["disabled"])
 
 
+class RuleWarningTest(CliCase):
+    def test_disabling_a_rule_warns_about_safety_constraints(self) -> None:
+        self.write("rules/demo-rule.md")
+        self.write("skills/demo-skill/SKILL.md")
+        for dry in (("--dry-run",), ()):
+            rc, env = self.run_json("disable", "rule", "demo-rule", *dry)
+            self.assertEqual(rc, 0)
+            self.assertEqual(sum("safety constraints" in w for w in env["warnings"]), 1)
+        rc, _, err = self.run_cli("enable", "rule", "demo-rule")
+        self.assertNotIn("safety constraints", err)
+        rc, _, err = self.run_cli("disable", "rule", "demo-rule")
+        self.assertIn("safety constraints", err)              # humans see it on stderr
+        rc, env = self.run_json("disable", "skill", "demo-skill")
+        self.assertFalse(any("safety constraints" in w for w in env["warnings"]))
+
+
 class DryRunNoShellOutTest(CliCase):
     def test_unknown_mcp_dry_run_never_calls_claude_mcp_get(self) -> None:
         self.claude_json({"mcpServers": {}})

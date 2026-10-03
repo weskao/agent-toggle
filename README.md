@@ -110,6 +110,8 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 `<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
 `rule` is claude-only (`~/.claude/rules/*.md`, parked in `rules-disabled/`).
+Disabling a rule prints a warning (also in `--json` `warnings`, dry run included)
+that rules may carry safety constraints.
 
 Flags accepted by every command, before or after the subcommand:
 
