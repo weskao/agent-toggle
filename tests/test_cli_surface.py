@@ -263,12 +263,29 @@ class SpellingTest(CliCase):
                          self.run_cli("--harness=codex", "list"))
         self.assertEqual(self.run_cli("--pick", "--json"), self.run_cli("pick", "--json"))
 
+    def test_help_topics_behave_the_same_with_and_without_dashes(self) -> None:
+        for topic in ("version", "help", "status", "config"):
+            self.assertEqual(self.run_cli("help", f"--{topic}"), self.run_cli("help", topic), topic)
+        for bad in ("bogus", "--bogus", "xxconfig"):   # not normalised to config
+            rc, out, err = self.run_cli("help", bad)
+            self.assertEqual((rc, out), (2, ""), bad)
+            self.assertIn("no such command", err)
+        # global flags after help are not topics
+        want = self.run_cli("help", "status")
+        for flags in (["--json"], ["-v"], ["--color", "never"], ["--color=never"],
+                      ["--harness", "codex"], ["--harness=codex"]):
+            self.assertEqual(self.run_cli("help", *flags, "status"), want, flags)
+        self.assertEqual(self.run_cli("help", "--json")[:2], self.run_cli("help")[:2])
+        # a literal `--` ends the options; it is not the topic
+        self.assertEqual(self.run_cli("help", "--", "config"), self.run_cli("help", "config"))
+
     def test_config_accepts_a_leading_double_dash(self) -> None:
         with mock.patch.dict(sys.modules, {"telegram_kit": None}):     # never the real keychain
             for argv in (["config"], ["config", "test"], ["config", "sync-ci", "--dry-run"]):
                 plain = self.run_cli(*argv, "--json")
                 self.assertEqual(plain, self.run_cli(f"--{argv[0]}", *argv[1:], "--json"), argv)
-                self.assertEqual(plain[0], 4)
+                if argv != ["config"]:          # bare config is the settings menu: no kit needed
+                    self.assertEqual(plain[0], 4)
 
     def test_color_flag_before_a_double_dash_command(self) -> None:
         self.write("skills/demo-skill/SKILL.md")
@@ -282,8 +299,20 @@ class SpellingTest(CliCase):
     def test_help_and_version_without_dashes(self) -> None:
         for word in ("help", "version"):
             self.assertEqual(self.run_cli(word), self.run_cli(f"--{word}"))
+        self.assertEqual(self.run_cli("help"), self.run_cli("-h"))
         self.assertIn(__version__, self.run_cli("version")[1])
-        self.assertIn("usage:", self.run_cli("help")[1])
+        self.assertIn("USAGE", self.run_cli("help")[1])
+
+    def test_per_command_help_in_both_spellings(self) -> None:
+        # help X == --help X == X --help, and each with --X for X: one output, exit 0
+        for cmd in cli.COMMANDS:
+            want = self.run_cli("help", cmd)
+            self.assertEqual(want[0], 0, cmd)
+            for argv in (["--help", cmd], [cmd, "--help"], [cmd, "-h"], ["help", f"--{cmd}"],
+                         ["--help", f"--{cmd}"], [f"--{cmd}", "--help"]):
+                self.assertEqual(self.run_cli(*argv), want, argv)
+        self.assertEqual(self.run_cli("--json", "help", "status"), self.run_cli("--json", "status",
+                                                                               "--help"))
 
     def test_bare_words_after_the_command_stay_names(self) -> None:
         self.write("skills/help/SKILL.md")

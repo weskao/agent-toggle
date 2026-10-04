@@ -53,15 +53,16 @@ def use_color(stream, mode: str = "auto") -> bool:
     return not (tty and os.name == "nt" and not _vt_enable(stream))
 
 
-def scan_color(argv: list[str]) -> str:
-    """The --color value from raw argv (so even argparse errors honor it); bad -> auto."""
-    mode = "auto"
+def scan_color(argv: list[str], default: str = "auto") -> str:
+    """The --color value from raw argv (so even argparse errors honor it); absent or
+    bad -> `default` (the `color` setting: AGENT_TOGGLE_COLOR env > config file > auto)."""
+    mode = default
     for i, a in enumerate(argv):
         if a == "--color" and i + 1 < len(argv):
             mode = argv[i + 1]
         elif a.startswith("--color="):
             mode = a[8:]
-    return mode if mode in COLOR_MODES else "auto"
+    return mode if mode in COLOR_MODES else default
 
 
 class CliError(SystemExit):

@@ -26,11 +26,16 @@ Usage:
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
     agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
-    agent_toggle.py config [test|sync-ci]      # Telegram settings for CI failure alerts
+    agent_toggle.py config [--json]            # settings menu (curses, else numbered list)
+    agent_toggle.py config test|sync-ci        # Telegram test message / GitHub CI secrets
+    agent_toggle.py help [command]             # styled help (also --help, <command> --help)
 
     <type> = skill | agent | command | rule | plugin | mcp
     --json prints exactly one JSON document; exit codes: 0 ok, 1 partial
     failure, 2 usage error, 3 locked, 4 unsupported pair / harness missing.
+    Settings: $HOME/.agent-toggle/config.json (see `config`); env overrides
+    AGENT_TOGGLE_UPDATE_CHECK / _COLOR / _LANG / _DEFAULT_HARNESS.
+    Update check: on by default, stderr only; AGENT_TOGGLE_UPDATE_CHECK=0 turns it off.
 """
 from __future__ import annotations
 
@@ -42,13 +47,28 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__, config, cost, doctor, fs, ops, profiles, store, undo
+from . import (
+    __version__,
+    config,
+    cost,
+    doctor,
+    fs,
+    i18n,
+    ops,
+    profiles,
+    settings,
+    store,
+    undo,
+    update_prompt,
+)
+from . import help as helptext
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
 from .mechanisms import dir_view, settle, sync_marker_note, validate_name
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
+from .ui import theme as ui_theme
 
 
 def project_of(key: str, entry: dict) -> str | None:
@@ -67,16 +87,30 @@ def _list_of(v: dict, key: str) -> list:
     return x if isinstance(x, list) else []
 
 
+def _all_hidden(hidden: frozenset[str], owner, shared) -> bool:
+    """True when every harness an item belongs to is off in settings (ui/model.py prefs rule);
+    an item shared with an enabled harness stays visible."""
+    return hidden.issuperset((owner, *shared))
+
+
+def _say_hidden(out: Result, msg: str) -> None:
+    """The dim "hidden by settings" note; --json carries it in the envelope's `warnings`."""
+    out.say(msg, warn=True, style="dim")
+
+
 def cmd_list(type_filter: str | None, state: dict, out: Result,
-             harness: str | None = None, project: str | None = None) -> None:
+             harness: str | None = None, project: str | None = None,
+             hidden: frozenset[str] = frozenset()) -> None:
     if project is not None:                  # one project's entries only
         project = str(project_view(project).project)       # exit 4 like disable --project
         state = store.scope_state(state, project)
-    items = [(project_of(k, v), v) for k, v in state["disabled"].items()
-             if (not type_filter or v.get("type") == type_filter)
-             and (not harness or harness in (v.get("harness"), *_list_of(v, "shared_with")))]
+    matched = [(project_of(k, v), v) for k, v in state["disabled"].items()
+               if (not type_filter or v.get("type") == type_filter)
+               and (not harness or harness in (v.get("harness"), *_list_of(v, "shared_with")))]
+    items = [(p, v) for p, v in matched if not _all_hidden(hidden, v.get("harness"), _list_of(v, "shared_with"))]
+    note = f"{len(matched) - len(items)} hidden by settings (agent-toggle config)" if len(matched) > len(items) else ""
     if not items:
-        out.say("nothing disabled")
+        _say_hidden(out, note) if note else out.say("nothing disabled")
         return
     for proj, v in sorted(items, key=lambda x: (str(x[1].get("harness", "")), str(x[1].get("type")),
                                                  str(x[1].get("name")), x[0] or "")):
@@ -93,9 +127,12 @@ def cmd_list(type_filter: str | None, state: dict, out: Result,
                 mechanism=v.get("mechanism"), companions=len(_list_of(v, "companions")),
                 shared_with=_list_of(v, "shared_with"), **({"project": proj} if proj else {}))
     out.say(f"\n{len(items)} disabled")
+    if note:
+        _say_hidden(out, note)
 
 
-def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
+def cmd_status(state: dict, out: Result, only: str | None = None,
+               hidden: frozenset[str] = frozenset()) -> None:
     legacy_state_dir = fs.legacy_state_dir()
     claude = claude_bin()
     legacy = None
@@ -125,7 +162,7 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
             disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy)
     table = harnesses()
     for hname, h in table.items():
-        if only and hname != only:
+        if (only and hname != only) or hname in hidden:
             continue
         home, backend = h.home, h.backend
         if not home.is_dir():
@@ -186,16 +223,19 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                        "live_twins": twins, "shared_with": sorted(shared)}
         out.row(hname, None, None, "status", "installed", "", show=False,
                 home=str(home), types=bits, mcp=backend, parked=info)
+    if n := len(hidden & set(table)):
+        _say_hidden(out, f"{n} harness(es) hidden by settings (agent-toggle config)")
     projects: dict[tuple, int] = {}
     for k, e in state["disabled"].items():
-        if (proj := project_of(k, e)) is not None:
+        if (proj := project_of(k, e)) is not None and not _all_hidden(hidden, e.get("harness"), _list_of(e, "shared_with")):
             projects[e.get("harness"), proj] = projects.get((e.get("harness"), proj), 0) + 1
     for (hname, proj), n in sorted(projects.items(), key=str):
         out.say(f"project {proj}  ({n} parked under {fs.parked_dir()})")
         out.row(hname, None, None, "status", "project", "", show=False, project=proj, parked=n)
     # the inverse of `untracked`: a state entry whose parked item is gone (DESIGN s6)
     for k, e in state["disabled"].items():
-        if only and only not in (e.get("harness"), *_list_of(e, "shared_with")):
+        if (only and only not in (e.get("harness"), *_list_of(e, "shared_with"))
+                or _all_hidden(hidden, e.get("harness"), _list_of(e, "shared_with"))):
             continue
         if gone := doctor.missing_parked(k, e):
             out.say(f"WARNING {e.get('harness')} {e.get('type')} {e.get('name')}: {gone}", warn=True)
@@ -213,14 +253,16 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
 
 
 def cmd_cost(state: dict, out: Result, harness: str | None = None,
-             type_: str | None = None, project: str | None = None) -> None:
+             type_: str | None = None, project: str | None = None,
+             hidden: frozenset[str] = frozenset()) -> None:
     """Estimated startup tokens per item, biggest first. Read-only. With `project`, that
     project's .claude and .mcp.json only (no plugins), else user scope."""
     proj = profiles.project_dir(project, harness)       # exit 4 like disable --project
     scoped, table = profiles.scope(state, proj)
-    items = [i for i in cost.inventory(scoped, table, out.warn, plugins=proj is None)
+    shown = [i for i in cost.inventory(scoped, table, out.warn, plugins=proj is None)
              if (not harness or harness in (i.harness, *i.shared_with))
              and (not type_ or i.type == type_)]
+    items = [i for i in shown if not _all_hidden(hidden, i.harness, i.shared_with)]
     items.sort(key=lambda i: (-i.tokens, -i.would_save, i.harness, i.type, i.name))
     if proj:
         out.say(f"project {proj}")
@@ -239,6 +281,8 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
     out.say(f"\n{len(items)} item(s): ~{live} tok loaded at startup; "
             f"~{saved} tok already saved by parked items  "
             f"(chars/{cost.CHARS_PER_TOKEN} estimate, +-25%)")
+    if len(shown) > len(items):
+        _say_hidden(out, f"{len(shown) - len(items)} hidden by settings (agent-toggle config)")
     out.row(harness, type_, None, "cost", "ok", "total", show=False, items=len(items),
             total_tokens=live, saved_tokens=saved, formula=cost.FORMULA,
             **({"project": str(proj)} if proj else {}))
@@ -253,7 +297,8 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False, project: str | None 
     except ImportError:                      # no curses (Windows without windows-curses)
         from .ui import menu as ui
     changes = ui.pick(scoped, table, plugins=not dry_run and proj is None,
-                      color=use_color(sys.stdout, out.color), project=proj, dry_run=dry_run)
+                      color=use_color(sys.stdout, out.color), project=proj, dry_run=dry_run,
+                      harness=harness)
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
@@ -361,8 +406,10 @@ def _reads_as(p: Path, text: str) -> bool:
 def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
     supports skills; keep park dirs out of an existing harness-home .gitignore.
-    A file there that is not our shim (no SHIM_MARKER) is refused, never overwritten."""
+    A file there that is not our shim (no SHIM_MARKER) is refused, never overwritten.
+    A harness switched off in settings is skipped unless named with --harness."""
     table = harnesses()
+    on = set(settings.enabled_harnesses())
     park = sorted({f"{sub}-disabled" for h in table.values()
                    for subs in h.dirs.values() for sub in subs
                    if not Path(sub).is_absolute()})     # skills.paths redirects live elsewhere
@@ -377,7 +424,12 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     "not installed" if not home.is_dir() else "no skill support",
                     show=False, home=str(home))
             continue
-        found += 1
+        found += 1          # installed: an off harness is skipped, not "no harness found"
+        if hname not in on and not args.harness:
+            out.row(hname, None, None, "install-shims", "skipped", "off in settings",
+                    show=False, home=str(home))
+            out.say(f"  skipped {hname} (off in settings)")
+            continue
         # dirs[0] is OpenCode's first skills.paths redirect when set; if its parent dir
         # is missing, fall back to the first in-home dir instead of creating a tree.
         subs = h.dirs["skill"]
@@ -443,13 +495,8 @@ COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enabl
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
-def normalize_argv(argv: list[str]) -> list[str]:
-    """Accept `--status` for `status` and bare `help` / `version` for `--help` / `--version`.
-
-    Only the command position is rewritten (after any leading global flags), so a
-    resource that happens to be named `list` or `help` is never touched.
-    """
-    argv = list(argv)
+def _command_index(argv: list[str]) -> int:
+    """Index of the command word: the first argument after any leading global flags."""
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -458,12 +505,50 @@ def normalize_argv(argv: list[str]) -> list[str]:
         elif a in _GLOBAL_FLAGS or a.startswith(("--harness=", "--color=")):
             i += 1
         else:
-            if a.startswith("--") and a[2:] in COMMANDS:
-                argv[i] = a[2:]
-            elif a in ("help", "version"):
-                argv[i] = "--" + a
             break
+    return i
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Accept `--status` for `status` and bare `help` / `version` for `--help` / `--version`.
+
+    Only the command position is rewritten (after any leading global flags), so a
+    resource that happens to be named `list` or `help` is never touched. The topic
+    after help is normalised too: `help --config` == `help config`.
+    """
+    argv = list(argv)
+    i = _command_index(argv)
+    if i < len(argv):
+        a = argv[i]
+        if a.startswith("--") and a[2:] in COMMANDS:
+            argv[i] = a[2:]
+        elif a in ("help", "version"):
+            argv[i] = "--" + a
+        j = i + 1 + _command_index(argv[i + 1:])      # the topic, after any global flags
+        if argv[i] in ("--help", "-h") and j < len(argv) and argv[j][2:] in (*COMMANDS, "version", "help") \
+                and argv[j].startswith("--"):
+            argv[j] = argv[j][2:]
     return argv
+
+
+def help_request(argv: list[str]) -> tuple[bool, str | None]:
+    """(is this a help request, its command or None for the overview), from normalised argv.
+
+    `--help [X]` / `-h [X]` in the command position, or `X ... --help|-h` after a command.
+    """
+    i = _command_index(argv)
+    if i >= len(argv):
+        return False, None
+    if argv[i] in ("--help", "-h"):
+        rest = argv[i + 1:]
+        flags = ("--", "--help", "-h", "--harness", "--color", *_GLOBAL_FLAGS)
+        words = [a for j, a in enumerate(rest)           # skip flags and their values; an
+                 if a not in flags and not a.startswith(("--harness=", "--color="))   # unknown
+                 and (j == 0 or rest[j - 1] not in ("--harness", "--color"))]         # --X is a topic
+        return True, words[0] if words else None
+    if argv[i] in COMMANDS and {"--help", "-h"} & set(argv[i + 1:]):
+        return True, argv[i]
+    return False, None
 
 
 class _Parser(argparse.ArgumentParser):
@@ -480,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
     # own defaults, so neither level sets a default; main() fills them in.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--harness", choices=list(harnesses()), default=argparse.SUPPRESS,
-                        help="target harness (default: claude)")
+                        help=f"target harness (default: {settings.get('default_harness')})")
     common.add_argument("--color", choices=COLOR_MODES, default=argparse.SUPPRESS,
                         help="colorize output (default: auto; honors NO_COLOR / FORCE_COLOR)")
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
@@ -543,26 +628,64 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run one command and return its exit code (the process exit code)."""
+    """Run one command and return its exit code (the process exit code).
+
+    Settings apply first; the update check starts before dispatch and is offered in a
+    `finally`, so every way out (a command, --help/--version, a usage error, Locked,
+    CliError) gets it. It writes to stderr only and never changes the exit code."""
     argv = normalize_argv(sys.argv[1:] if argv is None else argv)
-    out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv,
-                 scan_color(argv))
     try:
+        language, color = settings.get("language"), settings.get("color")
+    except Exception:  # noqa: BLE001 - settings must never crash the CLI before it starts
+        language, color = "en", "auto"
+    i18n.set_language(language)
+    color = scan_color(argv, color)     # --color > env > setting > auto
+    started = update_prompt.start()
+    try:
+        return _main(argv, color)
+    except KeyboardInterrupt:
+        started = None                  # never prompt after the user hit Ctrl-C
+        raise
+    finally:
+        with contextlib.suppress(KeyboardInterrupt):     # Ctrl-C while waiting on the check
+            update_prompt.offer(started, json_mode="--json" in argv, color_mode=color)
+
+
+def _main(argv: list[str], color: str) -> int:
+    out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv, color)
+    try:
+        wants_help, topic = help_request(argv)
+        if wants_help:
+            topic = None if topic == "help" else topic
+            if topic is not None and topic not in (*COMMANDS, "version"):
+                die(f"no such command: {topic} (see `agent-toggle help`)", 2)
+            on = use_color(sys.stdout, color)
+            default = settings.get("default_harness")
+            text = (helptext.version_help(on) if topic == "version"
+                    else helptext.command_help(topic, on, default) if topic
+                    else helptext.top_help(on, default))
+            print(ui_theme.encodable(text, sys.stdout))     # an ASCII stdout must not crash
+            return 0
         args = build_parser().parse_args(argv)
         out.command = "ui" if args.command == "pick" else args.command
         out.json_mode = getattr(args, "json", False)
         args.harness = getattr(args, "harness", None)
+        # harness.<name>=false hides a harness from the overviews; --harness still reaches it
+        hidden = frozenset() if args.harness else \
+            frozenset(settings.HARNESS_NAMES) - frozenset(settings.enabled_harnesses())
         cmd = out.command
         if cmd == "ui":
             if out.json_mode:
                 die("ui is interactive; --json is not supported", 2)
             cmd_ui(load_state(write_back=False), out, args.dry_run, args.project, args.harness)
         elif cmd == "cost":
-            cmd_cost(load_state(write_back=False), out, args.harness, args.type, args.project)
+            cmd_cost(load_state(write_back=False), out, args.harness, args.type, args.project,
+                     hidden)
         elif cmd == "status":
-            cmd_status(load_state(write_back=False), out, args.harness)
+            cmd_status(load_state(write_back=False), out, args.harness, hidden)
         elif cmd == "list":
-            cmd_list(args.type, load_state(write_back=False), out, args.harness, args.project)
+            cmd_list(args.type, load_state(write_back=False), out, args.harness, args.project,
+                     hidden)
         elif cmd == "migrate":
             cmd_migrate(out)
         elif cmd == "install-shims":
@@ -580,7 +703,13 @@ def main(argv: list[str] | None = None) -> int:
                 die("enable --all takes no <type> or <name>", 2)
             undo.cmd_enable_all(args.harness, args.dry_run, out, args.project)
         else:
-            args.harness = args.harness or "claude"
+            # --project is claude-layout only, so it keeps claude as its default
+            if not args.harness and args.project is None:
+                args.harness = settings.get("default_harness")
+                if args.harness not in settings.enabled_harnesses():
+                    print(f"agent-toggle: default harness '{args.harness}' is turned off in "
+                          "settings (agent-toggle config)", file=sys.stderr)
+            args.harness = args.harness or "claude"     # --project is claude-layout only
             cmd_toggle(args, out)
         rc = out.exit_code()
     except fs.Locked as e:
@@ -589,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
     except CliError as e:
         out.error(e.msg)
         rc = e.code
-    except SystemExit as e:             # argparse --help / --version
+    except SystemExit as e:             # argparse --version (help never reaches argparse)
         return e.code or 0
     except Exception as e:              # never a bare traceback; --json stays one document
         out.error(f"{type(e).__name__}: {e}")
