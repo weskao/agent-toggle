@@ -504,7 +504,7 @@ and should be proven early.
 
 | topic | recommendation |
 |---|---|
-| **Secrets in backups** | MCP entries carry auth headers. A backup holds only the toggled server's entry, never another server's (a project `.mcp.json` backup: the entry, its exact text and its neighbours' names, not the whole file -- §8.2). Write backups and `state.json` with mode `0600`; `log.jsonl` never includes payloads; `SECURITY.md` states what is stored and where; `status` warns if the directory is group/world readable. |
+| **Secrets in backups** | MCP entries carry auth headers. A project `.mcp.json` backup holds only the toggled server's entry (the entry, its exact text and its neighbours' names, not the whole file -- §8.2); the user-scope JSON MCP backend (copilot) still backs up the whole file, so its backup can include other servers' headers. Write backups and `state.json` with mode `0600`; `log.jsonl` never includes payloads; `SECURITY.md` states what is stored and where; `status` warns if the directory is group/world readable. |
 | **Concurrency** | Lock file as in §5.4. Agents and humans do run the tool simultaneously. |
 | **Sync jobs** | Detect `.synced-from-*` markers in a live dir and warn that a sync may re-create parked items; recommend parking in the *source* harness. |
 | **Harness drift** | Harness config formats change between versions. Each table row records the harness version it was verified against; `doctor` compares the live layout against the row (expected dirs/keys present) and reports "layout changed" instead of failing deep inside an operation. Fixture homes in tests freeze the verified layout. Phase 2 ships it read-only (no lock, no state write, no CLI): a missing dir, file or key is an informational `absent`; only a present-but-unparseable or unsupported file is `error: layout changed`; JSONC is a `note`. |
@@ -537,7 +537,7 @@ directories, and the promise that a disable never loses data.
 |---|---|---|---|
 | 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
 | 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
-| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; a backup holds only the toggled server's entry; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`; disabling one project `.mcp.json` server leaves no trace of another server's token under `~/.agent-toggle/`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs. A project backup written before the G15 fix still holds the whole file text until that server is disabled again |
+| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; a project `.mcp.json` backup holds only the toggled server's entry (the copilot user-scope JSON backend still backs up the whole file); `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`; disabling one project `.mcp.json` server leaves no trace of another server's token under `~/.agent-toggle/`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs. A project backup written before the G15 fix still holds the whole file text until that server is disabled again |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | done: both shim templates carry a Safety section; `ops` warns when a plan disables a `rule` |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | done: argv form, and `mechanisms.valid_plugin_id` refuses any other id before `claude plugin ...` runs (`tests/test_platform.py`) |
 | 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the parse check there is the structural validator in `toml_check.py` (see §8.2) |
@@ -732,6 +732,19 @@ Known gaps added by phase 2:
   are reported by their own rows, not here.
 - Fixed: `profile save --project` (and the cost inventory) lists the live servers of a
   project that has only `.mcp.json` and no `.claude/`.
+
+Known gaps found at the final verification (not fixed; each has a stated ceiling):
+
+- The user-scope JSON MCP backend (copilot's `mcp-config.json`, `toggle_json_mcp`) still
+  backs up the whole file text before and after the edit, so its backup can hold other
+  servers' headers. Reusing the project entry-only backup (`project_mcp_backup`) would
+  close it.
+- OpenCode now also scans `~/.claude/skills` and `~/.agents/skills` (§11 q2). Disabling a
+  skill for opencode while a same-named copy sits in another scanned dir prints
+  "disabled" although OpenCode still loads the other copy. Fix: warn or refuse when the
+  name exists in more than one scanned dir.
+- `list_plugins` is called with the 30 s read timeout, but no test pins that wiring
+  (`run_cli`'s per-call and env-var behaviour are tested).
 
 ---
 

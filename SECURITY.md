@@ -23,9 +23,11 @@ All bookkeeping lives under `~/.agent-toggle/`:
   contain credentials**: `Authorization` headers (for example
   `Bearer <token>`), API keys in `env` blocks, and tokens embedded in URLs.
   Treat the directory like any other secrets store.
-- A backup holds only the server that was disabled. For a project
-  `.mcp.json` that is the entry, its exact text and the names of the servers
-  next to it -- never another server's entry or the whole file. A project
+- A project `.mcp.json` backup holds only the server that was disabled: the
+  entry, its exact text and the names of the servers next to it -- never
+  another server's entry or the whole file. The user-scope JSON MCP backend
+  (copilot's `mcp-config.json`) still backs up the whole file text before and
+  after the edit, so that backup can include other servers' headers. A project
   backup written by an earlier version may still hold the whole file text
   (including other servers' headers); it keeps working, and disabling that
   server again (after `enable`) replaces it with the per-entry form.
