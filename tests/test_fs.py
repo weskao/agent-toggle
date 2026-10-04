@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import random
 import unittest
 from unittest import mock
 
@@ -215,6 +216,9 @@ VALID_TOML = [
     "a = [\n  1, # one\n  2,\n]\nn = [[1, 2], [\"x\", [true]], []]\nm = [{x = 1}, {y = [1]}]\n",
     "i = {a = 1, b.c = 2, d = {e = [1, 2]}}\ne = {}\n",
     '[mcp_servers.x]\ncommand = "npx"\nargs = ["-y", "pkg"]\nenv = { TOKEN = "t" }\n',
+    "[a.b.c]\n[a]\nb.d = 1\n", "[t.a.c]\n[t]\na.d = 1\n",                  # dotted key into an implicit table
+    '"a\\\\u0041" = 1\naA = 2\n\'x\\ty\' = 3\n"x\\ty" = 4\n',            # decoded keys that differ
+    "d = [2024-02-29, 23:59:59, 2024-02-29T00:00:00+23:59, 1979-05-27 07:32:00.5-07:00]\n",
 ]
 BAD_TOML = {
     "unterminated string": 'a = "abc\n',
@@ -251,6 +255,20 @@ BAD_TOML = {
     "inline newline": "a = {x = 1,\ny = 2}\n",
     "inline duplicate": "a = {x = 1, x = 2}\n",
     "bad date": "a = 1979-13\n",
+    "month 13": "a = 1979-13-01\n", "feb 30": "a = 2024-02-30\n", "feb 29 off-year": "a = 2023-02-29\n",
+    "day 00": "a = 2024-01-00\n", "hour 24": "a = 24:00:00\n", "minute 60": "a = 12:60:00\n",
+    "second 60": "a = 12:00:60\n", "datetime hour 24": "a = 2024-01-01T24:00:00Z\n",
+    "offset hour 24": "a = 2024-01-01T00:00:00+24:00\n", "offset minute 60": "a = 2024-01-01T00:00:00+00:60\n",
+    "bare cr after line-ending backslash": 's = """a\\\n \r b"""\n',
+    "dotted into explicit table": "[a.b]\n[a]\nb.d = 1\n",
+    "dotted into explicit nested": "[a.b.c]\n[a]\nb.c.d = 1\n",
+    "dotted into inline table": "a = {x = 1}\na.y = 2\n",
+    "dotted-through table reopened": "[a.b.c]\n[a]\nb.d = 1\n[a.b]\n",
+    "quoted dup of bare": '"a" = 1\na = 2\n', "literal dup of bare": "'a' = 1\na = 2\n",
+    "escape-equal keys": '"a\\tb" = 1\n"a\\u0009b" = 2\n',
+    "long escape-equal keys": '"\\U00000041" = 1\nA = 2\n',
+    "quoted header dup": '[a]\n["a"]\n', "quoted dotted dup": '[t]\n"x".y = 1\nx.y = 2\n',
+    "escaped backslash key dup": '"a\\\\b" = 1\n\'a\\b\' = 2\n',
     "control char": 'a = "x\x00y"\n',
     "bare cr": "a = 1\rb = 2\n",
 }
@@ -292,3 +310,44 @@ class TomlCheckTest(unittest.TestCase):
         for why, text in BAD_TOML.items():
             with self.subTest(why=why), self.assertRaises(ValueError):
                 real.loads(text)             # the snippet really is invalid TOML
+
+    @unittest.skipIf(fs._tomllib() is None, "needs tomllib (3.11+)")
+    def test_mutations_agree_with_tomllib(self) -> None:
+        """Seeded random edits of known-good TOML: the fallback accepts exactly what tomllib does."""
+        real = fs._tomllib()
+        seeds = VALID_TOML + [f.read_text(encoding="utf-8") for f in sorted(FIXTURES.glob("*/.*/config.toml"))]
+        seeds += list(BAD_TOML.values())
+        rng, alphabet = random.Random(20261004), "\"'\\[]{}=.,#\n\r \t0189aAeEuUxT-+:_Z234567"
+        seen = set()
+        for _ in range(2000):
+            text = rng.choice(seeds)
+            for _ in range(rng.randint(1, 3)):
+                i = rng.randint(0, len(text))
+                op = rng.randrange(5)
+                if op == 0:
+                    text = text[:i] + rng.choice(alphabet) + text[i:]
+                elif op == 1:
+                    text = text[:i] + text[i + 1:]
+                elif op == 2:
+                    text = text[:i] + text[i:i + 1] * 2 + text[i + 1:]
+                elif op == 3:
+                    lines = text.splitlines(keepends=True) or [""]
+                    j = rng.randrange(len(lines))
+                    lines.insert(j, lines[rng.randrange(len(lines))])
+                    text = "".join(lines)
+                else:
+                    text = text.replace('"', "'") if rng.random() < .5 else text.replace("'", '"')
+            if text in seen:
+                continue
+            seen.add(text)
+            try:
+                real.loads(text)
+                want = True
+            except ValueError:
+                want = False
+            try:
+                toml_check.parse(text)
+                got = True
+            except ValueError:
+                got = False
+            self.assertEqual(got, want, f"fallback={got} tomllib={want} for {text!r}")

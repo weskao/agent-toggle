@@ -10,19 +10,23 @@ ValueError. Tests cross-check it against tomllib so it cannot drift looser.
 from __future__ import annotations
 
 import re
+from datetime import date, time
 
 _BARE = re.compile(r"[A-Za-z0-9_-]+")
 _WS = " \t"
 _END = r"(?=[ \t\r\n,\]}#]|$)"
 _DIG = r"\d(?:_?\d)*"
 _INT = r"[+-]?(?:0|[1-9](?:_?\d)*)"
+_DT = (r"(?P<dt>\d{4}-\d\d-\d\d(?:[Tt ]\d\d:\d\d:\d\d(?:\.\d+)?(?:[Zz]|[+-]\d\d:\d\d)?)?"
+       r"|\d\d:\d\d:\d\d(?:\.\d+)?)")
+_DT_PARTS = re.compile(r"(?:(\d{4})-(\d\d)-(\d\d))?[Tt ]?(?:(\d\d):(\d\d):(\d\d)(?:\.\d+)?(?:[+-](\d\d):(\d\d))?)?")
 _VALUE = re.compile("(?:" + "|".join((
-    r"\d{4}-\d\d-\d\d(?:[Tt ]\d\d:\d\d:\d\d(?:\.\d+)?(?:[Zz]|[+-]\d\d:\d\d)?)?",
-    r"\d\d:\d\d:\d\d(?:\.\d+)?",
+    _DT,
     rf"{_INT}(?:\.{_DIG}(?:[eE][+-]?{_DIG})?|[eE][+-]?{_DIG})",
     rf"{_INT}", r"0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*", r"0o[0-7](?:_?[0-7])*", r"0b[01](?:_?[01])*",
     r"[+-]?(?:inf|nan)", r"true", r"false")) + ")" + _END)
-_ESC = {"b", "t", "n", "f", "r", '"', "\\"}
+_ESC = {"b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r", '"': '"', "\\": "\\"}
+_UNESC = re.compile(r"\\(?:u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|(.))")
 
 
 class Table(dict):
@@ -101,7 +105,7 @@ class _P:
         q = self.s[self.i]
         triple = multi and self.peek(3) == q * 3
         self.i += 3 if triple else 1
-        start = self.i                    # raw text, escapes undecoded: enough to spot a repeated key
+        start = self.i                    # only keys (multi=False) are decoded below; values stay raw
         while True:
             c = self.peek()
             if not c:
@@ -109,7 +113,10 @@ class _P:
             if c == q:
                 if not triple:
                     self.i += 1
-                    return self.s[start:self.i - 1]
+                    raw = self.s[start:self.i - 1]
+                    if multi or q == "'" or "\\" not in raw:
+                        return raw
+                    return _UNESC.sub(lambda m: chr(int(m[1] or m[2], 16)) if m[1] or m[2] else _ESC[m[3]], raw)
                 n = len(re.compile(re.escape(q) + "+").match(self.s, self.i).group())
                 if n >= 3:
                     if n > 5:
@@ -133,7 +140,7 @@ class _P:
                             or 0xD800 <= int(h, 16) <= 0xDFFF:
                         raise self.err("bad unicode escape")
                     self.i += 2 + width
-                elif triple and (m := re.compile(r"[ \t]*\r?\n[ \t\r\n]*").match(self.s, self.i + 1)):
+                elif triple and (m := re.compile(r"[ \t]*\r?\n(?:[ \t]|\r?\n)*").match(self.s, self.i + 1)):
                     self.i = m.end()
                 else:
                     raise self.err("bad escape")
@@ -150,10 +157,24 @@ class _P:
         elif c == "{":
             return self.inline()
         elif m := _VALUE.match(self.s, self.i):
+            if m["dt"]:
+                self.dt(m["dt"])
             self.i = m.end()
         else:
             raise self.err("bad value")
         return True
+
+    def dt(self, text: str) -> None:     # ranges, as tomllib checks them (so 24:00 and :60 are out)
+        y, mo, d, h, mi, sec, oh, om = _DT_PARTS.match(text).groups()
+        try:
+            if y:
+                date(int(y), int(mo), int(d))
+            if h:
+                time(int(h), int(mi), int(sec))
+            if oh:
+                time(int(oh), int(om))              # tomllib: offset hh 00-23, mm 00-59
+        except ValueError:
+            raise self.err(f"date/time out of range: {text}") from None
 
     def array(self) -> None:
         self.i += 1
@@ -195,8 +216,9 @@ class _P:
         self.ws()
         for k in path[:-1]:
             sub = table.setdefault(k, Table("dotted"))
-            if not isinstance(sub, Table) or sub.kind not in ("dotted",):
+            if not isinstance(sub, Table) or sub.kind not in ("dotted", "implicit"):
                 raise self.err(f"key {k!r} already defined")
+            sub.kind = "dotted"           # an implicit table (parent of a header) may be extended
             table = sub
         if path[-1] in table:
             raise self.err(f"duplicate key {path[-1]!r}")
