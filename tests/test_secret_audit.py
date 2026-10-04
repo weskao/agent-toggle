@@ -219,6 +219,29 @@ class SecretAuditTest(CliCase):
                 self.assertIn("RuntimeError: cli crashed", out + err)
         self.assert_clean()
 
+    def test_project_backup_holds_no_other_servers_secret(self) -> None:
+        """G15: disabling server A must not copy server B's header anywhere."""
+        token = "Bearer test-token-000"
+        (self.proj / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "a-mcp": {"command": "demo"},
+            "b-mcp": {"url": "https://example.invalid/mcp",
+                      "headers": {"Authorization": token}}}}, indent=2), encoding="utf-8")
+        p = ("mcp", "a-mcp", "--project", str(self.proj))
+        for i, extra in enumerate(VARIANTS):
+            self.go("disable", *p, "--dry-run", *extra)
+            with self.batch(f"g{i}"):
+                self.go("disable", *p, *extra)
+            self.go("enable", *p, "--dry-run", *extra)
+            self.read_only(*extra)
+            self.go("enable", *p, *extra)
+        self.go("disable", *p)                        # leave the backup on disk
+        self.assertTrue(list(fs.backup_dir().glob("*__a-mcp.json")))
+        for f in fs.state_dir().rglob("*"):
+            if f.is_file():
+                self.assertNotIn("test-token-000", f.read_text(encoding="utf-8"), f)
+        for argv, text in self.seen:
+            self.assertNotIn("test-token-000", text, argv)
+
     def test_corrupt_backups_and_configs_show_no_value(self) -> None:
         self.each("disable")
         for b in fs.backup_dir().glob("*.json"):     # truncate mid-value: parsers must not echo it

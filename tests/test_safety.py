@@ -454,7 +454,7 @@ class CheckedConfigWriteTest(SandboxCase):
         text = 'a = 1\n\n[mcp_servers.x]\nk = 1\n'
         block = "[mcp_servers.x]\nk = 1\n"
         ok = mcp_toml.remove_verify(text, "x", block)
-        self.assertIn(ok(text, "a = 1\n\n"), ("", "unverified (no tomllib)"))
+        self.assertEqual(ok(text, "a = 1\n\n"), "")
         for bad_after in ("a = 1\n", text, "a = 1\n\n[mcp_servers.x]\n"):
             with self.assertRaises(ValueError, msg=bad_after):
                 mcp_toml.remove_verify(text, "x", block)(text, bad_after)
@@ -466,13 +466,11 @@ class CheckedConfigWriteTest(SandboxCase):
         with self.assertRaises(ValueError):
             added("a = 1\n# new\n", "a = 1\n# new\n\n" + block)
 
-    def test_toml_verify_is_unverified_without_tomllib(self) -> None:
+    def test_toml_verify_parses_without_tomllib(self) -> None:
         text, block = 'a = 1\n\n[mcp_servers.x]\nk = 1\n', "[mcp_servers.x]\nk = 1\n"
         with mock.patch.object(fs, "_tomllib", lambda: None):
-            self.assertEqual(mcp_toml.remove_verify(text, "x", block)(text, "a = 1\n\n"),
-                             "unverified (no tomllib)")
-            self.assertEqual(mcp_toml.add_verify("a = 1\n", block)("a = 1\n", "a = 1\n\n" + block),
-                             "unverified (no tomllib)")
+            self.assertEqual(mcp_toml.remove_verify(text, "x", block)(text, "a = 1\n\n"), "")
+            self.assertEqual(mcp_toml.add_verify("a = 1\n", block)("a = 1\n", "a = 1\n\n" + block), "")
 
     def test_corrupt_backup_fails_the_row_not_the_batch(self) -> None:
         self.cfg.write_bytes(self.cfg.read_bytes()

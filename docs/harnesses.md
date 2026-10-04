@@ -46,7 +46,7 @@ A dash means the harness has no such resource this tool can toggle.
 | claude | `~/.claude` | `skills/` — move | `agents/` — move | `commands/` — move | `rules/` — move | native CLI (`claude plugin enable/disable`) | remove-with-backup |
 | codex | `~/.codex` | `skills/` — move | `agents/` — move | `commands/` or `prompts/` — move | — (`rules/default.rules` is a permission file) | — (no CLI this tool can drive) | remove-with-backup |
 | grok | `~/.grok` | `skills/` — move | — | — | — | — | remove-with-backup |
-| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (every OS) | `skills/` plus every `opencode.json` `skills.paths[]` entry — move | — (agents are config entries) | `command/` — move | — | — | flag |
+| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (every OS) | every `skills.paths[]` entry of `opencode.json` (else `opencode.jsonc`; `~`, `$HOME/`, `${HOME}/` expanded, relative entries skipped), `skills/`, `skill/`, `~/.claude/skills`, `~/.agents/skills` — move | — (agents are config entries) | `command/` — move | — | — | flag |
 | openclaw | `~/.openclaw` | `skills/` — move, or flag when `skills.entries.<name>` exists | `agents/` — move | — | — | flag | — (state is sqlite) |
 | copilot | `~/.copilot` | `skills/` — move | `agents/` — move | — | — | — | remove-with-backup |
 | vibe | `~/.vibe` | `skills/` — move | — | — | — | — | — |
@@ -81,7 +81,7 @@ listed.
 | claude, codex, grok, copilot, vibe homes and skill/agent dirs | Confirmed on a real install (DESIGN §4). |
 | grok MCP in `config.toml` | Confirmed on a live install. |
 | opencode `mcp.<name>.enabled` boolean in `opencode.json` | Shape observed (boolean under each server) on a real install at the version above. Still assumed: that the file is always strict JSON (the one inspected was). |
-| opencode `skills.paths` | A list in `opencode.json`; observed on a real install. Relative-path base (`<opencode home>`) is an assumption: DESIGN does not say. |
+| opencode `skills.paths` | A list in `opencode.json`; observed on a real install. The scanned-dir set and relative-entry rule (session cwd, not the config dir) were probed on 2.0.22 (DESIGN §11 q2). `opencode.json` over `opencode.jsonc` precedence is an assumption. |
 | openclaw `skills.entries.<name>.enabled`, `plugins.entries.<name>.enabled` | Shape observed (boolean `enabled` per entry; some plugin entries carry only `config` and no `enabled`, which the tool treats as not flaggable) at the version above. `openclaw.json` parsed as strict JSON. |
 | copilot `installed-plugins/` entry format | Unknown: the directory was empty on the surveyed machine, so plugins stay unsupported. |
 | agy skills/command layout | Unknown: not observed (DESIGN §11 q1). |

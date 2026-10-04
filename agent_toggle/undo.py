@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import fs, ops, store
 from .harnesses import TYPES, harnesses, project_view
-from .mechanisms import fail_row, validate_name
+from .mechanisms import fail_row, recover, validate_name
 from .output import CliError, Result, die
 
 REVERSE = {"disable": "enable", "enable": "disable"}
@@ -105,6 +105,11 @@ def cmd_enable_all(harness: str | None, dry_run: bool, out: Result,
     if project is not None:
         project = str(project_view(project).project)       # exit 4 like disable --project
     want = store.project_digest(project) if project is not None else None
+    if not dry_run and store.load_state(write_back=False).get("pending"):
+        with fs.lock():              # settle a killed run's op first, so the plan sees it
+            state = store.load_state()
+            recover(state, out)
+            store.save_state(state)
     for key, entry in store.load_state(write_back=False)["disabled"].items():
         try:
             h, digest, type_, name = store.parse_key(key)

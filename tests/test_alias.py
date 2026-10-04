@@ -98,6 +98,30 @@ class AliasBehaviour:
         self.assertTrue(any(".synced-from-test" in w
                             for w in self.run_json("status")[1]["warnings"]))
 
+    def test_sync_marker_warns_once_per_real_dir_naming_every_viewer(self) -> None:
+        (self.tmp / ".claude" / "skills" / ".synced-from-test").write_text("", encoding="utf-8")
+        hits = lambda env: [w for w in env["warnings"] if ".synced-from-test" in w]   # noqa: E731
+        status = hits(self.run_json("status")[1])
+        self.assertEqual(len(status), 1, status)
+        self.assertIn("viewed by claude, opencode", status[0])
+        disable = hits(self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1])
+        self.assertEqual(len(disable), 1, disable)
+        self.assertIn("viewed by claude, opencode", disable[0])
+        text = self.run_cli("status")[1]
+        self.assertEqual(text.count(".synced-from-test"), 1, text)
+
+    def test_gitignore_warning_once_per_park_dir_and_only_inside_a_work_tree(self) -> None:
+        none = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
+                ["warnings"] if "NOT gitignored" in w]
+        self.assertEqual(none, [])                      # no git work tree: nothing to fix
+        self.run_cli("enable", "skill", ITEM, "--harness", "opencode")
+        self.git_init()
+        warned = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
+                  ["warnings"] if "NOT gitignored" in w]
+        self.assertEqual(len(warned), 1, warned)
+        self.assertEqual(len(set(warned)), 1)
+        self.assertIn(f"{(self.tmp / '.claude').resolve()}/.gitignore", warned[0])
+
 
 @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
 class SymlinkAliasTest(AliasBehaviour, AliasBase):
@@ -125,6 +149,17 @@ class SkillsPathsAliasTest(AliasBehaviour, AliasBase):
         self.alias_via_paths()
 
 
+class DefaultCompatAliasTest(AliasBehaviour, AliasBase):
+    """No skills.paths at all: OpenCode still scans ~/.claude/skills, so claude's
+    skills are a shared dir (parked once under claude), not a second park dir."""
+
+    def test_cost_counts_the_shared_skill_once(self) -> None:
+        rc, env = self.run_json("cost")
+        names = [(r["harness"], r["name"]) for r in env["results"]
+                 if r.get("type") == "skill" and r.get("name") == ITEM]
+        self.assertEqual(names, [("claude", ITEM)])
+
+
 class OpencodeTableTest(AliasBase):
     def test_xdg_config_home_wins_and_relative_is_ignored(self) -> None:
         self.assertEqual(build(self.tmp)["opencode"].home, self.oc)
@@ -133,14 +168,37 @@ class OpencodeTableTest(AliasBase):
         os.environ["XDG_CONFIG_HOME"] = "relative/dir"
         self.assertEqual(build(self.tmp)["opencode"].home, self.oc)
 
-    def test_skill_dirs_follow_skills_paths_and_survive_bad_json(self) -> None:
-        dirs = lambda: build(self.tmp)["opencode"].dirs["skill"]      # noqa: E731
-        self.assertEqual(dirs(), ("skills",))
-        (self.oc / "opencode.json").write_text("{ not json", encoding="utf-8")
-        self.assertEqual(dirs(), ("skills",))
-        (self.oc / "opencode.json").write_text(json.dumps(
-            {"skills": {"paths": ["~/.codex/skills", "rel", 7, "~/.codex/skills"]}}), encoding="utf-8")
-        self.assertEqual(dirs(), ("skills", str(self.tmp / ".codex/skills"), str(self.oc / "rel")))
+    def dirs(self) -> tuple[str, ...]:
+        return build(self.tmp)["opencode"].dirs["skill"]
+
+    def write_cfg(self, text: str, name: str = "opencode.json") -> None:
+        (self.oc / name).write_text(text, encoding="utf-8")
+
+    def test_skill_dirs_default_and_additive_and_survive_bad_json(self) -> None:
+        claude, agents = str(self.tmp / ".claude/skills"), str(self.tmp / ".agents/skills")
+        default = ("skills", "skill", claude, agents)      # T1: OpenCode 2.0.22 scans all four
+        self.assertEqual(self.dirs(), default)
+        self.write_cfg("{ not json")
+        self.assertEqual(self.dirs(), default)
+        self.write_cfg(json.dumps({"skills": {"paths": [
+            "~/.codex/skills", "rel", "~other/x", 7, "~/.codex/skills", "/abs/dir"]}}))
+        # redirects first (install-shims target), own dirs stay scanned, relative skipped
+        self.assertEqual(self.dirs(), (str(self.tmp / ".codex/skills"), "/abs/dir", *default))
+        (self.oc / "opencode.json").write_bytes(b"\xff\xfe{")      # not UTF-8: still no crash
+        self.assertEqual(self.dirs(), default)
+        shutil.rmtree(self.oc)                  # not installed: no other harness's dirs
+        self.assertEqual(self.dirs(), ("skills", "skill"))
+
+    def test_skills_paths_forms_jsonc_and_home_vars(self) -> None:
+        codex = str(self.tmp / ".codex/skills")
+        tail = self.dirs()[-4:]
+        self.write_cfg('// c\n{"skills": {"paths": ["$HOME/.codex/skills", /* x */ "${HOME}/a", "~"],}}',
+                       "opencode.jsonc")
+        self.assertEqual(self.dirs(), (codex, str(self.tmp / "a"), str(self.tmp), *tail))
+        self.write_cfg('{"skills": ["~/.codex/skills"]}', "opencode.jsonc")      # bare list
+        self.assertEqual(self.dirs(), (codex, *tail))
+        self.write_cfg('{"skills": {"paths": ["~/from-json"]}}')                 # .json wins
+        self.assertEqual(self.dirs()[0], str(self.tmp / "from-json"))
 
     def test_unshared_opencode_items_report_no_sharing(self) -> None:
         rc, env = self.run_json("disable", "command", "own-command", "--harness", "opencode")

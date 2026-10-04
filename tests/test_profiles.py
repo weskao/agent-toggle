@@ -315,5 +315,21 @@ class ModeTest(ProfileCase):
         self.assertEqual((fs.profiles_dir() / "work.json").stat().st_mode & 0o777, 0o600)
 
 
+class McpOnlyProjectTest(ProfileCase):
+    """A project with only `.mcp.json` (no `.claude/`) still lists its live servers."""
+
+    def test_save_lists_live_and_parked_servers(self) -> None:
+        proj = self.tmp / "work" / "bare"
+        proj.mkdir(parents=True)
+        (proj / ".mcp.json").write_text(json.dumps(
+            {"mcpServers": {"alpha": {"command": "a"}, "beta": {"command": "b"}}}), encoding="utf-8")
+        self.assertEqual(self.run_cli("disable", "mcp", "beta", "--project", str(proj))[0], 0)
+        self.assertEqual(self.run_cli("profile", "save", "p", "--project", str(proj))[0], 0)
+        doc = json.loads((fs.profiles_dir() / "p.json").read_text(encoding="utf-8"))
+        self.assertEqual({(i["type"], i["name"]): i["live"] for i in doc["items"]},
+                         {("mcp", "alpha"): True, ("mcp", "beta"): False})
+        self.assertFalse((proj / ".claude").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

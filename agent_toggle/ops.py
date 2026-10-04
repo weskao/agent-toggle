@@ -13,6 +13,7 @@ from . import fs
 from .harnesses import harnesses, project_view
 from .mechanisms import (
     fail_row,
+    recover,
     toggle_dir_type,
     toggle_json_mcp,
     toggle_mcp,
@@ -91,18 +92,25 @@ def apply_plan(plan: list[Op], out: Result, dry_run: bool = False, *,
                headers: bool = False) -> int:
     """Apply `plan`; returns the fail count.
 
-    A real run takes ONE fs.lock() for the whole plan, re-reads state under it
-    and saves it in `finally`, so what already moved is kept even if a later
-    item crashes. A dry run plans against a read-only state: no lock, state,
+    A real run takes ONE fs.lock() for the whole plan, re-reads state under it,
+    first settles what a killed run left in flight (mechanisms.recover), then
+    saves state per item -- a write-ahead entry before each flag write or dir
+    move (store.begin), a checkpoint per mcp/plugin item -- and once more in
+    `finally`, so a kill loses at most the item in flight and that one is
+    recoverable. A dry run plans against a read-only state: no lock, state,
     log or backup write. A caller that already holds the lock passes `state`.
     """
     if state is not None:
         return _dispatch(plan, state, out, dry_run, batch, headers)
     if dry_run:
-        return _dispatch(plan, load_state(write_back=False), out, True, batch, headers)
+        state = load_state(write_back=False)
+        if not fs.lock_held():           # a live run's op in flight is not "interrupted"
+            recover(state, out, dry_run=True)
+        return _dispatch(plan, state, out, True, batch, headers)
     with fs.lock():
         state = load_state()
         try:
+            recover(state, out)
             return _dispatch(plan, state, out, False, batch, headers)
         finally:
             save_state(state)

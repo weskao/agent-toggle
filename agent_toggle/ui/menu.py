@@ -6,11 +6,12 @@ which one ran. Plain line I/O: filter -> numbered list -> toggle by number -> ap
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from .model import SORTS, Row, collect, cycle, visible
+from .model import SORTS, Row, collect, cycle, profile_command, profile_listing, visible
 
-HELP = ("numbers toggle (1 3 5-7)  /text filter  s sort  h harness  t type  "
-        "a apply  q cancel  ? help")
+HELP = ("numbers toggle (1 3 5-7)  /text filter (/ alone clears)  s sort  h harness  t type  "
+        "p profile  a apply  q cancel  ? help")
 
 
 def _show(out, shown: list[Row], chips: str, pending: int) -> None:
@@ -37,7 +38,8 @@ def _numbers(arg: str, size: int) -> list[int] | None:
     return out
 
 
-def loop(rows: list[Row], stdin, stdout) -> list[Row] | None:
+def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
+         dry_run: bool = False) -> list[Row] | None:
     query, harness, type_, sort = "", "all", "all", "name"
     harness_opts = ["all", *sorted({n for r in rows for n in (r.harness, *r.shared)})]
     type_opts = ["all", *sorted({r.type for r in rows})]
@@ -45,7 +47,7 @@ def loop(rows: list[Row], stdin, stdout) -> list[Row] | None:
     while True:
         shown = visible(rows, query, harness, type_, sort)
         if redraw:
-            chips = f"filter:{query or '-'} harness:{harness} type:{type_} sort:{sort}"
+            chips = f"filter:{'/' + query if query else '-'} harness:{harness} type:{type_} sort:{sort}"
             _show(stdout, shown, chips, sum(1 for r in rows if r.changed))
         redraw = True
         stdout.write("> ")
@@ -67,9 +69,16 @@ def loop(rows: list[Row], stdin, stdout) -> list[Row] | None:
             type_ = cycle(type_opts, type_)
         elif cmd.startswith("/"):
             query = cmd[1:].strip()
+        elif low == "p" or low.startswith("p "):          # profiles: list, or run one line
+            line = cmd[1:].strip()
+            stdout.write((profile_command(rows, line, project, dry_run) if line else
+                          f"{profile_listing()}\np <number|name>  |  p save <name>")
+                         + "\n")
+            redraw = bool(line)
         elif low in ("?", "help"):
             stdout.write("Numbers tick/untick rows (unticked = parked); nothing is applied "
-                         "until `a`.\n")
+                         "until `a`. `p` lists profiles; `p <number|name>` stages one, "
+                         "`p save <name>` saves the live state.\n")
             redraw = False
         elif cmd and (idx := _numbers(cmd, len(shown))) is not None:
             for i in idx:
@@ -80,7 +89,8 @@ def loop(rows: list[Row], stdin, stdout) -> list[Row] | None:
 
 
 def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False,
-         stdin=None, stdout=None) -> list[Row] | None:
+         stdin=None, stdout=None, project: Path | None = None,
+         dry_run: bool = False) -> list[Row] | None:
     """`color` is accepted for signature parity and ignored (plain text)."""
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     notes: list[str] = []
@@ -90,4 +100,4 @@ def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False
     if not rows:
         stdout.write("nothing to show\n")
         return None
-    return loop(rows, stdin, stdout)
+    return loop(rows, stdin, stdout, project, dry_run)

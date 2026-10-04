@@ -31,8 +31,9 @@ from pathlib import Path
 from typing import Callable
 
 from . import fs
+from .backends.flag_json import jsonc_loads
 from .backends.mcp_json import ProjectMcpError, read_project_mcp
-from .backends.plugin_cli import claude_bin, run_cli
+from .backends.plugin_cli import full_plugin_id, list_plugins
 from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
 
 CHARS_PER_TOKEN = 4
@@ -171,7 +172,7 @@ def flag_names(h, type_: str) -> list[str]:
     rel, pointer = h.flags[type_]
     prefix = pointer[:pointer.index("<name>")] if "<name>" in pointer else pointer[:-1]
     try:
-        node = json.loads((h.home / rel).read_text(encoding="utf-8").removeprefix("\ufeff"))
+        node = jsonc_loads((h.home / rel).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     for k in prefix:
@@ -217,22 +218,6 @@ def plugin_estimate(root: Path) -> Estimate:
     return tokens, chars, basis or "empty bundle"
 
 
-def list_plugins(warn: Callable[[str], None]) -> list[dict]:
-    """`claude plugin list --json` through the injectable runner; [] when unavailable."""
-    exe = claude_bin()
-    if not exe:
-        return []
-    ok, text = run_cli(exe, ["plugin", "list", "--json"])
-    try:       # run_cli merges stderr into the text: skip any notice before the array
-        data = json.JSONDecoder().raw_decode(text, max(text.find("["), 0))[0] if ok else None
-    except ValueError:
-        data = None
-    if not isinstance(data, list):
-        warn("could not read `claude plugin list --json`; plugin rows come from state only")
-        return []
-    return [p for p in data if isinstance(p, dict) and isinstance(p.get("id"), str)]
-
-
 def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: None,
               plugins: bool = True) -> list[Item]:
     """Every togglable item once: live, then parked-only. A dir shared by several
@@ -253,9 +238,13 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                               0 if enabled else est[0], est[1], est[2], tuple(shared)))
 
     for hname, h in table.items():
-        if not h.home.is_dir():
+        # a --project view with only .mcp.json has no .claude dir, but its servers are live
+        only_mcp = not h.home.is_dir() and h.project is not None and h.mcp is not None
+        if not h.home.is_dir() and not only_mcp:
             continue
         for type_ in h.types:
+            if only_mcp and type_ != "mcp":
+                continue
             if type_ in h.dirs:
                 for sub in h.dirs[type_]:
                     v = dir_view(table, hname, type_, h.home, sub)
@@ -274,9 +263,11 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                 for name in live_mcp(h.home, h.backend):
                     add(hname, type_, name, True, mcp_estimate(hname, counts.get(name)))
 
+    listed: list[str] = []                # canonical `name@marketplace` ids, for the parked rows
     claude = table.get("claude")
     if plugins and claude and claude.home.is_dir() and "plugin" in claude.types:
         for p in list_plugins(warn):
+            listed.append(p["id"])
             root = p.get("installPath")
             add("claude", "plugin", p["id"], p.get("enabled", True) is not False,
                 plugin_estimate(Path(root)) if isinstance(root, str)
@@ -290,10 +281,16 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
             est = mcp_estimate(h, backup_tools(e))
         elif t == "plugin":
             est = (0, None, "not in plugin list")
+            if "@" not in n:              # parked as `name`; the live id is `name@marketplace`
+                n = full_plugin_id(n, listed) or n    # ambiguous: keep it as parked
         else:
             parked = e.get("parked_at")
             est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)
         shared = e.get("shared_with")
         add(h, t, n, False, est,
             [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
-    return items
+    # a project dir symlinked out of the project (to ~/.claude/skills) is user scope
+    outside = {(n, t) for n, h in table.items() if h.project is not None
+               for t, subs in h.dirs.items()
+               if any(not (h.home / s).resolve().is_relative_to(h.project) for s in subs)}
+    return [i for i in items if (i.harness, i.type) not in outside]

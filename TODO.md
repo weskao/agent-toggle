@@ -106,7 +106,7 @@ Checked against the code on 2026-10-03; every §6.1 row is done.
 
 ## Needs a real install to settle (`docs/DESIGN.md` §11)
 
-- [ ] OpenCode `skills.paths` default when unset (q2)
+- [x] OpenCode `skills.paths` default when unset (q2)
 - [ ] copilot `installed-plugins/` entry format once a plugin is installed (q3)
 - [x] openclaw flag shape `skills.entries.<name>.enabled` /
       `plugins.entries.<name>.enabled`, and whether `openclaw.json` is strict JSON (q5)
@@ -116,29 +116,36 @@ Checked against the code on 2026-10-03; every §6.1 row is done.
 
 Fix only if one bites; none blocks a phase.
 
-- [ ] `run_cli` uses a fixed 120 s timeout for every `claude plugin ...` call
-      (`backends/plugin_cli.py`)
-- [ ] a plugin can show twice in the picker when parked under a name that differs from
-      `name@marketplace`
-- [ ] picker typing mode (after `/`) has no on-screen cue
-- [ ] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
-- [ ] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
-- [ ] `.synced-from-*` warning repeats once per harness viewing the directory
-- [ ] `aliases_from` on the harness record is metadata only
-- [ ] `ui` and `cost` are user-scope only (no `--project`)
-- [ ] picker has no profile key; profiles are CLI only
-- [ ] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports
-      `unverified`)
-- [ ] JSONC / JSON5 config is refused, never rewritten
-- [ ] project park across filesystems is copy + delete, not atomic; an empty
-      `parked/<sha8>/*-disabled` dir can remain after `enable`
-- [ ] a killed run between a flag write and the state save leaves the flag `false`
-      with no state entry
-- [ ] `profile save --project` lists only parked servers for a project with only
-      `.mcp.json`
-- [ ] project `.mcp.json` backups hold the whole file text (mode `0600`), which can
-      include other servers' auth headers
-- [ ] `doctor` does not check companion files
+- [x] `run_cli` uses a fixed 120 s timeout for every `claude plugin ...` call
+      (`backends/plugin_cli.py`) -- now 30 s for read-only `plugin list`, 120 s for
+      every other call, `AGENT_TOGGLE_CLI_TIMEOUT` overrides both
+- [x] a plugin can show twice in the picker when parked under a name that differs from
+      `name@marketplace` -- the parked row now collapses into the listed `name@marketplace` one
+- [x] picker typing mode (after `/`) has no on-screen cue -- the top line now reads
+      `filter: /text█` with a hint (also in the menu fallback)
+- [x] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
+- [x] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
+- [x] `.synced-from-*` warning repeats once per harness viewing the directory -- now once
+      per real directory, naming every viewer
+- [x] `aliases_from` on the harness record is metadata only
+- [x] `ui` and `cost` are user-scope only (no `--project`) -- both take `--project <dir>`
+- [x] picker has no profile key; profiles are CLI only -- `p` stages a saved profile or
+      saves the live state (curses and menu)
+- [x] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports
+      `unverified`) -- now parse-checked by a stdlib structural validator
+- [x] JSONC / JSON5 config is refused, never rewritten -- JSONC is now rewritten in place
+      (comments and trailing commas kept); JSON5 stays refused
+- [x] project park across filesystems is copy + delete, not atomic; an empty
+      `parked/<sha8>/*-disabled` dir can remain after `enable` -- now a crash-safe
+      temp copy + rename, and `enable` prunes the empty park dirs
+- [x] a killed run between a flag write and the state save leaves the flag `false`
+      with no state entry -- now a write-ahead `pending` entry the next run settles
+- [x] `profile save --project` lists only parked servers for a project with only
+      `.mcp.json` -- its live servers are listed too
+- [x] project `.mcp.json` backups hold the whole file text (mode `0600`), which can
+      include other servers' auth headers -- now only the toggled entry, put back by a
+      byte-preserving re-insert; old whole-file backups still restore
+- [x] `doctor` does not check companion files -- parked file present, no orphans, never both live and parked
 
 ## Housekeeping
 

@@ -8,11 +8,48 @@ from pathlib import Path
 from unittest import mock
 
 from base import SandboxCase
+from test_project import ProjectCase
 
 from agent_toggle import cli, fs, ops, store
 from agent_toggle.output import Result
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+class UiProjectSeamTest(ProjectCase):
+    """`ui --project`: the picker gets the project's scope, the plan carries the project."""
+
+    def test_pick_is_scoped_and_apply_plan_carries_the_project(self) -> None:
+        try:
+            from agent_toggle.ui import picker
+        except ImportError:
+            self.skipTest("curses unavailable")
+        self.run_cli("disable", "skill", "demo-skill", "--project", str(self.proj))
+        row = picker.Row("claude", "agent", "demo-agent", True)
+        row.staged = False
+        with mock.patch.object(picker, "pick", return_value=[row]) as pick, \
+                mock.patch.object(ops, "apply_plan", wraps=ops.apply_plan) as spy:
+            rc, _, _ = self.run_cli("ui", "--project", str(self.proj))
+        self.assertEqual(rc, 0)
+        state, table = pick.call_args.args[:2]
+        self.assertEqual(list(table), ["claude"])
+        self.assertEqual(table["claude"].project, self.proj.resolve())
+        self.assertEqual(list(state["disabled"]), [self.key])      # this project's entries only
+        self.assertEqual(pick.call_args.kwargs["project"], self.proj.resolve())
+        self.assertIs(pick.call_args.kwargs["plugins"], False)     # plugins are user scope
+        self.assertEqual(spy.call_args.args[0],
+                         [ops.Op("claude", "agent", "disable", "demo-agent", str(self.proj.resolve()))])
+        self.assertFalse((self.pclaude / "agents" / "demo-agent.md").exists())
+
+    def test_user_scope_ui_is_unchanged(self) -> None:
+        try:
+            from agent_toggle.ui import picker
+        except ImportError:
+            self.skipTest("curses unavailable")
+        with mock.patch.object(picker, "pick", return_value=None) as pick:
+            self.assertEqual(self.run_cli("ui")[0], 0)
+        self.assertIsNone(pick.call_args.kwargs["project"])
+        self.assertIn("codex", pick.call_args.args[1])
 
 
 class HarnessGateTest(SandboxCase):

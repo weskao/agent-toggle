@@ -12,8 +12,8 @@ to the targets -- a user's `git status` must not change because of our
 bookkeeping.
 
 Usage:
-    agent_toggle.py ui [--dry-run]             # interactive picker (curses, else numbered menu)
-    agent_toggle.py cost [--type T]            # startup token estimates, biggest first
+    agent_toggle.py ui [--dry-run] [--project D]   # interactive picker (curses, else numbered menu)
+    agent_toggle.py cost [--type T] [--project D]  # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable --all [--harness H] [--dry-run]   # restore everything
@@ -46,7 +46,7 @@ from . import __version__, config, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
-from .mechanisms import dir_view, validate_name
+from .mechanisms import dir_view, settle, sync_marker_note, validate_name
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
 
@@ -109,6 +109,11 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
         out.say(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
                 f"auth headers; fix: chmod 700 {fs.state_dir()}", warn=True)
     out.say(f"claude  {claude or 'NOT FOUND -- plugin/mcp actions will fail'}")
+    if state.get("pending") and fs.lock_held():
+        out.say("WARNING another agent-toggle run is in progress (it holds the lock)", warn=True)
+    else:
+        for key in state.get("pending", {}):      # an op a killed run left in flight
+            out.say(f"WARNING {settle(state, key, dry_run=True)[1]}", warn=True)
     if legacy_state_dir.exists():
         done = any(k.startswith("claude:") for k in state["disabled"])
         legacy = "imported" if done else "present"
@@ -149,10 +154,8 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                 view = dir_view(table, hname, t, home, sub)
                 parked = view.parked
                 shared.update(set(view.sharers) - {hname})
-                if markers := fs.sync_markers(view.live):
-                    out.say(f"                   ! {view.live} carries {', '.join(markers)} -- a "
-                            f"sync job may re-create parked items; park in the source harness",
-                            warn=True)
+                if msg := sync_marker_note(out, view):
+                    out.say(f"                   ! {msg}", warn=True)
                 # Skills are directories; agents and commands are files that may
                 # sit one level down. Counting rglob("*") for skills would report
                 # every file inside every skill.
@@ -210,12 +213,17 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
 
 
 def cmd_cost(state: dict, out: Result, harness: str | None = None,
-             type_: str | None = None) -> None:
-    """Estimated startup tokens per item, biggest first. Read-only."""
-    items = [i for i in cost.inventory(store.scope_state(state), harnesses(), out.warn)
+             type_: str | None = None, project: str | None = None) -> None:
+    """Estimated startup tokens per item, biggest first. Read-only. With `project`, that
+    project's .claude and .mcp.json only (no plugins), else user scope."""
+    proj = profiles.project_dir(project, harness)       # exit 4 like disable --project
+    scoped, table = profiles.scope(state, proj)
+    items = [i for i in cost.inventory(scoped, table, out.warn, plugins=proj is None)
              if (not harness or harness in (i.harness, *i.shared_with))
              and (not type_ or i.type == type_)]
     items.sort(key=lambda i: (-i.tokens, -i.would_save, i.harness, i.type, i.name))
+    if proj:
+        out.say(f"project {proj}")
     for i in items:
         what = (f"~{i.tokens:>6} tok  {i.basis}" if i.enabled
                 else f"~{0:>6} tok  parked, would save ~{i.would_save} tok  ({i.basis})")
@@ -232,24 +240,28 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
             f"~{saved} tok already saved by parked items  "
             f"(chars/{cost.CHARS_PER_TOKEN} estimate, +-25%)")
     out.row(harness, type_, None, "cost", "ok", "total", show=False, items=len(items),
-            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA)
+            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA,
+            **({"project": str(proj)} if proj else {}))
 
 
-def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
+def cmd_ui(state: dict, out: Result, dry_run: bool = False, project: str | None = None,
+           harness: str | None = None) -> None:
+    proj = profiles.project_dir(project, harness)       # exit 4 like disable --project
+    scoped, table = profiles.scope(state, proj)
     try:
         from .ui import picker as ui
     except ImportError:                      # no curses (Windows without windows-curses)
         from .ui import menu as ui
-    changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run,
-                      color=use_color(sys.stdout, out.color))
+    changes = ui.pick(scoped, table, plugins=not dry_run and proj is None,
+                      color=use_color(sys.stdout, out.color), project=proj, dry_run=dry_run)
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
     if not changes:
         out.say("no changes")
         return
-    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name)
-                   for r in changes), key=lambda op: op[:3])
+    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name,
+                          str(proj) if proj else None) for r in changes), key=lambda op: op[:3])
     # the picker's state copy may be stale: apply_plan re-reads it under the lock
     ops.apply_plan(plan, out, dry_run, batch=store.BATCH, headers=True)
     if dry_run:
@@ -339,6 +351,13 @@ def shim_refusal(dest: Path) -> str | None:
     return None if ours else "exists and lacks the agent-toggle shim marker"
 
 
+def _reads_as(p: Path, text: str) -> bool:
+    try:
+        return p.read_text(encoding="utf-8") == text
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
     supports skills; keep park dirs out of an existing harness-home .gitignore.
@@ -359,7 +378,33 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     show=False, home=str(home))
             continue
         found += 1
-        dest = home / h.dirs["skill"][0] / "agent-toggle" / "SKILL.md"
+        # dirs[0] is OpenCode's first skills.paths redirect when set; if its parent dir
+        # is missing, fall back to the first in-home dir instead of creating a tree.
+        subs = h.dirs["skill"]
+        sub = subs[0] if not Path(subs[0]).is_absolute() or (home / subs[0]).parent.is_dir() \
+            else "skills"
+        dest = home / sub / "agent-toggle" / "SKILL.md"
+        view = dir_view(table, hname, "skill", home, sub)
+        if view.owner != hname and table[view.owner].home.is_dir():
+            # a redirect onto another installed harness's dir: that harness writes its own
+            # shim there; never overwrite it with this harness's text
+            out.row(hname, None, None, "install-shims", "skipped",
+                    f"{dest} belongs to {view.owner}: run install-shims for it",
+                    show=False, home=str(home))
+            continue
+        text = shim_text(hname)
+        others = [p for s in subs if s != sub
+                  and (home / s).resolve() != (home / sub).resolve()
+                  and (p := home / s / "agent-toggle" / "SKILL.md").is_file()
+                  and not p.is_symlink()]
+        same = next((p for p in others if _reads_as(p, text)), None)
+        if same and not dest.exists():
+            # an alias dir (OpenCode scans ~/.claude/skills, ~/.agents/skills) already serves
+            # this very shim: a second copy would only leave "which one wins" unchecked
+            out.row(hname, None, None, "install-shims", "skipped", f"covered by {same}",
+                    show=False, home=str(home))
+            out.say(f"  skipped  {dest.parent.parent} (covered by {same})")
+            continue
         if why := shim_refusal(dest):
             fix = (f"refused: {dest} {why}; fix: move it aside (or delete it if it is an "
                    f"older agent-toggle shim), then re-run install-shims")
@@ -368,10 +413,13 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
             continue
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(shim_text(hname), encoding="utf-8")
+            dest.write_text(text, encoding="utf-8")
         out.row(hname, None, None, "install-shims", "planned" if args.dry_run else "ok",
-                str(dest), show=False, home=str(home))
+                str(dest), show=False, home=str(home), also_seen=[str(p) for p in others])
         out.say(f"  {verb}  {dest}")
+        if others:       # e.g. the claude shim, whose text says `--harness` defaults to claude
+            out.say(f"    note: {hname} also loads {', '.join(map(str, others))} (a different "
+                    f"shim); which one wins is unchecked")
         installed += 1
         # A tracked park dir turns every disable into deletion noise in
         # `git status`; only touch a .gitignore that already exists.
@@ -450,6 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser("ui", aliases=["pick"], parents=[common], help="interactive picker")
     up.add_argument("--dry-run", action="store_true",
                     help="show the plan for what you stage; change nothing")
+    up.add_argument("--project", metavar="dir", help=PROJECT_HELP)
     sub.add_parser("status", parents=[common], help="health check")
     ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
     ls.add_argument("type", nargs="?", choices=TYPES)
@@ -457,6 +506,8 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser("cost", parents=[common],
                         help="estimated startup tokens per item, biggest first")
     cp.add_argument("--type", choices=TYPES, help="only this resource type")
+    cp.add_argument("--project", metavar="dir",
+                    help="price this project's <dir>/.claude and <dir>/.mcp.json, not user scope")
     sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
@@ -505,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "ui":
             if out.json_mode:
                 die("ui is interactive; --json is not supported", 2)
-            cmd_ui(load_state(write_back=False), out, args.dry_run)
+            cmd_ui(load_state(write_back=False), out, args.dry_run, args.project, args.harness)
         elif cmd == "cost":
-            cmd_cost(load_state(write_back=False), out, args.harness, args.type)
+            cmd_cost(load_state(write_back=False), out, args.harness, args.type, args.project)
         elif cmd == "status":
             cmd_status(load_state(write_back=False), out, args.harness)
         elif cmd == "list":

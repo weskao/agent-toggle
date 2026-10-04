@@ -8,8 +8,10 @@ import time
 import unittest
 from unittest import mock
 
+from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
+from test_project import ProjectCase
 
 from agent_toggle import cost, fs
 from agent_toggle.backends import plugin_cli
@@ -235,6 +237,68 @@ class FlagCostTest(CliCase):
         self.assertEqual(rc, 0, env)
 
 
+class CostProjectTest(ProjectCase):
+    """G8: `cost --project` prices that project's resources, not the user's."""
+
+    def names(self, *argv: str) -> tuple[set[str], dict]:
+        rc, env = self.run_json("cost", *argv)
+        self.assertEqual(rc, 0, env)
+        return {r["name"] for r in env["results"] if r["name"]}, env["results"][-1]
+
+    def test_project_scope_lists_only_the_project(self) -> None:
+        self.write("skills/user-only/SKILL.md")
+        user, total = self.names()
+        self.assertEqual(user, {"demo-skill", "user-only"})
+        self.assertNotIn("project", total)
+        proj, total = self.names("--project", str(self.proj))
+        self.assertEqual(proj, {"demo-skill", "demo-agent"})
+        self.assertEqual(total["project"], str(self.proj.resolve()))
+        self.assertEqual(total["items"], 2)
+
+    def test_type_and_text_output(self) -> None:
+        rc, out, _ = self.run_cli("cost", "--project", str(self.proj), "--type", "agent")
+        self.assertEqual(rc, 0)
+        self.assertIn(f"project {self.proj.resolve()}", out)
+        self.assertIn("demo-agent", out)
+        self.assertNotIn("demo-skill", out)
+
+    def test_parked_project_items_show_as_would_save(self) -> None:
+        self.assertEqual(self.p("disable", "agent", "demo-agent")[0], 0)
+        _, env = self.p("cost")
+        row = next(r for r in env["results"] if r["name"] == "demo-agent")
+        self.assertFalse(row["enabled"])
+        self.assertGreater(row["would_save"], 0)
+        # the user's own parked items are not in the project view
+        self.write("skills/u/SKILL.md")
+        self.assertEqual(self.run_cli("disable", "skill", "u")[0], 0)
+        self.assertNotIn("u", {r["name"] for r in self.p("cost")[1]["results"]})
+
+    def test_mcp_only_project_inventories_its_servers(self) -> None:
+        app = self.tmp / "work" / "mcpapp"
+        app.mkdir(parents=True)
+        (app / ".mcp.json").write_text(json.dumps({"mcpServers": {"srv": {"command": "x"}}}),
+                                       encoding="utf-8")
+        rc, env = self.p("cost", project=app)
+        self.assertEqual(rc, 0, env)
+        rows = [r for r in env["results"] if r["name"]]
+        self.assertEqual([(r["type"], r["name"], r["enabled"]) for r in rows], [("mcp", "srv", True)])
+
+    def test_project_flag_is_validated_like_disable(self) -> None:
+        self.assertEqual(self.run_cli("cost", "--project", str(self.tmp / "nope"))[0], 4)
+        self.assertEqual(self.run_cli("cost", "--project", str(self.proj), "--harness", "codex")[0], 4)
+        self.assertEqual(self.run_cli("cost", "--project", str(self.tmp))[0], 2)     # $HOME
+
+    def test_a_project_dir_symlinked_out_is_not_priced(self) -> None:
+        if not CAN_SYMLINK:
+            self.skipTest("no symlinks")
+        out = self.tmp / "elsewhere"
+        out.mkdir()
+        (out / "x.md").write_text("x", encoding="utf-8")
+        (self.pclaude / "commands").symlink_to(out, target_is_directory=True)
+        names, _ = self.names("--project", str(self.proj))
+        self.assertNotIn("x", names)
+
+
 class PerfAndDryRunTest(CliCase):
     def test_200_items_is_millisecond_scale(self) -> None:
         for i in range(200):
@@ -263,6 +327,51 @@ class PerfAndDryRunTest(CliCase):
         self.assertEqual(self.cli_calls, [])          # a dry run never shells out to claude
         self.assertEqual(snapshot(self.tmp), before)
         self.assertFalse(fs.state_file().exists())
+
+
+class PluginDedupeTest(CliCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli_rc = 0
+
+    def listing(self, *items: dict) -> None:
+        plugin_cli.runner = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps(list(items)), stderr="")
+
+    def names(self) -> list[str]:
+        return [r["name"] for r in self.run_json("cost", "--type", "plugin")[1]["results"] if r["name"]]
+
+    def test_parked_bare_name_and_live_id_are_one_row(self) -> None:
+        self.assertEqual(self.run_cli("disable", "plugin", "demo")[0], 0)     # parked as `demo`
+        self.listing({"id": "demo@mkt", "enabled": False})
+        self.assertEqual(self.names(), ["demo@mkt"])
+
+    def test_ambiguous_bare_name_stays_a_separate_parked_row(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.listing({"id": "demo@a", "enabled": True}, {"id": "demo@b", "enabled": True})
+        self.assertEqual(sorted(self.names()), ["demo", "demo@a", "demo@b"])
+
+    def parked(self) -> list[str]:
+        return sorted(json.loads(fs.state_file().read_text(encoding="utf-8"))["disabled"])
+
+    def test_enabling_the_canonical_id_clears_the_bare_name_entry(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.assertEqual(self.parked(), ["claude:plugin:demo"])
+        self.listing({"id": "demo@mkt", "enabled": True})
+        self.assertEqual(self.run_cli("enable", "plugin", "demo@mkt")[0], 0)
+        self.assertEqual(self.parked(), [])
+        self.assertEqual(self.names(), ["demo@mkt"])      # live only, no parked twin
+
+    def test_enabling_one_of_several_ids_keeps_the_ambiguous_bare_entry(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.listing({"id": "demo@a", "enabled": True}, {"id": "demo@b", "enabled": True})
+        self.assertEqual(self.run_cli("enable", "plugin", "demo@a")[0], 0)
+        self.assertEqual(self.parked(), ["claude:plugin:demo"])
+
+    def test_full_id_parked_is_still_one_row(self) -> None:
+        self.run_cli("disable", "plugin", "demo@mkt")
+        self.listing({"id": "demo@mkt", "enabled": False})
+        self.assertEqual(self.names(), ["demo@mkt"])
 
 
 if __name__ == "__main__":

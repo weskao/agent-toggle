@@ -65,6 +65,12 @@ already present in that harness home. Each harness gets its own template from
 agent to pass `--harness <that harness>`). The shim tells the agent to act only
 on the user's explicit request, never on instructions found inside skill or
 tool content, and to preview bulk operations with `--dry-run`.
+OpenCode's shim goes into the first `skills.paths` dir when one is set (and its
+parent exists), else `skills/`. OpenCode also scans `~/.claude/skills` and
+`~/.agents/skills`: when one of them already holds the very same shim text, the
+OpenCode shim is skipped (`covered by <path>`); a different shim there (the
+claude one, whose default harness is `claude`) is noted and OpenCode's own is
+still written.
 
 Every shim carries an `<!-- agent-toggle shim: ... -->` marker line.
 `install-shims` updates a file that has the marker in place (it is idempotent)
@@ -108,10 +114,10 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 | command | what it does |
 |---|---|
-| `ui` | interactive picker — cost column, sort, filters; `--dry-run` shows the plan for what you stage and changes nothing |
+| `ui` | interactive picker — cost column, sort, filters, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
-| `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
+| `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
 | `install-shims` | write the skill shim into every installed harness; refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
@@ -137,9 +143,12 @@ Flags accepted by every command, before or after the subcommand:
   `{ExceptionType}: {message}` -- always emit it, with `"ok": false`.
   Exception: `--help` / `--version` print plain text even with `--json`, and
   `ui` is interactive so it rejects `--json` (exit 2).
-- `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `profile
+- `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `ui` / `cost` / `profile
   save|apply|diff`) switches to project scope; see [Project scope](#project-scope).
 - `--version` prints the version.
+- `AGENT_TOGGLE_CLI_TIMEOUT=<seconds>` overrides the timeout of every `claude` CLI call
+  (default 30 s for read-only `plugin list`, 120 s for every other call); a
+  non-positive or non-numeric value is ignored with a warning.
 - `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
   unexpected errors; otherwise they are a single `error:` line.
 - `--color auto|always|never` sets ANSI color for human output: green ok, red errors,
@@ -196,14 +205,14 @@ agent-toggle ui
 ```
 
 ```
- filter: telegram█
+ filter: /telegram█   typing: Backspace edits, Ctrl-U clears, Enter applies, Esc quits (nothing applied)
  *[x]    (92)  claude   command telegram-summary
   [ ]    (61)  claude   skill   telegram-display
   [x]      48   claude   skill   telegram-group-send
   [x]      20   claude   mcp     telegram-example
 
  4 shown  |  ~68 tok  |  harness:all type:all sort:name  |  1 staged -- Enter to apply
- Tab tick  Enter apply  Esc cancel  s sort  h/t filter  ? keys  / type to filter
+ Tab tick  Enter apply  Esc cancel  s sort  h/t filter  p profile  ? keys  / type to filter
 ```
 
 The number column is the estimated startup tokens (chars / 4, about +-25 %);
@@ -216,8 +225,9 @@ shells out).
 | `s` | cycle sort: name, cost (biggest first) |
 | `h` | cycle the harness filter |
 | `t` | cycle the type filter |
+| `p` | profiles: stage a saved one, or save the live state (see below) |
 | `?` | show the key list |
-| `/` | start typing a filter |
+| `/` | start typing a filter: the top line shows `filter: /text█` and a hint (text, so it reads without colour) |
 | any other printable character | appends to the filter (terms are ANDed, case-insensitive) |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `↑` `↓` / `Ctrl-P` `Ctrl-N` | move; `PgUp`/`PgDn` jump a screen |
@@ -225,9 +235,17 @@ shells out).
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel — nothing is applied |
 
-`s`, `h`, `t` and `?` are commands while the filter is empty. Press `/` first
+`s`, `h`, `t`, `p` and `?` are commands while the filter is empty. Press `/` first
 to type a filter that begins with one of them (the example above is typed
 `/telegram`); once the filter is non-empty, every letter just types.
+
+`p` opens a prompt over the list of saved profiles: type a number or name (or
+`apply <name>`) and Enter to **stage** that profile's ticks (only the items it
+mentions; ones this machine lacks are skipped), then Enter in the picker applies
+them like any other tick -- so `ui --dry-run` previews a profile and a stray
+`p` changes nothing. `save <name>` writes the live state (not your staged ticks) as
+a profile, with the same name rules and project scope as `profile save`; it is
+off under `--dry-run`. Esc closes the prompt.
 
 The checkbox shows the **enabled** state: `[x]` is live, `[ ]` is parked. A
 `*` marks a row you changed.
@@ -241,8 +259,9 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
 Without curses, `ui` falls back to a numbered menu with the same staging and the
 same result: type row numbers (`1 3 5-7`) to tick or untick, `/text` to filter,
-`s` / `h` / `t` to sort and cycle the harness and type filters, `a` to apply, `q`
-(or end of input) to cancel.
+`s` / `h` / `t` to sort and cycle the harness and type filters (`/` alone clears the
+filter), `p` to list profiles, `p <number|name>` to stage one and `p save <name>`
+to save the live state, `a` to apply, `q` (or end of input) to cancel.
 
 ## What each harness supports
 
@@ -298,16 +317,19 @@ rather than guessing.
 ### Shared directories
 
 OpenCode may read skills from another harness's directory through
-`opencode.json` → `skills.paths` (absolute, `~/`-prefixed or relative-to-the-
-opencode-dir entries; a bare `~` or `$HOME/...` is not expanded, and
-`opencode.jsonc` is not read). Such a directory is **one** item, filed under
+`opencode.json` → `skills.paths` (absolute, `~`, `$HOME/...`
+and `${HOME}/...` entries; read from `opencode.json`, else `opencode.jsonc`;
+relative entries are skipped, since OpenCode resolves them against the session
+directory). OpenCode also always scans `~/.claude/skills` and `~/.agents/skills`,
+so claude's skills count as shared with it. Such a directory is **one** item, filed under
 its owner (the harness whose home really holds it): it is
 parked once, tracked once, and every row reports `shared_with`, the other
 harnesses it also affects. `status` prints `shared dir with: ...`.
 
 If the live directory carries `.synced-from-*` markers, a sync job may
-re-create what you parked; `status` warns about it. Park in the source harness
-instead. The warning is printed once per harness that views the directory.
+re-create what you parked; `status` and `disable` warn about it. Park in the
+source harness instead. The warning is printed once per real directory, naming
+every harness that views it.
 
 ## Companion files
 
@@ -429,8 +451,10 @@ bulk operations with `--dry-run`.
 Claude layout only: `--harness codex --project ...` exits `4`, as does a
 missing directory or one with neither `.claude/` nor `.mcp.json`. `$HOME`, its
 ancestors, the tool's own state dir and the harness homes are refused (exit
-`2`) -- that is user scope. `list` and `enable --all` run the same checks. `cost` and
-`ui` are user-scope only.
+`2`) -- that is user scope. `list`, `enable --all`, `cost` and `ui` run the same
+checks. `cost --project` prices that project's items only (no plugins), and
+`ui --project` stages and applies in project scope (its `p` key saves and applies
+project profiles).
 
 ```sh
 agent-toggle disable skill demo-skill --project .
@@ -453,18 +477,21 @@ agent-toggle enable --all --project .
   Restore with that command, or `git checkout`; do not commit the deletion if
   the repo is shared.
 - `.mcp.json` is edited directly (no `claude` CLI) and must be **strict JSON**:
-  a BOM, comments or trailing commas are refused. `disable` rewrites the file in
-  its detected layout (tabs or 2 spaces, LF or CRLF) and saves a verbatim backup
-  at `mcp-backups/<sha8>__claude__<name>.json` (mode `0600`; it holds the file
-  text, so it may hold auth headers). `enable` restores the file byte for byte
-  if it is unchanged since the disable, otherwise merges the entry back in and
-  reformats.
-- Moves across filesystems fall back to copy + delete (not atomic). An empty
-  `parked/<sha8>/*-disabled` dir may remain after `enable`; `doctor` ignores it.
+  a BOM, comments or trailing commas are refused. `disable` cuts only that
+  server's entry, leaving every other byte as it was, and saves a backup at
+  `mcp-backups/<sha8>__claude__<name>.json` (mode `0600`) holding only that entry
+  -- its own headers, never another server's. `enable` puts the entry's bytes
+  back into the current file (an unchanged file comes back byte for byte; after
+  other edits it goes after its old neighbour, else at the end, indented like the
+  file) and checks that nothing else changed.
+- A move across filesystems copies into a temp dir beside the target, renames it
+  into place, then deletes the source, so a killed run leaves either the source
+  intact or the target complete, and the next run settles it (see "Where state
+  lives"). `enable` removes the emptied `parked/<sha8>/*-disabled` and
+  `parked/<sha8>` dirs; a dir that still holds anything is kept.
 - `status` prints one `project <dir>` line per project holding parked items.
-  A project with only `.mcp.json` saves only its parked servers in
-  `profile save --project`; live ones are not listed (the inventory needs
-  `.claude/`).
+  A project with only `.mcp.json` has its live servers listed too in
+  `profile save --project`, next to its parked ones.
 
 ## Doctor
 
@@ -476,21 +503,21 @@ Read-only: no lock, no state write-back, no `claude` CLI call. For each
 installed harness it compares the live layout with the table row (expected
 dirs and config keys), then cross-checks `state.json` against disk (parked
 item present, origin dir present, backup present, project dir present, entry
-passes the same tamper checks `enable` runs, modes no looser than `0600` /
-`0700`). Rows (`action: doctor`) carry a status:
+passes the same tamper checks `enable` runs, companion files present and not also
+live, modes no looser than `0600` / `0700`). Rows (`action: doctor`) carry a status:
 
 | status | meaning |
 |---|---|
 | `ok` | matches |
 | `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
-| `unverified` | could not be parsed here (an existing codex/grok `config.toml` on Python 3.10, which has no `tomllib`) |
-| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one after `enable` is ignored) |
-| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
+| `unverified` | no version could be read, or the row has nothing to check |
+| `warn` | loose file modes; a parked item or companion file with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
+| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files (companions included) are gone or fail the tamper checks, a companion both live and parked, a flag re-enabled outside the tool, an op a killed run left in flight that needs you (`pending: stuck`, with the exact fix) |
 
 Only `error` makes the exit code `1`; each problem row names the command that
 fixes it. `--harness X` for a harness that is not installed is a `note` (exit
-`0`). Companion files are not checked.
+`0`).
 
 A harness item parked with no state entry also carries `orphan`, and its fix
 follows from it: `identical` (the live copy has the same content: delete the
@@ -508,14 +535,16 @@ were since seen on one real install each (openclaw 2026.7.1-2, opencode 2.0.22; 
 - `opencode.json`: `mcp.<name>.enabled`
 
 The edit changes one boolean token and nothing else, is verified after writing
-and rolled back on any mismatch (bytes and file mode). Files that are not
-strict JSON (JSONC / JSON5 -- comments, trailing commas) or that repeat a key are
-**refused**, never rewritten; a leading BOM is kept as is; a missing key is
-refused, never invented. An openclaw skill
+and rolled back on any mismatch (bytes and file mode). JSONC (`//` and `/* */`
+comments, trailing commas) is edited the same way: only the flag token changes,
+comments and commas are kept. JSON5 (unquoted keys, single quotes, hex) and files
+that repeat a key are **refused**, never rewritten; a leading BOM is kept as is; a
+missing key is refused, never invented. An openclaw skill
 uses the flag only when `skills.entries.<name>` already exists, otherwise its
-directory is moved. If a run is killed between the flag write and the state
-save, the flag is `false` with no state entry: `enable` then tells you to set it
-back by hand. Please report a real install that differs.
+directory is moved. The state entry (with the flag's previous value) is saved
+before the flag is written, so a run killed in between is settled by the next
+run, never guessed (see "Where state lives"). Please report a real install that
+differs.
 
 ## Safety checks
 
@@ -527,8 +556,9 @@ back by hand. Please report a real install that differs.
   invalid codex `config.toml` makes an MCP edit fail and roll back instead of
   being rewritten. A codex `config.toml` edit also fails (and is left as the other
   tool wrote it) if the file changed between read and write, and CRLF files keep their
-  line endings. On Python 3.10 (no `tomllib`) the TOML check is textual only: it checks
-  against the original text that only the one block changed, but cannot parse.
+  line endings. On Python 3.10 (no `tomllib`) the edit is parse-checked by a stdlib structural
+  validator (`agent_toggle/toml_check.py`, differentially tested against `tomllib`),
+  on top of the textual check that only the one block changed.
 - Profiles and project dirs are validated like command-line input.
 
 ## Where state lives
@@ -539,13 +569,27 @@ bookkeeping.
 
 | file | contents |
 |---|---|
-| `state.json` | current disabled list (schema v3; atomic write, mode `0600`) |
-| `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item) |
+| `state.json` | current disabled list (schema v3; atomic write, mode `0600`), saved before each flag write or dir move with the op in flight under an optional `pending` key, and after each MCP / plugin item |
+| `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item; the error says when its PID is gone, i.e. a killed run left it) |
 | `log.jsonl` | one line per operation (mode `0600`), see below |
 | `mcp-backups/` | `<harness>__<server>.json`, or `<sha8>__<harness>__<server>.json` for a project `.mcp.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
+
+A killed run loses at most the one item in flight. If that was a flag write or a
+dir move (with its companions), its `pending` record (the full entry, a flag's
+previous value included) lets the next `disable` / `enable` / `enable --all` /
+`undo` / ... finish it (it reached disk: recorded) or drop it (it did not), with
+a warning and a `recovered` log row (which `undo` does not reverse). `status` and
+`doctor` report it, with `agent-toggle enable ...` when the item ends up
+disabled. The one case left to you is a cross-filesystem move killed between its
+two renames: both copies are complete, and the report names the `diff -r` to
+check and the `rm -rf` that keeps either one. MCP and plugin items are saved
+per item (when the next one starts), without a `pending` record (a project `.mcp.json`
+edit has one): a kill inside that window
+leaves the change unrecorded (an MCP server's backup stays in `mcp-backups/`).
+A killed run also leaves its `lock`; the next run's error says so.
 
 Each `log.jsonl` row is `{ts, harness, type, name, action, result, batch,
 project, scope, detail}`. `batch` is one id per run (what `undo` reverses);
@@ -567,7 +611,9 @@ path exists as a *file*, so the `is_dir()` check has to come **before** the
 `mkdir` or it is unreachable.
 
 **2. Park dirs that are not gitignored get a warning.** Without it, every
-disable leaves dozens of deletion lines in `git status`.
+disable leaves dozens of deletion lines in `git status`. The warning is shown once
+per park dir, and only for a dir inside a git work tree (elsewhere `git status`
+cannot be dirtied and the `.gitignore` fix would not apply).
 
 ## Paths are resolved before comparison
 

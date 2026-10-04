@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import filecmp
 import json
-import re
+import os
 from pathlib import Path
 
 from . import fs, store
+from .backends.flag_json import jsonc_loads
 from .harnesses import Harness, harnesses
-from .mechanisms import _refusal, dir_view
+from .mechanisms import _refusal, dir_view, settle
 from .output import CliError, Result
 from .store import load_state
 
@@ -22,8 +23,6 @@ STYLE = {"ok": "green", "error": "red", "warn": "yellow",
          "absent": "dim", "note": "dim", "unverified": "dim"}
 TAG = {"ok": "v", "absent": "-", "note": "i", "unverified": "?", "warn": "!", "error": "x"}
 NEED = {"move": ("parked_at", "origin"), "remove_backup": ("backup",)}
-# strings (kept) | comments | trailing commas: what makes strict JSON into JSONC
-_JSONC = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
 
 
 def _row(out: Result, harness, type_, name, status: str, detail: str, **extra) -> None:
@@ -44,7 +43,7 @@ def _read_json(file: Path) -> tuple[object, str, str]:
         return json.loads(text), "ok", ""
     except ValueError as e:
         try:                                    # parses once comments/commas are gone: JSONC
-            json.loads(_JSONC.sub(lambda m: m[0] if m[0][0] == '"' else "", text))
+            jsonc_loads(text)
             return None, "jsonc", ""
         except ValueError:
             return None, "broken", f"is not valid JSON ({e})"
@@ -61,9 +60,9 @@ def _walk(data: object, path) -> tuple[bool, object]:
 def _file_row(out: Result, hname, type_, name, file: Path, kind: str, why: str, lead: str,
               jsonc_ok: bool = True) -> None:
     """The row for a JSON file that did not load as strict JSON."""
-    if kind == "jsonc" and jsonc_ok:     # JSONC/JSON5 is the harness's own format, not corruption
-        _row(out, hname, type_, name, "note", f"unsupported format: {file} has comments or trailing "
-             f"commas (JSONC/JSON5); agent-toggle will not edit it, doctor cannot check it")
+    if kind == "jsonc" and jsonc_ok:     # JSONC is the harness's own format, not corruption
+        _row(out, hname, type_, name, "note", f"{file} has comments or trailing commas (JSONC); "
+             f"agent-toggle edits its flags in place and keeps them, doctor does not check its keys")
     else:
         _row(out, hname, type_, name, "error", f"{lead}{file} " + (why or "is not valid JSON"))
 
@@ -104,23 +103,17 @@ def _check_layout(out: Result, h: Harness, table: dict) -> None:
     if h.mcp:
         spec, lead = h.mcp, "layout changed: "
         if spec.backend == "toml":
-            toml = fs._tomllib()
-            if toml is None:
-                state = "unverified" if spec.file.is_file() else "absent"
-                _row(out, h.name, "mcp", None, state, f"{spec.file}: no tomllib, not parsed"
-                     if state == "unverified" else f"{spec.file} does not exist (nothing to check)")
+            try:
+                data = fs.toml_parse(spec.file.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                _row(out, h.name, "mcp", None, "absent",
+                     f"{spec.file} does not exist (nothing to check)")
+            except (OSError, ValueError) as e:
+                _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} does not parse ({e})")
             else:
-                try:
-                    data = toml.loads(spec.file.read_text(encoding="utf-8"))
-                except FileNotFoundError:
+                if not _walk(data, spec.key_path)[0]:
                     _row(out, h.name, "mcp", None, "absent",
-                         f"{spec.file} does not exist (nothing to check)")
-                except (OSError, ValueError) as e:
-                    _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} does not parse ({e})")
-                else:
-                    if not _walk(data, spec.key_path)[0]:
-                        _row(out, h.name, "mcp", None, "absent",
-                             f"[{'.'.join(spec.key_path)}] not in {spec.file} (nothing to check)")
+                         f"[{'.'.join(spec.key_path)}] not in {spec.file} (nothing to check)")
         else:
             _json_at(out, h.name, "mcp", None, spec.file, spec.key_path, lead, jsonc_ok=False,
                      absent_ok=True)
@@ -255,7 +248,9 @@ def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel:
 
 def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> None:
     entries = state["disabled"].values()
-    tracked = {e["parked_at"] for e in entries
+    pending = [p["entry"] for p in state.get("pending", {}).values()
+               if isinstance(p, dict) and isinstance(p.get("entry"), dict)]
+    tracked = {e["parked_at"] for e in (*entries, *pending)
                if isinstance(e, dict) and isinstance(e.get("parked_at"), str)}
     seen: set[Path] = set()
     for h in table.values():
@@ -274,7 +269,7 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
     if only:
         return
     digests = set()
-    for k in state["disabled"]:
+    for k in (*state["disabled"], *state.get("pending", {})):
         try:
             digests.add(store.parse_key(k)[1])
         except ValueError:
@@ -303,6 +298,59 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
                  f"delete it yourself once the server is confirmed restored")
 
 
+def _recorded_companions(e) -> list[tuple[str, str]]:
+    """(origin, parked) pairs of one state entry; malformed records are `_check_entry`'s."""
+    comps = e.get("companions") if isinstance(e, dict) else None
+    return [(c["from"], c["to"]) for c in comps if isinstance(c, dict)
+            and isinstance(c.get("from"), str) and isinstance(c.get("to"), str)] \
+        if isinstance(comps, list) else []
+
+
+def _check_companions(out: Result, state: dict, only: str | None) -> None:
+    """Companion files (companions.py): every recorded one is parked and not also live,
+    and nothing under the companion dir lacks an entry. `pending` (write-ahead) entries
+    are the settle rows' business: not checked, but their files are not orphans either."""
+    tracked: set[str] = set()
+    for key, e in state["disabled"].items():
+        pairs = _recorded_companions(e)
+        tracked.update(to for _, to in pairs)
+        if key in state.get("pending", {}):      # a killed enable leaves the key in both
+            continue
+        if only and not (isinstance(e, dict) and only in (e.get("harness"), *(e.get("shared_with") or ()))):
+            continue
+        try:
+            ident = store.parse_key(key)
+            enable = enable_cmd(key, e)
+        except ValueError:                       # malformed key: _check_entry reports it
+            continue
+        ident = (ident[0], ident[2], ident[3])
+        for origin, to in pairs:
+            parked, live = Path(to).exists(), Path(origin).exists() or Path(origin).is_symlink()
+            if not parked:
+                _row(out, *ident, "error", f"companion parked file missing: {to}; fix: put it back "
+                     f"there and run `{enable}`, or move your copy to {origin} and remove the "
+                     f"entry from {fs.state_file()}")
+            elif live:
+                _row(out, *ident, "error", f"companion is both live ({origin}) and parked ({to}); "
+                     f"fix: compare them, delete the copy you do not want, then run `{enable}`")
+    for p in state.get("pending", {}).values():
+        e = p.get("entry") if isinstance(p, dict) else None
+        tracked.update(to for _, to in _recorded_companions(e))
+    root = fs.companion_dir()
+    if not root.is_dir():
+        return
+    for top in sorted(root.iterdir()):
+        if (only and not top.name.startswith(f"{only}_")) or top.name.startswith("."):
+            continue
+        for dirpath, _, files in os.walk(top):
+            for f in sorted(files):
+                p = Path(dirpath) / f
+                if not f.startswith(".") and str(p) not in tracked:
+                    _row(out, None, None, f, "warn", f"{p} is a parked companion with no state "
+                         f"entry; fix: move it back under its harness home by hand (the path "
+                         f"below {top} mirrors the one under that home), or delete it")
+
+
 def _check_modes(out: Result) -> None:
     for p in (fs.state_file(), *fs.backup_dir().glob("*.json")):
         if fs.too_open(p, 0o077):
@@ -329,7 +377,19 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
                                                                     *(e.get("shared_with") or ()))):
                 continue
             _check_entry(out, key, e, table)
+        live = bool(state.get("pending")) and fs.lock_held()
+        if live:
+            _row(out, None, None, None, "note", "another agent-toggle run is in progress (it "
+                 "holds the lock); its in-flight op is not checked")
+        for key, p in {} if live else state.get("pending", {}).items():   # a killed run's op
+            if harness and not (isinstance(p, dict) and isinstance(p.get("entry"), dict)
+                                and p["entry"].get("harness") == harness):
+                continue
+            verdict, msg = settle(state, key, dry_run=True)
+            _row(out, None, None, key, "error" if verdict == "stuck" else "warn", msg,
+                 pending=verdict)
         _check_orphans(out, state, table, harness)
+        _check_companions(out, state, harness)
     if not harness:
         _check_modes(out)
     errors = sum(r["status"] == "error" for r in out.rows)

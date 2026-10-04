@@ -98,6 +98,7 @@ class EnvelopeTest(CliCase):
 
     def test_warnings_travel_in_the_envelope(self) -> None:
         self.write("skills/demo-skill/SKILL.md")      # park dir is not gitignored here
+        self.git_init()
         _, env = self.run_json("disable", "skill", "demo-skill")
         self.assertTrue(any("NOT gitignored" in w for w in env["warnings"]))
 
@@ -242,6 +243,7 @@ class SpellingTest(CliCase):
         cases = (
             ["status"], ["list"], ["list", "skill"], ["ui"], ["ui", "--dry-run"],
             ["cost"], ["cost", "--type", "skill"], ["cost", "--harness", "codex"],
+            ["cost", "--project", str(proj)], ["ui", "--dry-run", "--project", str(proj)],
             ["disable", "skill", "demo-skill", "--dry-run"],
             ["enable", "skill", "demo-skill", "--dry-run"],
             ["install-shims", "--dry-run"],

@@ -4,7 +4,10 @@ No curses import here, so the menu fallback works where curses does not exist.
 """
 from __future__ import annotations
 
-from .. import cost
+from pathlib import Path
+
+from .. import cost, profiles
+from ..output import CliError, Result
 
 SORTS = ("name", "cost")
 
@@ -70,3 +73,77 @@ def cycle(options: tuple[str, ...] | list[str], current: str) -> str:
     """The option after `current` (wraps; an unknown current restarts at the first)."""
     return options[(options.index(current) + 1) % len(options)] if current in options \
         else options[0]
+
+
+# ------------------------------------------------------------ typing cue (G3)
+
+TYPING_HINT = "typing: Backspace edits, Ctrl-U clears, Enter applies, Esc quits (nothing applied)"
+
+
+def header_text(query: str, typing: bool) -> str:
+    """The picker's top line. A filter being typed is `/query` plus a cursor block and a
+    hint, so the mode shows without colour; idle, it says how to start one."""
+    if typing or query:
+        return f" filter: /{query}█   {TYPING_HINT}"
+    return " filter: (press / to type one, ? for keys)"
+
+
+# ------------------------------------------------------------ profile key (G9)
+
+PROFILE_USAGE = "profile: <number|name> or apply <number|name> or save <name>"
+
+
+def profile_names() -> list[str]:
+    return [p.stem for p in profiles.stored()]
+
+
+def profile_listing() -> str:
+    names = profile_names()
+    return ("profiles: " + "  ".join(f"{n}) {name}" for n, name in enumerate(names, 1))
+            if names else "no profiles saved (save one with: save <name>)")
+
+
+def profile_command(rows: list[Row], line: str, project: Path | None = None,
+                    dry_run: bool = False) -> str:
+    """Run one profile prompt line and return a one-line result (never raises, never prints).
+
+    `save <name>` writes what is live now through `profiles.cmd_save`; `[apply] <number|name>`
+    only STAGES the profile's ticks on `rows` -- Enter then applies them through the
+    same plan as any other tick, so `--dry-run` previews it. Names and scope are
+    validated by `profiles` exactly as `profile save|apply` does."""
+    line = line.strip()
+    if not line:
+        return ""
+    verb, _, arg = line.partition(" ")
+    if verb.lower() in ("save", "apply"):
+        verb, arg = verb.lower(), arg.strip()
+    else:
+        verb, arg = "apply", line
+    if not arg:
+        return PROFILE_USAGE
+    try:
+        if verb == "save":
+            if dry_run:
+                return "save is off under --dry-run (it writes a file)"
+            out = Result(json_mode=True)            # json_mode: nothing is printed over curses
+            profiles.cmd_save(arg, None, None, out, project)
+            warned = f"; WARNING: {out.warnings[0]}" if out.warnings else ""
+            return (f"saved profile {arg}: {out.rows[0]['items']} items as live now "
+                    f"(staged ticks not included){warned}")
+        names = profile_names()
+        name = names[int(arg) - 1] if arg.isascii() and arg.isdecimal() and 1 <= int(arg) <= len(names) else arg
+        by = {(r.harness, r.type, r.name): r for r in rows}
+        staged = same = skipped = 0
+        for it in profiles.load_scoped(name, project)["items"]:
+            r = by.get((it["harness"], it["type"], it["name"]))
+            if r is None:
+                skipped += 1
+                continue
+            r.staged = it["live"]
+            staged, same = staged + r.changed, same + (not r.changed)
+        return (f"profile {name}: {staged} staged, {same} already as profiled, "
+                f"{skipped} not on this machine" + (" -- Enter to apply" if staged else ""))
+    except CliError as e:                           # same messages as the CLI
+        return f"error: {e.msg}"
+    except (OSError, ValueError) as e:              # a name too long, a NUL or a lone surrogate
+        return f"error: {getattr(e, 'strerror', None) or e}"

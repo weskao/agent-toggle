@@ -185,6 +185,8 @@ def load_state(write_back: bool = True, check_entries: bool = True) -> dict:
     for key, entry in state.get("disabled", {}).items():
         if check_entries and not isinstance(entry, dict):
             die(f"state file malformed ({state_file}): entry {key!r} must be an object")
+    if not isinstance(state.get("pending", {}), dict):
+        die(f"state file malformed ({state_file}): pending must be an object")
     if upgrade(state) and write_back:
         save_state(state)
     return state
@@ -193,6 +195,45 @@ def load_state(write_back: bool = True, check_entries: bool = True) -> dict:
 def save_state(state: dict) -> None:
     fs.private_dir(fs.state_dir())
     fs.atomic_write(fs.state_file(), json.dumps(state, indent=2, ensure_ascii=False))
+
+
+# ----------------------------------------- write-ahead (G13, DESIGN s5.4 / s5.5)
+# `pending` is an optional top-level object {key: {"action", "entry"}}: absent in
+# old state files and whenever nothing is in flight, so schema v3 is unchanged.
+
+def begin(state: dict, key: str, action: str, entry: dict) -> None:
+    """Record the op about to touch disk and save it BEFORE touching disk.
+
+    `entry` is the full record (a flag's prior value `was` included), so the next
+    run can finish or undo the op without guessing (mechanisms.settle). This one
+    save also persists every op finished since the last one: a killed run loses
+    at most the op in flight, and that one stays recoverable."""
+    state.setdefault("pending", {})[key] = {"action": action, "entry": entry}
+    save_state(state)
+
+
+def end(state: dict, key: str) -> None:
+    """The op's outcome is in state["disabled"]: drop its pending record. In memory
+    only -- the next begin()/checkpoint() or apply_plan's final save persists it."""
+    pending = state.get("pending", {})
+    pending.pop(key, None)
+    if not pending:
+        state.pop("pending", None)
+
+
+def checkpoints(state: dict, dry_run: bool):
+    """tick() to call once per item in mechanisms without a write-ahead entry (mcp,
+    plugin): keeps the lock fresh and saves the items finished so far, only when
+    one changed state (a failed item writes nothing)."""
+    last = json.dumps(state)
+
+    def tick() -> None:
+        nonlocal last
+        fs.refresh_lock()
+        if not dry_run and (now := json.dumps(state)) != last:
+            save_state(state)
+            last = now
+    return tick
 
 
 # The log row schema, defined once; log() writes every field, in this order.

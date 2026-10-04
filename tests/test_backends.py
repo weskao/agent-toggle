@@ -1,17 +1,20 @@
 """MCP backends: TOML text slices and ~/.claude.json scope lookup."""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import io
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from base import SandboxCase
 from test_cli_surface import CliCase, snapshot
 
 from agent_toggle import fs, mechanisms
-from agent_toggle.backends import flag_json, mcp_json, mcp_toml
+from agent_toggle.backends import flag_json, mcp_json, mcp_toml, plugin_cli
 from agent_toggle.harnesses import harnesses
 from agent_toggle.output import Result
 
@@ -517,6 +520,29 @@ class FlagJsonTest(SandboxCase):
             with self.subTest(label):
                 self.flip(text, ptr)
 
+    def test_jsonc_keeps_comments_and_trailing_commas(self) -> None:
+        text = ('// top comment\n{\n'
+                '  "url": "https://example.com/a//b", /* "enabled": false */\n'
+                '  "note": "say \\"/* hi */\\" // not a comment",\n'
+                '  "mcp": {\n'
+                '    "example-mcp": {\n'
+                '      // "enabled": false,\n'
+                '      "enabled": /* inline */ true,\r\n'
+                '      "tools": ["a", "b",],\n'
+                '    },\n'
+                '  },\n'
+                '}\n')
+        self.flip(text, ("mcp", "example-mcp", "enabled"))
+        self.flip('\ufeff/* bom */{"mcp": {"example-mcp": {"enabled": false,},},}',
+                  ("mcp", "example-mcp", "enabled"), old="false")
+
+    def test_strip_jsonc_is_length_preserving(self) -> None:
+        text = '{"a": "//x", /* c\n */ "b": [1,], "c": ",}", // t\n}'
+        masked = flag_json.strip_jsonc(text)
+        self.assertEqual(len(masked), len(text))
+        self.assertEqual(masked.count("\n"), text.count("\n"))
+        self.assertEqual(flag_json.jsonc_loads(text), {"a": "//x", "b": [1], "c": ",}"})
+
     def test_false_flag_turns_true(self) -> None:
         self.flip('{"mcp": {"example-mcp": {"enabled": false}}}',
                   ("mcp", "example-mcp", "enabled"), old="false")
@@ -543,12 +569,16 @@ class FlagJsonTest(SandboxCase):
                                       ' "enabled": false}}}', "duplicate"),
             "duplicate elsewhere": ('{"x": 1, "x": 2, "mcp": {"example-mcp":'
                                     ' {"enabled": true}}}', "duplicate"),
-            "jsonc comment": ('{\n  // comment\n  "mcp": {"example-mcp": {"enabled": true}}\n}',
-                              "not strict JSON"),
-            "jsonc trailing comma": ('{"mcp": {"example-mcp": {"enabled": true,}}}',
-                                     "not strict JSON"),
+            "jsonc duplicate": ('{\n  // c\n  "mcp": {"example-mcp": {"enabled": true,'
+                                ' /* c */ "enabled": false,},}', "duplicate"),
             "json5 unquoted key": ('{mcp: {"example-mcp": {"enabled": true}}}',
-                                   "not strict JSON"),
+                                   "JSON5 is not supported"),
+            "json5 single quotes": ("{'mcp': {\"example-mcp\": {\"enabled\": true}}}",
+                                    "JSON5 is not supported"),
+            "json5 hex": ('{"n": 0x1F, "mcp": {"example-mcp": {"enabled": true}}}',
+                          "JSON5 is not supported"),
+            "unterminated block comment": ('{/* "mcp": {"example-mcp": {"enabled": true}}}',
+                                           "not strict JSON"),
             "NaN": ('{"n": NaN, "mcp": {"example-mcp": {"enabled": true}}}',
                     "not strict JSON"),
             "top level not an object": ('[true]', "not found"),
@@ -584,3 +614,48 @@ class FlagJsonTest(SandboxCase):
             flag_json.set_flag(p, ("mcp", "example-mcp", "enabled"), False)
         self.assertEqual(p.read_bytes(), before)
         self.assertEqual(len(calls), 2)
+
+
+class CliTimeoutTest(SandboxCase):
+    """run_cli: per-call timeout, AGENT_TOGGLE_CLI_TIMEOUT override, no real claude."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.seen: list[float] = []
+        self.addCleanup(plugin_cli.__dict__.__setitem__, "runner", plugin_cli.runner)
+        plugin_cli.runner = lambda cmd, **kw: (self.seen.append(kw["timeout"]),
+                                               subprocess.CompletedProcess(cmd, 0, "ok", ""))[1]
+        self.addCleanup(os.environ.pop, plugin_cli.TIMEOUT_ENV, None)
+        os.environ.pop(plugin_cli.TIMEOUT_ENV, None)
+
+    def test_defaults_are_per_call(self) -> None:
+        plugin_cli.run_cli("bin", ["plugin", "enable", "x"])
+        plugin_cli.run_cli("bin", ["plugin", "list"], timeout=plugin_cli.READ_TIMEOUT)
+        self.assertEqual(self.seen, [plugin_cli.MUTATE_TIMEOUT, plugin_cli.READ_TIMEOUT])
+        self.assertLess(plugin_cli.READ_TIMEOUT, plugin_cli.MUTATE_TIMEOUT)
+
+    def test_env_overrides_every_call(self) -> None:
+        os.environ[plugin_cli.TIMEOUT_ENV] = "7.5"
+        plugin_cli.run_cli("bin", ["plugin", "enable", "x"])
+        plugin_cli.run_cli("bin", ["plugin", "list"], timeout=30)
+        self.assertEqual(self.seen, [7.5, 7.5])
+
+    def test_invalid_env_is_ignored_with_a_warning(self) -> None:
+        for bad in ("abc", "0", "-5", "nan", "inf", ""):
+            os.environ[plugin_cli.TIMEOUT_ENV] = bad
+            self.seen.clear()
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                ok, _ = plugin_cli.run_cli("bin", ["plugin", "list"], timeout=30)
+            self.assertEqual((ok, self.seen), (True, [30]), bad)
+            self.assertEqual(bool(err.getvalue()), bad != "", bad)   # empty = unset, silent
+            if bad:
+                self.assertIn(plugin_cli.TIMEOUT_ENV, err.getvalue())
+
+    def test_timeout_message_names_the_env_var(self) -> None:
+        def boom(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        plugin_cli.runner = boom
+        ok, msg = plugin_cli.run_cli("bin", ["plugin", "list"], timeout=30)
+        self.assertFalse(ok)
+        self.assertIn("30s", msg)
+        self.assertIn(plugin_cli.TIMEOUT_ENV, msg)
