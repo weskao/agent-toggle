@@ -26,6 +26,10 @@ def _can_symlink() -> bool:
 
 CAN_SYMLINK = _can_symlink()
 
+# Never hit the network for an update check, in-process or in a subprocess that
+# inherits this environment (SandboxCase.setUp only touches HOME/TERM/..., so it stays).
+os.environ["AGENT_TOGGLE_UPDATE_CHECK"] = "0"
+
 
 class SandboxCase(unittest.TestCase):
     """A throwaway HOME / USERPROFILE with a fake ~/.claude tree.

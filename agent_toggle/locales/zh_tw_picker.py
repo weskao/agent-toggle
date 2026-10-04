@@ -1,0 +1,77 @@
+"""zh-TW catalogue -- curses picker and numbered fallback.
+
+Msgids are unique across all area modules (i18n refuses to import otherwise).
+"""
+from __future__ import annotations
+
+CATALOG: dict[str, str] = {
+    # type groups (model.type_label)
+    "picker.all": "全部",
+    "picker.type.skill": "技能",
+    "picker.type.agent": "代理",
+    "picker.type.command": "指令",
+    "picker.type.rule": "規則",
+    "picker.type.plugin": "外掛",
+    "picker.type.mcp": "MCP",
+    "picker.sort.name": "名稱",
+    "picker.sort.cost": "成本",
+    # title bar, filter line, status line
+    "picker.summary.resources": "%s 個項目",
+    "picker.summary.live": "啟用約 %s tok",
+    "picker.summary.staged": "已暫存 %s 個（%s tok）",
+    "picker.filter.placeholder": "篩選",
+    "picker.filter.type": "類型：",
+    "picker.filter.sort": "排序：",
+    "picker.empty": "沒有符合的項目 -- Ctrl-U 清除篩選，Left/Right 換 harness，t 換類型",
+    "picker.status.shown": "顯示 %s / %s",
+    "picker.status.dry_run": "試跑：Enter 只顯示計畫",
+    "picker.badge.shared": "+共用",
+    # detail pane
+    "picker.state.live": "啟用",
+    "picker.state.parked": "停用",
+    "picker.d.harness": "harness",
+    "picker.d.type": "類型",
+    "picker.d.state": "狀態",
+    "picker.d.staged": "已暫存",
+    "picker.d.path": "路徑",
+    "picker.d.cost": "成本",
+    "picker.d.cost_live": "工作階段開始時約 %s tok",
+    "picker.d.cost_parked": "目前 0；還原後約 %s tok",
+    "picker.d.saves": "停用可省",
+    "picker.d.shared": "共用於",
+    "picker.d.since": "停用時間",
+    "picker.d.mechanism": "機制",
+    # key chips
+    "picker.chip.toggle": "切換",
+    "picker.chip.apply": "套用",
+    "picker.chip.cancel": "取消",
+    "picker.chip.help": "說明",
+    "picker.chip.filter": "篩選",
+    "picker.chip.harness": "harness",
+    "picker.chip.type": "類型",
+    "picker.chip.sort": "排序",
+    "picker.chip.profile": "設定檔",
+    "picker.chip.all": "全部切換",
+    "picker.chip.edit": "編輯",
+    "picker.chip.clear": "清除篩選",
+    "picker.chip.move": "移動",
+    # help overlay
+    "picker.help.title": "按鍵",
+    "picker.help.move": "移動（也可用 Ctrl-P / Ctrl-N）",
+    "picker.help.toggle": "切換此列（啟用 <-> 停用），並移到下一列",
+    "picker.help.apply": "套用暫存的變更（--dry-run：只看計畫）",
+    "picker.help.cancel": "取消；不做任何變更",
+    "picker.help.filter": "輸入篩選；直接打其他字母也會開始篩選",
+    "picker.help.edit": "編輯 / 清除篩選",
+    "picker.help.harness": "harness 分頁（0 = 全部）",
+    "picker.help.type": "循環切換類型篩選",
+    "picker.help.sort": "循環切換排序：名稱 / 成本（由大到小）",
+    "picker.help.profile": "設定檔：暫存一個，或儲存目前啟用的狀態",
+    "picker.help.all": "切換所有可見的列",
+    "picker.help.help": "顯示此說明",
+    "picker.help.cost": "成本 = 工作階段開始時載入的約略 token 數（字元數/4）。",
+    "picker.help.close": "按任意鍵關閉說明",
+    # profile prompt
+    "picker.profile.hint": "編號或名稱 = 暫存該設定檔；`save <名稱>` = 儲存目前啟用的狀態",
+    "picker.profile.keys": "Enter 執行，Esc 取消",
+}

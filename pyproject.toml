@@ -42,7 +42,7 @@ telegram = ["telegram-kit>=0.2.2,<0.3"]
 agent-toggle = "agent_toggle.cli:main"
 
 [tool.setuptools]
-packages = ["agent_toggle", "agent_toggle.backends", "agent_toggle.ui"]
+packages = ["agent_toggle", "agent_toggle.backends", "agent_toggle.locales", "agent_toggle.ui"]
 
 [tool.setuptools.package-data]
 agent_toggle = ["shims/*.tmpl"]

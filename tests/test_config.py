@@ -4,6 +4,7 @@ telegram-kit is an optional extra, so every test runs against FakeKit: no keycha
 """
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
@@ -12,7 +13,8 @@ from unittest import mock
 
 from test_cli_surface import CliCase
 
-from agent_toggle import config
+from agent_toggle import config, settings
+from agent_toggle.ui import config_menu
 
 
 class FakeStore:
@@ -76,8 +78,12 @@ class ConfigTest(CliCase):
         return subprocess.CompletedProcess(args, 0, out, "")
 
     def interactive(self, chat_id: str) -> tuple[int, str]:
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input", return_value=chat_id):
+        """The numbered settings list (stdout is not a TTY): pick the token row (read hidden),
+        then the chat id row and type *chat_id*; EOF quits."""
+        rows = [r.label() for r in config_menu.ITEMS]
+        token = rows.index("Telegram bot token") + 1
+        chat = rows.index("Telegram chat ID") + 1
+        with mock.patch.object(sys, "stdin", io.StringIO(f"{token}\n{chat}\n{chat_id}\n")):
             rc, out, _ = self.run_cli("config")
         return rc, out
 
@@ -87,23 +93,47 @@ class ConfigTest(CliCase):
         self.assertEqual(FakeStore.items["telegram_bot_token"], "123456:ABCDEFtoken")
         self.assertEqual(json.loads(config.config_file().read_text(encoding="utf-8")),
                          {"telegram_chat_id": "-100123"})
-        self.assertIn("********oken", out)
         self.assertNotIn("ABCDEF", out)
-        self.assertEqual(self.run_json("config")[1]["results"][1]["detail"], "-100123")
+        env = self.run_json("config")[1]
+        self.assertIn("********oken", env["results"][0]["detail"])
+        self.assertEqual(env["results"][1]["detail"], "-100123")
+        self.assertNotIn("ABCDEF", json.dumps(env))
 
     def test_enter_keeps_and_dash_clears(self) -> None:
         self.interactive("-100123")
         self.kit.hidden = ""
         self.interactive("")
         self.assertEqual(FakeStore.items["telegram_bot_token"], "123456:ABCDEFtoken")
+        self.assertEqual(load_chat(), {"telegram_chat_id": "-100123"})
         self.kit.hidden = "-"
         self.interactive("-")
         self.assertEqual(FakeStore.items, {})
         self.assertEqual(load_chat(), {})
 
     def test_bad_chat_id_is_refused(self) -> None:
-        self.assertEqual(self.interactive("not a chat")[0], 2)
+        rc, out = self.interactive("not a chat")
+        self.assertEqual(rc, 0)                 # a menu message, not a fatal exit
+        self.assertIn("not a chat ID: not a chat", out)
         self.assertEqual(load_chat(), {})
+
+    def test_an_invalid_chat_id_in_the_file_is_never_shown(self) -> None:
+        settings.config_file().parent.mkdir(parents=True, exist_ok=True)
+        settings.config_file().write_text(json.dumps({"telegram_chat_id": "123456:PASTEDsecret"}),
+                                          encoding="utf-8")
+        rc, out, err = self.run_cli("config", "--json")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["results"][1]["detail"], "not set")
+        self.assertNotIn("PASTED", out + err)
+
+    def test_json_lists_every_setting_with_its_source(self) -> None:
+        rc, env = self.run_json("config")
+        self.assertEqual(rc, 0)
+        names = [r["name"] for r in env["results"] if r["type"] == "setting"]
+        self.assertEqual(names, [k for k in settings.DEFAULTS if k != config.CHAT_KEY])
+        sources = {r["name"]: r["source"] for r in env["results"][2:]}
+        # tests/base.py sets AGENT_TOGGLE_UPDATE_CHECK=0 for the whole run
+        self.assertEqual(sources.pop("update_check"), "env")
+        self.assertEqual(set(sources.values()), {"default"})
 
     def test_test_message_needs_both_values_and_reports_delivery(self) -> None:
         self.assertEqual(self.run_cli("config", "test")[0], 2)
@@ -125,12 +155,15 @@ class ConfigTest(CliCase):
         self.assertEqual(self.run_cli("config", "sync-ci", "--dry-run", "--repo", "o/r")[0], 0)
         self.assertEqual(self.gh_calls, [])
 
-    def test_missing_extra_is_a_clear_exit_4(self) -> None:
+    def test_missing_extra_is_a_clear_exit_4_for_test_and_sync_ci_only(self) -> None:
         mock.patch.stopall()
         with mock.patch.dict(sys.modules, {"telegram_kit": None}):
-            rc, _, err = self.run_cli("config")
-        self.assertEqual(rc, 4)
-        self.assertIn("agent-toggle[telegram]", err)
+            for action in ("test", "sync-ci"):
+                rc, _, err = self.run_cli("config", action)
+                self.assertEqual(rc, 4)
+                self.assertIn("agent-toggle[telegram]", err)
+            with mock.patch.object(sys, "stdin", io.StringIO("")):   # never the real TTY
+                self.assertEqual(self.run_cli("config")[0], 0)  # the menu degrades instead
 
 
 def load_chat() -> dict:

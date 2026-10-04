@@ -7,9 +7,9 @@ import unittest
 from unittest import mock
 
 from base import CAN_SYMLINK, SandboxCase
+from test_conformance import FIXTURES
 
 from agent_toggle import fs, toml_check
-from test_conformance import FIXTURES
 
 
 class SafeMoveTest(SandboxCase):
