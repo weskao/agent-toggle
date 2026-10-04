@@ -605,7 +605,10 @@ runs this pattern in production:
 - `aliases_from` on the harness record is metadata only (§5.2).
 - Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
   `.headers` sub-table) was confirmed on a live install; OpenCode's
-  no-`skills.paths` default is still assumed to be its own `skills/` (§11 q2).
+  no-`skills.paths` default is its own `skills/` (§11 q2, answered on opencode
+  2.0.22). `opencode_skill_dirs()` still misses `skill/`, `~/.claude/skills`,
+  `~/.agents/skills`, the bare-array `skills` form, and resolves a relative
+  `skills.paths` entry against the config dir (OpenCode uses the session cwd).
 - `claude.ai` connectors are toggled through each *existing* project's
   `disabledMcpServers`; a project opened for the first time later starts without
   the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
@@ -686,7 +689,16 @@ Known gaps added by phase 2:
 1. Agy skill/command layout — not present on the surveyed machine.
 2. Whether OpenCode's `skills.paths` default (when unset) is its own
    `~/.config/opencode/skills` — determines the fixture for a non-aliased
-   install.
+   install. Answered on opencode 2.0.22 (probed in a throwaway HOME / `XDG_*`
+   with a `skills`-less `opencode.json`, via `opencode serve` + `opencode api
+   skill.list`; confirmed against the bundled source): yes, `<config>/skills/`
+   is scanned, and so is `<config>/skill/` (singular), plus `~/.claude/skills`
+   and `~/.agents/skills` (global Claude/agents compatibility dirs). `skills.paths`
+   is additive — the own `skills/` dir stays scanned when it is set — and the
+   bare-array form `"skills": ["dir"]` is accepted. A relative `skills.paths`
+   entry resolves against the session's working directory, not the config dir;
+   `~/` is expanded against home. The `~/.config/opencode/skills` literal is only
+   the default when `XDG_CONFIG_HOME` is unset. Code gaps (T4): see §8.2.
 3. Copilot `installed-plugins/` entry format once a plugin is installed
    (directory was empty on the surveyed machine).
 4. Windows harness home paths per harness — each harness documents its own;

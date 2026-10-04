@@ -106,7 +106,7 @@ Checked against the code on 2026-10-03; every §6.1 row is done.
 
 ## Needs a real install to settle (`docs/DESIGN.md` §11)
 
-- [ ] OpenCode `skills.paths` default when unset (q2)
+- [x] OpenCode `skills.paths` default when unset (q2)
 - [ ] copilot `installed-plugins/` entry format once a plugin is installed (q3)
 - [x] openclaw flag shape `skills.entries.<name>.enabled` /
       `plugins.entries.<name>.enabled`, and whether `openclaw.json` is strict JSON (q5)
