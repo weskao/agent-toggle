@@ -1,6 +1,8 @@
-"""Picker data gathering and filtering (no curses screen is opened).
+"""Picker: data gathering and filtering (`ui.model`, no curses), then the curses screen
+driven through a fake window that keeps the painted text.
 
-The data tests use `ui.model`, so they run where curses does not exist (Windows)."""
+The data tests use `ui.model`, so they run where curses does not exist (Windows). The
+screen tests assert on what is RENDERED (text per screen row), never on call counts."""
 from __future__ import annotations
 
 import json
@@ -9,10 +11,10 @@ from unittest import mock
 
 from base import SandboxCase
 
-from agent_toggle import fs, mechanisms, profiles
+from agent_toggle import fs, i18n, mechanisms, profiles, settings
 from agent_toggle.harnesses import build
 from agent_toggle.output import CliError, Result
-from agent_toggle.ui import model
+from agent_toggle.ui import model, theme
 
 try:
     from agent_toggle.ui import picker
@@ -64,6 +66,18 @@ class PickerTest(SandboxCase):
         # a parked plugin the CLI cannot list still gets a (unticked) row
         self.assertIs(by_name["x"].enabled, False)
 
+    def test_collect_fills_the_detail_facts(self) -> None:
+        self.write("skills/live-one/SKILL.md")
+        state = {"version": 3, "disabled": {"claude:skill:parked-one": {
+            "harness": "claude", "type": "skill", "name": "parked-one", "mechanism": "move",
+            "at": "2026-09-19T10:00:00+0000", "parked_at": "/parked/parked-one"}}}
+        by = {r.name: r for r in model.collect(state, {"claude": build(self.tmp)["claude"]})}
+        live, parked = by["live-one"], by["parked-one"]
+        self.assertEqual(model.short_path(live.path), "~/.claude/skills/live-one")
+        self.assertEqual((live.since, live.mechanism), ("", "move"))
+        self.assertEqual((parked.path, parked.since, parked.mechanism),
+                         ("/parked/parked-one", "2026-09-19T10:00:00+0000", "move"))
+
     def test_match_filters_on_all_terms(self) -> None:
         rows = [model.Row("claude", "command", "orch:batch", True),
                 model.Row("codex", "skill", "orch-helper", True),
@@ -105,72 +119,416 @@ class PickerTest(SandboxCase):
         # type chip and text query combine
         self.assertEqual([r.name for r in model.visible(rows, "claude", type_="skill")], ["a", "d"])
 
+    def test_grouped_keeps_the_type_order_and_the_sort_inside(self) -> None:
+        rows = [model.Row("claude", "mcp", "m", True), model.Row("claude", "skill", "b", True),
+                model.Row("claude", "agent", "c", True), model.Row("claude", "skill", "a", True)]
+        self.assertEqual([(ty, [r.name for r in g]) for ty, g in model.grouped(rows)],
+                         [("skill", ["b", "a"]), ("agent", ["c"]), ("mcp", ["m"])])
+
+    def test_prefs_hide_switched_off_harnesses_and_seed_the_start_view(self) -> None:
+        rows = [model.Row("claude", "skill", "a", True),
+                model.Row("codex", "skill", "b", True),
+                model.Row("codex", "agent", "c", True, shared=("claude",))]
+        self.assertEqual(model.prefs(rows), (rows, ["claude", "codex"], "all", "all", "name"))
+        settings.set("harness.codex", False)
+        settings.set("picker_sort", "cost")
+        settings.set("picker_type", "agent")
+        kept, names, harness, type_, sort = model.prefs(rows)
+        # a codex-only row is hidden; one shared with an enabled harness stays
+        self.assertEqual([r.name for r in kept], ["a", "c"])
+        self.assertEqual((names, harness, type_, sort), (["claude"], "all", "agent", "cost"))
+
     def test_cycle_wraps_and_recovers(self) -> None:
         self.assertEqual(model.cycle(("name", "cost"), "name"), "cost")
         self.assertEqual(model.cycle(("name", "cost"), "cost"), "name")
         self.assertEqual(model.cycle(["all", "x"], "gone"), "all")
 
-    def test_cost_cell_shows_saving_for_parked(self) -> None:
+    def test_cost_cell_and_token_format(self) -> None:
         self.assertEqual(model.Row("claude", "skill", "a", True, 12).cost_cell, "12")
         self.assertEqual(model.Row("claude", "skill", "a", False, 0, 7).cost_cell, "(7)")
+        self.assertEqual([model.fmt_tokens(n) for n in (0, 999, 1000, 12345)],
+                         ["0", "999", "1.0k", "12.3k"])
 
 
 class FakeWin:
-    """Just enough of a curses window: records addnstr calls, replays queued keys."""
+    """A curses window stand-in: keeps the painted screen as text (one string per row,
+    trailing blanks stripped) and replays queued keys. A `(h, w)` tuple in the key queue
+    resizes the window and returns KEY_RESIZE; an exception instance is raised."""
 
-    def __init__(self, keys=(), size=(8, 60)):
-        self.size, self.keys, self.calls = size, list(keys), []
+    def __init__(self, keys=(), size=(24, 80)):
+        self.size, self.keys, self.frames = size, list(keys), []
+        self.erase()
 
     def getmaxyx(self):
         return self.size
 
-    def addnstr(self, y, x, text, n, attr=0):
-        self.calls.append((y, x, text[:n], attr))
+    def erase(self):
+        h, w = self.size
+        self.grid = [[" "] * w for _ in range(h)]
+        self.attrs: dict[tuple[int, int], int] = {}
+
+    def addstr(self, y, x, text, attr=0):
+        h, w = self.size
+        if not 0 <= y < h or x < 0 or x + len(text) > w:
+            raise picker.curses.error("out of window")
+        for i, ch in enumerate(text):
+            self.grid[y][x + i] = ch
+            self.attrs[y, x + i] = attr
+
+    def refresh(self):
+        self.frames.append(["".join(r).rstrip() for r in self.grid])
+
+    def keypad(self, flag):
+        pass
 
     def get_wch(self):
-        return self.keys.pop(0)
+        key = self.keys.pop(0)
+        if isinstance(key, tuple):
+            self.size = key
+            return picker.curses.KEY_RESIZE
+        if isinstance(key, BaseException):
+            raise key
+        return key
 
-    def erase(self): pass
-    def noutrefresh(self): pass
-    def refresh(self): pass
-    def keypad(self, flag): pass
+    @property
+    def screen(self) -> list[str]:
+        return self.frames[-1]
+
+    def text(self, frame: int = -1) -> str:
+        return "\n".join(self.frames[frame])
+
+    def find(self, needle: str) -> int:
+        """The screen row (last frame) holding `needle`."""
+        return next(y for y, line in enumerate(self.screen) if needle in line)
 
 
-class TypingCueTest(unittest.TestCase):
-    """G3: typing mode is visible as text (a `/` prefix, a cursor block, a hint), never as
-    colour alone."""
+def demo_rows() -> list:
+    """collect() order (harness, type, name). On screen, grouped by type:
+    Skills alpha beta zeta, Agents gamma, Commands delta."""
+    return [model.Row("claude", "agent", "gamma", True, 50, shared=("codex",)),
+            model.Row("claude", "skill", "alpha", True, 1200, path="/x/skills/alpha"),
+            model.Row("claude", "skill", "beta", False, 0, 300, path="/x/skills-disabled/beta",
+                      since="2026-09-19T10:00:00+0000", mechanism="move"),
+            model.Row("claude", "skill", "zeta", True, 5000),
+            model.Row("codex", "command", "delta", True, 10)]
 
-    def test_header_text_idle_and_typing(self) -> None:
-        self.assertIn("press / to type", model.header_text("", False))
-        self.assertNotIn("\u2588", model.header_text("", False))
-        empty = model.header_text("", True)               # `/` pressed, nothing typed yet
-        self.assertIn("filter: /\u2588", empty)
-        self.assertIn("Esc quits", empty)
-        self.assertIn("filter: /abc\u2588", model.header_text("abc", True))
-        # a filter typed without `/` (a non-command first letter) reads the same
-        self.assertIn("filter: /abc\u2588", model.header_text("abc", False))
 
-    @unittest.skipIf(picker is None, "curses unavailable")
-    def test_draw_shows_the_cue_in_monochrome(self) -> None:
-        with mock.patch.object(picker.curses, "doupdate", create=True):
-            for typing, query in ((False, ""), (True, ""), (True, "tel")):
-                win = FakeWin()
-                picker.draw(win, [], query, 0, 0, 0, "chips", color=False, typing=typing)
-                y, x, text, attr = win.calls[0]
-                self.assertEqual(text.rstrip(), model.header_text(query, typing)[:59].rstrip())
-                self.assertEqual(bool(attr & picker.curses.A_REVERSE), typing or bool(query))
+@unittest.skipIf(picker is None, "curses unavailable")
+class ScreenCase(SandboxCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.rows = demo_rows()
 
-    @unittest.skipIf(picker is None, "curses unavailable")
-    def test_loop_slash_turns_the_cue_on_and_backspace_off(self) -> None:
-        rows = [picker.Row("claude", "skill", "a", True)]
-        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
-                                 create=True):
-            win = FakeWin(["/", "x", "\x7f", "\x1b"])
-            self.assertIsNone(picker.loop(win, rows))
-        headers = [c[2].strip() for c in win.calls if c[0] == 0]
-        self.assertEqual([h.split("   ")[0] for h in headers],
-                         ["filter: (press / to type one, ? for keys)", "filter: /\u2588",
-                          "filter: /x\u2588", "filter: (press / to type one, ? for keys)"])
+    def run_keys(self, keys, size=(24, 80), color=False, glyphs=theme.UNICODE, rows=None,
+                 dry_run=False):
+        win = FakeWin(keys, size)
+        out = picker.loop(win, self.rows if rows is None else rows, color=color,
+                          dry_run=dry_run, glyphs=glyphs)
+        return out, win
+
+    def names(self, out) -> list[tuple[str, bool]]:
+        return [(r.name, r.staged) for r in out]
+
+
+class KeysTest(ScreenCase):
+    def test_space_and_tab_toggle_and_advance(self) -> None:
+        out, win = self.run_keys([" ", "\t", "\n"])
+        self.assertEqual(self.names(out), [("alpha", False), ("beta", True)])
+        # the staged rows carry a - / + marker and their glyph flips
+        line = win.screen[win.find("alpha")]
+        self.assertIn("○ - alpha", line)
+        self.assertIn("● + beta", win.screen[win.find("beta")])
+
+    def test_toggling_twice_unstages(self) -> None:
+        out, _ = self.run_keys([" ", "\x10", " ", "\n"])          # Ctrl-P back up
+        self.assertEqual(out, [])
+
+    def test_enter_applies_and_esc_or_ctrl_c_cancel(self) -> None:
+        self.assertEqual(self.run_keys(["\n"])[0], [])
+        self.assertIsNone(self.run_keys([" ", "\x1b"])[0])
+        self.assertIsNone(self.run_keys([" ", "\x03"])[0])
+        self.assertIsNone(self.run_keys([" ", KeyboardInterrupt()])[0])
+
+    def test_moving(self) -> None:
+        C = picker.curses
+        cases = {(C.KEY_END,): "delta", (C.KEY_END, C.KEY_HOME): "alpha",
+                 (C.KEY_DOWN, C.KEY_DOWN): "zeta", ("\x0e", C.KEY_UP): "alpha",
+                 (C.KEY_NPAGE,): "delta", (C.KEY_NPAGE, C.KEY_PPAGE): "alpha"}
+        for keys, name in cases.items():
+            self.rows = demo_rows()
+            out, _ = self.run_keys([*keys, " ", "\n"])
+            self.assertEqual([r.name for r in out], [name], keys)
+
+    def test_typing_filters_and_shows_the_input_with_a_cursor(self) -> None:
+        out, win = self.run_keys(["/", "g", "a", "\t", "\n"])
+        self.assertEqual(self.names(out), [("gamma", False)])
+        typed = win.frames[3]                                 # after `/`, `g`, `a`
+        self.assertIn("/ ga█", typed[2])
+        self.assertIn("gamma", "\n".join(typed))
+        self.assertNotIn("alpha", "\n".join(typed[3:-2]))
+        # idle, the filter line is a placeholder, not an input
+        self.assertIn("/ filter", win.frames[0][2])
+        self.assertNotIn("█", win.frames[0][2])
+
+    def test_command_keys_only_act_with_no_filter(self) -> None:
+        # with no filter, `s` sorts ...
+        _, win = self.run_keys(["s", "\x1b"])
+        self.assertIn("sort: cost", win.screen[2])
+        # ... after `/` it is a letter, and so is every letter after an implicit start
+        _, win = self.run_keys(["/", "s", "\x1b"])
+        self.assertIn("/ s█", win.screen[2])
+        self.assertIn("sort: name", win.screen[2])
+        _, win = self.run_keys(["x", "s", "\x1b"])
+        self.assertIn("/ xs█", win.screen[2])
+        # Space types while filtering (it separates AND terms) instead of toggling
+        out, _ = self.run_keys(["/", "l", " ", "\n"])
+        self.assertEqual(out, [])
+        # Backspace emptying the filter returns to command mode
+        _, win = self.run_keys(["/", "x", "\x7f", "s", "\x1b"])
+        self.assertIn("sort: cost", win.screen[2])
+        self.assertIn("/ filter", win.screen[2])
+        # Ctrl-U clears a filter outright
+        _, win = self.run_keys(["/", "z", "z", "\x15", "\x1b"])
+        self.assertIn("alpha", win.text())
+
+    def test_tabs_switch_with_arrows_and_digits(self) -> None:
+        C = picker.curses
+        _, win = self.run_keys(["\x1b"])
+        # All counts everything; codex counts its own row and the one shared with it
+        self.assertIn(" All 5 ", win.screen[1])
+        self.assertIn(" claude 4 ", win.screen[1])
+        self.assertTrue(win.screen[1].endswith(" codex 2"))
+        for keys, shown, hidden in (([C.KEY_RIGHT], "zeta", "delta"),
+                                    (["2"], "delta", "zeta"),
+                                    ([C.KEY_LEFT], "delta", "zeta"),          # wraps to codex
+                                    (["2", "0"], "delta", None),
+                                    (["h", "h"], "gamma", "alpha")):
+            _, win = self.run_keys([*keys, "\x1b"])
+            self.assertIn(shown, win.text(), keys)
+            if hidden:
+                self.assertNotIn(hidden, win.text(), keys)
+        # a digit with no such tab is ignored
+        _, win = self.run_keys(["9", "\x1b"])
+        self.assertIn("delta", win.text())
+        self.assertIn("zeta", win.text())
+
+    def test_type_cycles_and_groups_have_headings(self) -> None:
+        _, win = self.run_keys(["\x1b"])
+        heads = [line.split()[0] for line in win.screen[3:] if "──" in line]
+        self.assertEqual(heads, ["Skills", "Agents", "Commands"])
+        self.assertIn("Skills 3", win.text())
+        _, win = self.run_keys(["t", "\x1b"])
+        self.assertIn("type: Skills", win.screen[2])
+        self.assertNotIn("gamma", win.text())
+        out, win = self.run_keys(["t", "t", " ", "\n"])
+        self.assertEqual([r.name for r in out], ["gamma"])
+
+    def test_sort_by_cost_holds_inside_each_group(self) -> None:
+        out, win = self.run_keys(["s", " ", "\n"])
+        self.assertEqual([r.name for r in out], ["zeta"])
+        self.assertLess(win.find("zeta"), win.find("alpha"))
+        self.assertLess(win.find("alpha"), win.find("beta"))
+
+    def test_toggle_all_visible(self) -> None:
+        out, _ = self.run_keys(["a", "\n"])                 # not all live -> all live
+        self.assertEqual(self.names(out), [("beta", True)])
+        out, _ = self.run_keys(["a", "\n"])                 # all live now -> all parked
+        self.assertEqual(sorted(r.name for r in out), ["alpha", "delta", "gamma", "zeta"])
+        for r in self.rows:
+            r.staged = r.enabled
+        out, _ = self.run_keys(["/", "z", "\x01", "\n"])    # Ctrl-A works while filtering
+        self.assertEqual(self.names(out), [("zeta", False)])
+
+    def test_help_overlay_opens_and_any_key_closes_it(self) -> None:
+        _, win = self.run_keys(["?", "x", "\x1b"])
+        overlay = win.text(1)
+        self.assertIn("Keys", overlay)
+        self.assertIn("toggle every visible row", overlay)
+        self.assertIn("╭", overlay)
+        self.assertNotIn("toggle every visible row", win.text())
+        self.assertIn("/ filter", win.screen[2])             # the closing key was not typed
+        self.assertIn("p", [k for k, _ in picker.help_lines(theme.UNICODE)])
+
+    def test_long_list_scrolls_with_the_cursor_and_its_heading(self) -> None:
+        rows = [model.Row("claude", "skill", f"s{n:02}", True) for n in range(30)]
+        rows.append(model.Row("claude", "agent", "last", True))
+        C = picker.curses
+        _, win = self.run_keys([C.KEY_NPAGE, "\x1b"], rows=rows, size=(12, 80))
+        cursor = next(line for line in win.screen if line.startswith("›"))
+        self.assertIn("s07", cursor)                         # 7-line body: one page down
+        self.assertNotIn("s00", win.text())
+        out, win = self.run_keys([C.KEY_END, " ", "\n"], rows=rows, size=(12, 80))
+        self.assertEqual([r.name for r in out], ["last"])
+        self.assertIn("Agents 1", win.text(-2))              # the heading scrolled in with it
+
+    def test_space_on_an_empty_list_does_not_start_a_filter(self) -> None:
+        out, win = self.run_keys(["2", "t", " ", "s", "\n"])      # codex tab + Skills: empty
+        self.assertEqual(out, [])
+        self.assertIn("/ filter", win.screen[2])
+        self.assertIn("sort: cost", win.screen[2])                # `s` still a command
+
+    def test_the_active_tab_always_fits(self) -> None:
+        rows = [model.Row(n, "skill", "x", True) for n in
+                ("claude", "codex", "grok", "opencode", "openclaw", "copilot", "vibe")]
+        _, win = self.run_keys(["7", "\x1b"], rows=rows, size=(24, 40))
+        self.assertIn("vibe 1", win.screen[1])
+        _, win = self.run_keys(["\x1b"], rows=rows, size=(24, 40))
+        self.assertIn("All 7", win.screen[1])
+
+    def test_a_tiny_window_keeps_status_and_keys(self) -> None:
+        out, win = self.run_keys([" ", "\n"], size=(5, 40))
+        self.assertEqual([r.name for r in out], ["alpha"])
+        self.assertIn("of 5 shown", win.frames[0][-2])
+        self.assertIn("Space toggle", win.frames[0][-1])
+
+    def test_resize_redraws_at_the_new_size(self) -> None:
+        _, win = self.run_keys([(30, 120), (12, 50), (4, 30), "\x1b"])
+        self.assertEqual(len(win.frames[1]), 30)
+        self.assertIn("│", "".join(line[60:] for line in win.frames[1][3:]))   # detail pane
+        self.assertEqual(len(win.frames[2]), 12)
+        self.assertTrue(all(len(line) <= 50 for line in win.frames[2]))
+        self.assertEqual(len(win.screen), 4)
+
+
+class LayoutTest(ScreenCase):
+    def test_title_bar_summary(self) -> None:
+        _, win = self.run_keys([" ", "\x1b"])
+        self.assertIn("agent-toggle  v", win.frames[0][0])
+        self.assertIn("5 resources · ~6.3k tok live", win.frames[0][0])
+        self.assertIn("1 staged (-1.2k tok)", win.screen[0])
+
+    def test_detail_pane_shows_at_wide_widths_only(self) -> None:
+        down = picker.curses.KEY_DOWN
+        _, win = self.run_keys([down, "\x1b"], size=(24, 120))
+        pane = "\n".join(line[72:] for line in win.screen)
+        for text in ("beta", "harness", "claude", "○ parked", "path", "/x/skills-disabled/beta",
+                     "since", "2026-09-19 10:00:00", "mechanism", "move", "~300 tok if restored"):
+            self.assertIn(text, pane)
+        _, win = self.run_keys([" ", picker.curses.KEY_UP, "\x1b"], size=(24, 120))
+        self.assertIn("staged → parked", win.text())
+        _, win = self.run_keys([down, "\x1b"], size=(24, 80))
+        self.assertNotIn("mechanism", win.text())
+        self.assertNotIn("│", "\n".join(win.screen[3:-2]))
+
+    def test_narrow_widths_degrade_but_keep_names_and_state(self) -> None:
+        for width in (80, 60, 40, 30):
+            _, win = self.run_keys(["\x1b"], size=(24, width))
+            self.assertTrue(all(len(line) <= width for line in win.screen), width)
+            self.assertRegex(win.text(), r"●\s+alpha")
+            self.assertIn("Space toggle", win.screen[-1])
+        _, win = self.run_keys(["\x1b"], size=(24, 90))
+        self.assertIn("+shared", win.text())
+        self.assertIn("1.2k", win.screen[win.find("alpha")])
+
+    def test_cost_column_and_parked_rows(self) -> None:
+        _, win = self.run_keys(["\x1b"], size=(24, 90))
+        self.assertIn("(300)", win.screen[win.find("beta")])
+        self.assertIn("○", win.screen[win.find("beta")])
+
+    def test_empty_result_says_how_to_get_back(self) -> None:
+        _, win = self.run_keys(["/", "q", "q", "\x1b"])
+        self.assertIn("nothing matches", win.text())
+        self.assertIn("0 of 5 shown", win.screen[-2])
+        # with the detail pane, the message is cut at the list's edge, not drawn under the pane
+        _, win = self.run_keys(["/", "q", "q", "\x1b"], size=(24, 120))
+        line = win.screen[3]
+        self.assertIn("nothing matches", line)
+        self.assertTrue(line.rstrip().endswith("│"), line)
+
+    def test_typing_mode_swaps_the_key_chips(self) -> None:
+        _, win = self.run_keys(["/", "\x1b"])
+        self.assertIn("Space toggle", win.frames[0][-1])
+        self.assertIn("Tab toggle", win.screen[-1])
+        self.assertIn("clear filter", win.screen[-1])
+
+    def test_dry_run_is_announced(self) -> None:
+        _, win = self.run_keys(["\x1b"], dry_run=True)
+        self.assertIn("dry run", win.screen[-2])
+
+    def test_mono_draw_uses_attributes_only(self) -> None:
+        _, win = self.run_keys(["\x1b"], size=(24, 90))
+        C = picker.curses
+        y = win.find("alpha")
+        self.assertTrue(win.attrs[y, 2] & C.A_BOLD)                  # live glyph: bold
+        self.assertTrue(win.attrs[y, 6] & C.A_REVERSE)               # cursor bar
+        beta = win.find("beta")
+        self.assertTrue(win.attrs[beta, 2] & C.A_DIM)                # parked glyph: dim
+
+    def test_color_draw_uses_pairs_and_no_colors_falls_back(self) -> None:
+        C = picker.curses
+        with mock.patch.multiple(C, has_colors=mock.DEFAULT, start_color=mock.DEFAULT,
+                                 use_default_colors=mock.DEFAULT, init_pair=mock.DEFAULT,
+                                 create=True) as m, \
+                mock.patch.object(C, "color_pair", side_effect=lambda n: n << 8):
+            m["has_colors"].return_value = True
+            _, win = self.run_keys(["\x1b"], color=True, size=(24, 90))
+            self.assertTrue(m["init_pair"].called)
+            y = win.find("alpha")
+            self.assertNotEqual((win.attrs[y, 2] >> 8) & 0xFF, 0)          # a coloured glyph
+            self.assertNotEqual(win.attrs[y, 2], win.attrs[win.find("beta"), 2])
+            m["init_pair"].reset_mock()
+            m["has_colors"].return_value = False
+            out, win = self.run_keys([" ", "\n"], color=True)
+            m["init_pair"].assert_not_called()
+            self.assertEqual([r.name for r in out], ["alpha"])
+            self.run_keys(["\x1b"], color=False)
+            m["init_pair"].assert_not_called()
+
+    def test_ascii_glyphs(self) -> None:
+        _, win = self.run_keys(["\x1b"], glyphs=theme.ASCII)
+        self.assertIn("*   alpha", win.text())
+        self.assertIn("o   beta", win.text())
+        self.assertNotIn("●", win.text())
+        self.assertIn("Lt/Rt harness", win.screen[-1])
+
+    def test_zh_tw_chrome(self) -> None:
+        self.addCleanup(i18n.set_language, i18n.LANGUAGE)
+        i18n.set_language("zh-TW")
+        _, win = self.run_keys(["\x1b"], size=(24, 100))
+        self.assertIn("技能", win.text())
+        self.assertIn("全部", win.screen[1])
+
+
+class SettingsTest(ScreenCase):
+    def test_disabled_harness_rows_and_tab_are_hidden(self) -> None:
+        settings.set("harness.codex", False)
+        _, win = self.run_keys(["\x1b"])
+        self.assertNotIn("delta", win.text())
+        self.assertIn("gamma", win.text())                  # owned by claude, shared with codex
+        self.assertNotIn("codex", win.screen[1])
+        self.assertIn("4 resources", win.screen[0])
+
+    def test_an_explicit_harness_shows_its_rows_even_when_off_in_settings(self) -> None:
+        settings.set("harness.claude", False)
+        _, win = self.run_keys(["\x1b"])
+        self.assertNotIn("alpha", win.text())
+        win = FakeWin(["\x1b"])
+        picker.loop(win, self.rows, harness="claude")         # `ui --harness claude`
+        self.assertIn("alpha", win.text())
+
+    def test_saved_sort_harness_and_type_are_the_start_view(self) -> None:
+        settings.set("picker_sort", "cost")
+        out, _ = self.run_keys([" ", "\n"])
+        self.assertEqual([r.name for r in out], ["zeta"])
+        settings.set("picker_harness", "codex")
+        _, win = self.run_keys(["\x1b"])
+        self.assertNotIn("alpha", win.text())
+        settings.set("picker_type", "command")
+        _, win = self.run_keys(["\x1b"])
+        self.assertIn("type: Commands", win.screen[2])
+        # a saved value with no rows behind it starts on All
+        settings.set("picker_type", "mcp")
+        _, win = self.run_keys(["\x1b"])
+        self.assertIn("type: All", win.screen[2])
+
+    def test_pick_keeps_its_contract(self) -> None:
+        for n in ("one", "two"):
+            self.write(f"skills/{n}/SKILL.md")
+        table = {"claude": build(self.tmp)["claude"]}
+        with mock.patch.object(picker.curses, "wrapper",
+                               side_effect=lambda fn, *a: fn(FakeWin([" ", "\n"]), *a)):
+            out = picker.pick({"version": 3, "disabled": {}}, table, plugins=False)
+        self.assertEqual([(r.label, r.staged) for r in out], [("claude/skill/one", False)])
 
 
 class ProfileKeyTest(SandboxCase):
@@ -188,6 +546,19 @@ class ProfileKeyTest(SandboxCase):
         (fs.profiles_dir() / f"{name}.json").write_text(json.dumps({
             "version": 1, "items": [{"harness": "claude", "type": "skill", "name": n, "live": live}
                                     for n, live in items], **extra}), encoding="utf-8")
+
+    def test_items_of_a_harness_off_in_settings_count_as_hidden(self) -> None:
+        fs.private_dir(fs.profiles_dir())
+        (fs.profiles_dir() / "work.json").write_text(json.dumps({"version": 1, "items": [
+            {"harness": h, "type": "skill", "name": "alpha", "live": False}
+            for h in ("claude", "codex", "grok")]}), encoding="utf-8")
+        settings.set("harness.codex", False)
+        self.assertEqual(model.profile_command(self.rows, "work"),
+                         "profile work: 1 staged, 0 already as profiled, 1 not on this machine, "
+                         "1 hidden by settings -- Enter to apply")
+        self.rows[0].staged = True
+        self.assertIn("2 not on this machine -- ",   # `ui --harness codex`: not hidden
+                      model.profile_command(self.rows, "work", harness="codex"))
 
     def test_listing_and_names(self) -> None:
         self.assertIn("no profiles saved", model.profile_listing())
@@ -242,7 +613,7 @@ class ProfileKeyTest(SandboxCase):
         # an OS-level refusal is a message, never a crash of the picker
         self.assertTrue(model.profile_command(self.rows, "save " + "x" * 300).startswith("error: "))
         # typeable-but-odd input is a message too: a unicode digit, a NUL, a lone surrogate
-        for odd in ("\u00b2", "save a\x00b", "a\x00b", "save a\ud800"):
+        for odd in ("²", "save a\x00b", "a\x00b", "save a\ud800"):
             self.assertTrue(model.profile_command(self.rows, odd).startswith("error: "), odd)
 
     def test_scope_mismatch_is_the_cli_error(self) -> None:
@@ -255,96 +626,43 @@ class ProfileKeyTest(SandboxCase):
     def test_curses_prompt_then_enter_returns_the_staged_rows(self) -> None:
         self.stored("work", [("alpha", False)])
         keys = ["p", "w", "o", "r", "k", "x", "\x7f", "\n", "\n"]       # p, `work`, Enter, Enter
-        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
-                                 create=True):
-            win = FakeWin(keys, size=(12, 70))
-            out = picker.loop(win, self.rows)
+        win = FakeWin(keys, size=(12, 70))
+        out = picker.loop(win, self.rows)
         self.assertEqual([r.name for r in out], ["alpha"])
-        self.assertTrue(any("profile> work" in c[2] for c in win.calls))
-        self.assertTrue(any("1) work" in c[2] for c in win.calls))
-        self.assertTrue(any("profile work: 1 staged" in c[2] for c in win.calls))
+        everything = "\n".join(win.text(i) for i in range(len(win.frames)))
+        self.assertIn("profile> work", everything)
+        self.assertIn("1) work", everything)
+        self.assertIn("profile work: 1 staged", win.screen[-2])
         # Esc at the prompt stages nothing (even a full valid name) and the picker carries on
         self.rows[0].staged = True
-        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
-                                 create=True):
-            keys = ["p", *"work", "\x1b", "\n"]
-            self.assertEqual(picker.loop(FakeWin(keys, size=(12, 70)), self.rows), [])
+        self.assertEqual(picker.loop(FakeWin(["p", *"work", "\x1b", "\n"], size=(12, 70)),
+                                     self.rows), [])
         # a 2-row window: the prompt clips instead of raising curses.error
-        class Tiny(FakeWin):
-            def addnstr(self, y, x, text, n, attr=0):
-                if y >= self.size[0]:
-                    raise picker.curses.error("out of window")
-                super().addnstr(y, x, text, n, attr)
-        self.assertEqual(picker.ask_profile(Tiny(["a", "\n"], size=(2, 40))), "a")
+        self.assertEqual(picker.ask_profile(FakeWin(["a", "\n"], size=(2, 40))), "a")
+        # ASCII terminals get an ASCII input cursor (a block would not encode)
+        win = FakeWin(["a", "\n"], size=(8, 40))
+        picker.ask_profile(win, None, theme.ASCII)
+        self.assertIn("profile> a_", win.text())
+        self.assertNotIn("█", win.text())
 
     @unittest.skipIf(picker is None, "curses unavailable")
-    def test_p_is_a_filter_letter_after_slash_and_is_in_the_help(self) -> None:
-        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
-                                 create=True):
-            win = FakeWin(["/", "p", "\x1b"], size=(12, 70))
-            picker.loop(win, self.rows)
-        self.assertFalse(any("profile>" in c[2] for c in win.calls))
-        self.assertIn("p profile", picker.HELP)
-        self.assertTrue(any("  p " in line for line in picker.LONG_HELP))
+    def test_a_profile_never_stages_a_row_of_a_hidden_harness(self) -> None:
+        rows = [*self.rows, model.Row("codex", "skill", "alpha", True)]
+        fs.private_dir(fs.profiles_dir())
+        (fs.profiles_dir() / "work.json").write_text(json.dumps({"version": 1, "items": [
+            {"harness": h, "type": "skill", "name": "alpha", "live": False}
+            for h in ("claude", "codex")]}), encoding="utf-8")
+        settings.set("harness.codex", False)
+        out = picker.loop(FakeWin(["p", *"work", "\n", "\n"], size=(12, 70)), rows)
+        self.assertEqual([r.label for r in out], ["claude/skill/alpha"])
+        self.assertTrue(rows[-1].staged)                    # the codex row was not touched
+
+    @unittest.skipIf(picker is None, "curses unavailable")
+    def test_p_is_a_filter_letter_after_slash(self) -> None:
+        win = FakeWin(["/", "p", "\x1b"], size=(12, 70))
+        picker.loop(win, self.rows)
+        self.assertFalse(any("profile>" in line for f in win.frames for line in f))
 
 
-@unittest.skipIf(picker is None, "curses unavailable")
-class PickerColorTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.rows = [picker.Row("claude", "skill", "a", True, 5),
-                     picker.Row("codex", "skill", "b", False, 0, 7)]
-        self.rows[1].staged = True            # pending enable
-        p = mock.patch.multiple(
-            picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
-            start_color=mock.DEFAULT, use_default_colors=mock.DEFAULT,
-            init_pair=mock.DEFAULT, create=True)
-        self.m = p.start()
-        self.addCleanup(p.stop)
-        cp = mock.patch.object(picker.curses, "color_pair", side_effect=lambda n: n << 8)
-        cp.start()
-        self.addCleanup(cp.stop)
-
-    def test_state_pair(self) -> None:
-        self.assertEqual(picker.state_pair(self.rows[0]), picker.P_LIVE)
-        self.assertEqual(picker.state_pair(self.rows[1]), picker.P_PENDING)
-        self.rows[1].staged = False
-        self.assertEqual(picker.state_pair(self.rows[1]), picker.P_PARKED)
-
-    def test_monochrome_draw_is_one_call_per_row_with_todays_attrs(self) -> None:
-        win = FakeWin()
-        picker.draw(win, self.rows, "", 0, 0, 1, "chips", color=False)
-        body = [c for c in win.calls if 1 <= c[0] <= 2]
-        self.assertEqual([c[0] for c in body], [1, 2])
-        self.assertEqual(body[0][3], picker.curses.A_REVERSE)
-        self.assertEqual(body[1][3], picker.curses.A_NORMAL | picker.curses.A_BOLD)
-        self.assertTrue(all(len(c[2]) == 59 for c in body))
-
-    def test_color_draw_segments_rebuild_same_text_and_cursor_row_stays_reversed(self) -> None:
-        mono, col = FakeWin(), FakeWin()
-        picker.draw(mono, self.rows, "", 0, 0, 1, color=False)
-        picker.draw(col, self.rows, "", 0, 0, 1, color=True)
-        for y in (1, 2):
-            text = "".join(c[2] for c in sorted(col.calls, key=lambda c: c[1]) if c[0] == y)
-            self.assertEqual(text, next(c[2] for c in mono.calls if c[0] == y))
-        cursor = [c for c in col.calls if c[0] == 1]
-        self.assertEqual(len(cursor), 1)                       # one reversed bar
-        self.assertTrue(cursor[0][3] & picker.curses.A_REVERSE)
-        self.assertEqual((cursor[0][3] >> 8) & 0xFF, picker.P_LIVE)
-        other = {c[1]: (c[3] >> 8) & 0xFF for c in col.calls if c[0] == 2}
-        self.assertEqual(sorted(other.values()),
-                         [0, picker.P_HARNESS, picker.P_TYPE, picker.P_PENDING])
-
-    def test_loop_without_has_colors_never_touches_pairs(self) -> None:
-        with mock.patch.object(picker.curses, "has_colors", return_value=False):
-            out = picker.loop(FakeWin(["\t", "\n"]), self.rows, color=True)
-        self.assertEqual([r.name for r in out], ["a", "b"])
-        self.m["start_color"].assert_not_called()
-        self.m["init_pair"].assert_not_called()
-
-    def test_loop_with_colors_inits_five_pairs_and_color_off_skips(self) -> None:
-        with mock.patch.object(picker.curses, "has_colors", return_value=True):
-            self.assertIsNone(picker.loop(FakeWin(["\x1b"]), self.rows, color=True))
-            self.assertEqual(self.m["init_pair"].call_count, 5)
-            self.m["init_pair"].reset_mock()
-            self.assertIsNone(picker.loop(FakeWin(["\x1b"]), self.rows, color=False))
-            self.m["init_pair"].assert_not_called()
+if __name__ == "__main__":
+    unittest.main()

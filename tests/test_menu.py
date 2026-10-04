@@ -12,7 +12,7 @@ from base import SandboxCase
 from test_project import ProjectCase
 
 import agent_toggle.ui as ui_pkg
-from agent_toggle import cli, fs, store
+from agent_toggle import cli, fs, settings, store
 from agent_toggle.harnesses import build
 from agent_toggle.ui import menu
 
@@ -30,11 +30,83 @@ class MenuTest(SandboxCase):
                             stdin=io.StringIO(script), stdout=out)
         return changes, out.getvalue()
 
+    def test_zh_tw_heading_on_an_ascii_pipe_never_crashes(self) -> None:
+        from agent_toggle import i18n
+        self.addCleanup(i18n.set_language, "en")
+        i18n.set_language("zh-TW")
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="ascii")
+        menu.pick({"version": 3, "disabled": {}}, self.table, plugins=False,
+                  stdin=io.StringIO("q\n"), stdout=out)
+        out.flush()
+        self.assertIn(b"alpha", raw.getvalue())
+
+    def test_a_non_ascii_row_on_an_ascii_pipe_never_crashes(self) -> None:
+        self.write("skills/技能/SKILL.md")                      # the row text goes via encodable
+        out = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+        menu.pick({"version": 3, "disabled": {}}, self.table, plugins=False,
+                  stdin=io.StringIO("q\n"), stdout=out)
+        out.flush()
+        self.assertIn(b"alpha", out.buffer.getvalue())
+        self.assertIn(b"?", out.buffer.getvalue())
+
+    def test_an_explicit_harness_is_shown_even_when_off_in_settings(self) -> None:
+        settings.set("harness.claude", False)
+        _, out = self.run_menu("q\n")
+        self.assertNotIn("alpha", out)
+        changes = menu.pick({"version": 3, "disabled": {}}, self.table, plugins=False,
+                            stdin=io.StringIO("1\na\n"), stdout=io.StringIO(), harness="claude")
+        self.assertEqual([r.name for r in changes], ["alpha"])
+        with mock.patch.dict(sys.modules, {"agent_toggle.ui.picker": None}), \
+                mock.patch.object(menu, "pick", return_value=None) as pick, \
+                contextlib.redirect_stdout(io.StringIO()):
+            saved = ui_pkg.__dict__.pop("picker", None)
+            if saved is not None:
+                self.addCleanup(setattr, ui_pkg, "picker", saved)
+            self.assertEqual(cli.main(["ui", "--harness", "claude"]), 0)
+        self.assertEqual(pick.call_args.kwargs["harness"], "claude")
+
     def test_toggle_by_number_then_apply(self) -> None:
         changes, out = self.run_menu("1\n3\na\n")
         self.assertEqual([(r.name, r.staged) for r in changes], [("alpha", False), ("gamma", False)])
-        self.assertIn("[x]", out)
+        self.assertIn("Skills (3)", out)                       # grouped under a type heading
+        self.assertIn("  1  *         2  claude   alpha", out)   # ASCII glyphs: not UTF-8
+        self.assertIn("  1  o -       2  claude   alpha", out)   # staged to park
         self.assertIn("2 staged", out)
+        self.assertNotIn("\x1b[", out)                         # no colour unless asked
+
+    def test_rows_are_numbered_down_the_grouped_screen(self) -> None:
+        self.write("agents/zed.md")
+        changes, out = self.run_menu("4\na\n")                 # skills 1-3, then agents
+        self.assertEqual([r.name for r in changes], ["zed"])
+        self.assertLess(out.index("Skills (3)"), out.index("Agents (1)"))
+
+    def test_color_and_unicode_glyphs(self) -> None:
+        class Tty(io.StringIO):
+            encoding = "utf-8"
+        out = Tty()
+        menu.pick({"version": 3, "disabled": {}}, self.table, plugins=False, color=True,
+                  stdin=io.StringIO("1\nq\n"), stdout=out)
+        text = out.getvalue()
+        self.assertIn("\x1b[32m●\x1b[0m", text)                # green live glyph
+        self.assertIn("\x1b[33m○\x1b[0m", text)                # yellow parked (staged) glyph
+        self.assertIn("\x1b[35m-\x1b[0m", text)                # magenta change marker
+
+    def test_settings_hide_harnesses_and_seed_the_view(self) -> None:
+        table = build(self.tmp)
+        (self.tmp / ".codex" / "skills" / "cx").mkdir(parents=True)
+        (self.tmp / ".codex" / "skills" / "cx" / "SKILL.md").write_text("x", encoding="utf-8")
+        out = io.StringIO()
+        menu.pick({"version": 3, "disabled": {}}, table, plugins=False,
+                  stdin=io.StringIO("q\n"), stdout=out)
+        self.assertIn("cx", out.getvalue())
+        settings.set("harness.codex", False)
+        settings.set("picker_sort", "cost")
+        out = io.StringIO()
+        menu.pick({"version": 3, "disabled": {}}, table, plugins=False,
+                  stdin=io.StringIO("q\n"), stdout=out)
+        self.assertNotIn("cx", out.getvalue())
+        self.assertIn("sort:cost", out.getvalue())
 
     def test_ranges_lists_and_double_toggle(self) -> None:
         changes, _ = self.run_menu("1-3\n2\na\n")
@@ -136,7 +208,7 @@ class MenuProjectTest(ProjectCase):
 
     def test_ui_project_lists_only_the_project_and_toggles_in_project_scope(self) -> None:
         self.write("skills/user-only/SKILL.md")
-        rc, out, _ = self.run_ui("1\na\n")           # rows: agent demo-agent, skill demo-skill
+        rc, out, _ = self.run_ui("2\na\n")           # 1 skill demo-skill, 2 agent demo-agent
         self.assertEqual(rc, 0, out)
         self.assertNotIn("user-only", out)
         self.assertFalse((self.pclaude / "agents" / "demo-agent.md").exists())

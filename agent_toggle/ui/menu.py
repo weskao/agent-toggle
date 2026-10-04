@@ -8,20 +8,47 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .model import SORTS, Row, collect, cycle, profile_command, profile_listing, visible
+from .model import (
+    SORTS,
+    Row,
+    collect,
+    cycle,
+    grouped,
+    prefs,
+    profile_command,
+    profile_listing,
+    type_label,
+    visible,
+)
+from .theme import Glyphs, ansi, encodable, get_glyphs
 
 HELP = ("numbers toggle (1 3 5-7)  /text filter (/ alone clears)  s sort  h harness  t type  "
         "p profile  a apply  q cancel  ? help")
 
 
-def _show(out, shown: list[Row], chips: str, pending: int) -> None:
+def ordered(shown: list[Row]) -> list[Row]:
+    """`shown` in screen order: grouped by type, so the numbers count down the screen."""
+    return [r for _, grp in grouped(shown) for r in grp]
+
+
+def _show(out, shown: list[Row], chips: str, pending: int, color: bool = False,
+          g: Glyphs | None = None) -> None:
+    g = g or get_glyphs(out)
     out.write("\n")
-    for n, r in enumerate(shown, 1):
-        also = f"  (+{','.join(r.shared)})" if r.shared else ""
-        out.write(f"{n:>3} {'*' if r.changed else ' '}{'[x]' if r.staged else '[ ]'} "
-                  f"{r.cost_cell:>7}  {r.harness:<9}{r.type:<8}{r.name}{also}\n")
-    out.write(f"{len(shown)} shown | ~{sum(r.tokens for r in shown)} tok | {chips}"
-              f"{f' | {pending} staged' if pending else ''}\n{HELP}\n")
+    n = 0
+    for type_, grp in grouped(shown):
+        out.write(encodable(ansi("title", f"{type_label(type_)} ({len(grp)})", color) + "\n", out))
+        for r in grp:
+            n += 1
+            glyph = ansi("live", g.live, color) if r.staged else ansi("parked", g.parked, color)
+            mark = ansi("pending", "+" if r.staged else "-", color) if r.changed else " "
+            also = ansi("choice", f"  (+{','.join(r.shared)})", color) if r.shared else ""
+            name = ansi("pending", r.name, color) if r.changed else r.name
+            out.write(encodable(f"{n:>3}  {glyph} {mark} {r.cost_cell:>7}  "
+                                f"{ansi('harness', f'{r.harness:<9}', color)}{name}{also}\n", out))
+    staged = ansi("pending", f" | {pending} staged", color) if pending else ""
+    out.write(f"{len(shown)} shown | ~{sum(r.tokens for r in shown)} tok | {chips}{staged}\n"
+              f"{ansi('muted', HELP, color)}\n")
 
 
 def _numbers(arg: str, size: int) -> list[int] | None:
@@ -39,16 +66,20 @@ def _numbers(arg: str, size: int) -> list[int] | None:
 
 
 def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
-         dry_run: bool = False) -> list[Row] | None:
-    query, harness, type_, sort = "", "all", "all", "name"
-    harness_opts = ["all", *sorted({n for r in rows for n in (r.harness, *r.shared)})]
-    type_opts = ["all", *sorted({r.type for r in rows})]
-    redraw = True
+         dry_run: bool = False, color: bool = False,
+         explicit: str | None = None) -> list[Row] | None:
+    # settings: hidden harnesses (never `explicit`, from ui --harness), defaults
+    kept, names, harness, type_, sort = prefs(rows, explicit)
+    harness_opts = ["all", *names]
+    type_opts = ["all", *(ty for ty, _ in grouped(kept))]
+    harness = harness if harness in harness_opts else "all"
+    type_ = type_ if type_ in type_opts else "all"
+    query, redraw, g = "", True, get_glyphs(stdout)
     while True:
-        shown = visible(rows, query, harness, type_, sort)
+        shown = ordered(visible(kept, query, harness, type_, sort))
         if redraw:
             chips = f"filter:{'/' + query if query else '-'} harness:{harness} type:{type_} sort:{sort}"
-            _show(stdout, shown, chips, sum(1 for r in rows if r.changed))
+            _show(stdout, shown, chips, sum(1 for r in kept if r.changed), color, g)
         redraw = True
         stdout.write("> ")
         stdout.flush()
@@ -60,7 +91,7 @@ def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
         if low in ("q", "quit"):
             return None
         if low in ("a", "apply"):
-            return [r for r in rows if r.changed]
+            return [r for r in kept if r.changed]
         if low == "s":
             sort = cycle(SORTS, sort)
         elif low == "h":
@@ -71,7 +102,7 @@ def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
             query = cmd[1:].strip()
         elif low == "p" or low.startswith("p "):          # profiles: list, or run one line
             line = cmd[1:].strip()
-            stdout.write((profile_command(rows, line, project, dry_run) if line else
+            stdout.write((profile_command(kept, line, project, dry_run, explicit) if line else
                           f"{profile_listing()}\np <number|name>  |  p save <name>")
                          + "\n")
             redraw = bool(line)
@@ -90,8 +121,8 @@ def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
 
 def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False,
          stdin=None, stdout=None, project: Path | None = None,
-         dry_run: bool = False) -> list[Row] | None:
-    """`color` is accepted for signature parity and ignored (plain text)."""
+         dry_run: bool = False, harness: str | None = None) -> list[Row] | None:
+    """`color` (cli passes `use_color(...)`) turns on ANSI styling of the rows."""
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     notes: list[str] = []
     rows = collect(state, harnesses, notes.append, plugins)
@@ -100,4 +131,4 @@ def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False
     if not rows:
         stdout.write("nothing to show\n")
         return None
-    return loop(rows, stdin, stdout, project, dry_run)
+    return loop(rows, stdin, stdout, project, dry_run, color, harness)
