@@ -27,7 +27,7 @@ from .backends.mcp_json import (
     write_project_mcp,
 )
 from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
-from .backends.plugin_cli import claude_bin, run_cli
+from .backends.plugin_cli import claude_bin, full_plugin_id, list_plugins, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses, project_view
@@ -302,6 +302,16 @@ def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> Dir
                        plain[0] if plain else found[0])
     return DirView(owner, live, live.parent / f"{live.name}-disabled",
                    sorted({hn for hn, _ in found}))
+
+
+def sync_marker_note(out: Result, v: DirView) -> str | None:
+    """The `.synced-from-*` warning for the real dir `v.live`, once per run however many
+    harnesses view it (they are all named in it); None when clean or already shown."""
+    if not (markers := fs.sync_markers(v.live)) or not out.first(("sync", v.live.resolve())):
+        return None
+    viewers = f" (viewed by {', '.join(v.sharers)})" if len(v.sharers) > 1 else ""
+    return (f"{v.live}{viewers} carries {', '.join(markers)} -- a sync job may re-create "
+            f"parked items; park in the source harness instead")
 
 
 def _logged_move(state: dict, key: str, action: str, entry: dict | None, src: Path,
@@ -606,12 +616,16 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
     if action == "disable" and names and not proj:
         for v in views:
             ohome = home if v.owner == harness else table[v.owner].home
-            if not gitignored(v.parked, ohome):
+            # one warning per real park dir, and only where the fix applies: the dir sits
+            # inside a git work tree (else `git status` cannot be dirtied, nothing to fix)
+            top = fs.git_toplevel(ohome)
+            if top and v.parked.resolve().is_relative_to(top) \
+                    and out.first(("ignore", v.parked.resolve())) \
+                    and not gitignored(v.parked, top):
                 out.warn(f"{v.parked} is NOT gitignored -- disabling will dirty `git status`. "
-                         f"fix: echo '{v.parked.name}/' >> {ohome}/.gitignore")
-            if markers := fs.sync_markers(v.live):
-                out.warn(f"{v.live} carries {', '.join(markers)} -- a sync job may re-create "
-                         f"parked items; park in the source harness instead")
+                         f"fix: echo '{v.parked.name}/' >> {top}/.gitignore")
+            if msg := sync_marker_note(out, v):
+                out.warn(msg)
 
     for name in names:
         fs.refresh_lock()
@@ -765,6 +779,14 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
             }
         else:
             state["disabled"].pop(key, None)
+            # parked as the bare `foo`, enabled as `foo@mkt`: the same plugin when it is the
+            # only listed id for that name (cost.inventory's rule); ambiguous stays separate.
+            # ponytail: no write-ahead entry -- plugins have none (the CLI is the op), a kill
+            # before the per-item save leaves the stale bare entry; `enable foo` clears it.
+            bare = name.partition("@")[0]
+            if "@" in name and f"{harness}:plugin:{bare}" in state["disabled"] \
+                    and full_plugin_id(bare, [p["id"] for p in list_plugins(lambda m: None)]) == name:
+                del state["disabled"][f"{harness}:plugin:{bare}"]
         _ok(out, dry_run, harness, "plugin", action, name, f"{action}d")
         log(action, "plugin", name, "ok", harness=harness, batch=batch)
     return fails

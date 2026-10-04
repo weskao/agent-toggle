@@ -85,6 +85,14 @@ class Result:
         self.color = color
         self.rows: list[dict] = []
         self.warnings: list[str] = []
+        self._seen: set = set()
+
+    def first(self, key) -> bool:
+        """True only the first time `key` is asked in this run (show a warning once)."""
+        if key in self._seen:
+            return False
+        self._seen.add(key)
+        return True
 
     def paint(self, text: str, style: str, stream=None) -> str:
         """`text` in `style` if `stream` (default stdout) takes color; never in --json.

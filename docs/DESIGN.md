@@ -645,16 +645,26 @@ runs this pattern in production:
   names the variable.
 - Fixed: a plugin parked as `name` collapses into the listed `name@marketplace` row
   in the inventory (picker and `cost`) when exactly one listed id matches; an
-  ambiguous bare name stays its own parked row. `enable` on the full id does not
-  clear a state entry recorded under the bare name -- `enable <bare name>` does.
+  ambiguous bare name stays its own parked row. Fixed: `enable name@marketplace`
+  also clears the state entry recorded under the bare `name`, by the same
+  single-unambiguous-match rule (`plugin_cli.full_plugin_id`; one extra
+  `plugin list` call, only when such an entry exists). The clear has no write-ahead
+  entry, like every plugin op: a kill before the per-item save leaves the stale
+  bare entry, which `enable name` removes.
 - Fixed: picker typing mode (after `/`) now shows `filter: /text█` plus a hint on the
   top line (§5.10).
-- With OpenCode installed, `disable --harness opencode` warns "NOT gitignored" once
-  per scanned skill dir (incl. `~/.agents/skills-disabled`, whose suggested
-  `.gitignore` fix cannot apply), and OpenCode sees two `agent-toggle` shims
-  (`<oc>/skills` and `~/.claude/skills`); which one wins is unchecked.
-- The `.synced-from-*` warning repeats once per harness that views the same
-  directory.
+- Fixed: `disable` warns "NOT gitignored" once per real park dir, and only when the
+  dir sits inside a git work tree (the fix is then `echo '<dir>/' >> <repo>/.gitignore`);
+  a dir outside any work tree (e.g. `~/.agents/skills-disabled`) gets no warning, as
+  `git status` cannot be dirtied there. `status` still shows its `[NOT gitignored]` tag.
+- Fixed: `install-shims` skips the OpenCode shim (`covered by <path>`) when an alias dir
+  it scans (`~/.claude/skills`, `~/.agents/skills`, a `skills.paths` entry) already
+  holds a shim with the same text. The claude shim is not that: its text says `--harness`
+  defaults to `claude`, which is wrong for an agent running in OpenCode, so OpenCode's
+  own shim is still written and the row carries `also_seen` plus a note. Which of two
+  differing shims OpenCode loads first is still unchecked.
+- Fixed: the `.synced-from-*` warning (`status`, `disable`) is shown once per real
+  directory, naming every harness that views it.
 - Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
   `.headers` sub-table) was confirmed on a live install; OpenCode's
   skill dirs are `skills.paths` (additive) plus `skills/`, `skill/`,
@@ -704,9 +714,8 @@ Known gaps added by phase 2:
 - `undo` and `enable --all` trust the project dir recorded in the log or state,
   the same trust user-scope replay already places in them; project dirs are
   still validated (not `$HOME`, roots or tool dirs; must exist).
-- A project with only `.mcp.json` saves only its parked servers in
-  `profile save --project`; live ones are not listed (the cost inventory needs
-  `.claude/`).
+- Fixed: a project with only `.mcp.json` lists its live servers in
+  `profile save --project` too, next to its parked ones.
 - Fixed: project `.mcp.json` backups held the whole file text before and after the
   edit (mode `0600`), so they could include other servers' auth headers. A backup
   now holds only the toggled entry (its value, its exact text and its neighbours'

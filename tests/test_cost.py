@@ -351,6 +351,23 @@ class PluginDedupeTest(CliCase):
         self.listing({"id": "demo@a", "enabled": True}, {"id": "demo@b", "enabled": True})
         self.assertEqual(sorted(self.names()), ["demo", "demo@a", "demo@b"])
 
+    def parked(self) -> list[str]:
+        return sorted(json.loads(fs.state_file().read_text(encoding="utf-8"))["disabled"])
+
+    def test_enabling_the_canonical_id_clears_the_bare_name_entry(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.assertEqual(self.parked(), ["claude:plugin:demo"])
+        self.listing({"id": "demo@mkt", "enabled": True})
+        self.assertEqual(self.run_cli("enable", "plugin", "demo@mkt")[0], 0)
+        self.assertEqual(self.parked(), [])
+        self.assertEqual(self.names(), ["demo@mkt"])      # live only, no parked twin
+
+    def test_enabling_one_of_several_ids_keeps_the_ambiguous_bare_entry(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.listing({"id": "demo@a", "enabled": True}, {"id": "demo@b", "enabled": True})
+        self.assertEqual(self.run_cli("enable", "plugin", "demo@a")[0], 0)
+        self.assertEqual(self.parked(), ["claude:plugin:demo"])
+
     def test_full_id_parked_is_still_one_row(self) -> None:
         self.run_cli("disable", "plugin", "demo@mkt")
         self.listing({"id": "demo@mkt", "enabled": False})

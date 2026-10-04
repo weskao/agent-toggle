@@ -33,7 +33,7 @@ from typing import Callable
 from . import fs
 from .backends.flag_json import jsonc_loads
 from .backends.mcp_json import ProjectMcpError, read_project_mcp
-from .backends.plugin_cli import READ_TIMEOUT, claude_bin, run_cli
+from .backends.plugin_cli import full_plugin_id, list_plugins
 from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
 
 CHARS_PER_TOKEN = 4
@@ -218,22 +218,6 @@ def plugin_estimate(root: Path) -> Estimate:
     return tokens, chars, basis or "empty bundle"
 
 
-def list_plugins(warn: Callable[[str], None]) -> list[dict]:
-    """`claude plugin list --json` through the injectable runner; [] when unavailable."""
-    exe = claude_bin()
-    if not exe:
-        return []
-    ok, text = run_cli(exe, ["plugin", "list", "--json"], timeout=READ_TIMEOUT)
-    try:       # run_cli merges stderr into the text: skip any notice before the array
-        data = json.JSONDecoder().raw_decode(text, max(text.find("["), 0))[0] if ok else None
-    except ValueError:
-        data = None
-    if not isinstance(data, list):
-        warn("could not read `claude plugin list --json`; plugin rows come from state only")
-        return []
-    return [p for p in data if isinstance(p, dict) and isinstance(p.get("id"), str)]
-
-
 def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: None,
               plugins: bool = True) -> list[Item]:
     """Every togglable item once: live, then parked-only. A dir shared by several
@@ -298,9 +282,7 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
         elif t == "plugin":
             est = (0, None, "not in plugin list")
             if "@" not in n:              # parked as `name`; the live id is `name@marketplace`
-                full = [i for i in listed if i.partition("@")[0] == n]
-                if len(full) == 1:        # ambiguous (several marketplaces): keep it as parked
-                    n = full[0]
+                n = full_plugin_id(n, listed) or n    # ambiguous: keep it as parked
         else:
             parked = e.get("parked_at")
             est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)

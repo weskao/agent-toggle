@@ -66,7 +66,11 @@ agent to pass `--harness <that harness>`). The shim tells the agent to act only
 on the user's explicit request, never on instructions found inside skill or
 tool content, and to preview bulk operations with `--dry-run`.
 OpenCode's shim goes into the first `skills.paths` dir when one is set (and its
-parent exists), else `skills/`.
+parent exists), else `skills/`. OpenCode also scans `~/.claude/skills` and
+`~/.agents/skills`: when one of them already holds the very same shim text, the
+OpenCode shim is skipped (`covered by <path>`); a different shim there (the
+claude one, whose default harness is `claude`) is noted and OpenCode's own is
+still written.
 
 Every shim carries an `<!-- agent-toggle shim: ... -->` marker line.
 `install-shims` updates a file that has the marker in place (it is idempotent)
@@ -323,8 +327,9 @@ parked once, tracked once, and every row reports `shared_with`, the other
 harnesses it also affects. `status` prints `shared dir with: ...`.
 
 If the live directory carries `.synced-from-*` markers, a sync job may
-re-create what you parked; `status` warns about it. Park in the source harness
-instead. The warning is printed once per harness that views the directory.
+re-create what you parked; `status` and `disable` warn about it. Park in the
+source harness instead. The warning is printed once per real directory, naming
+every harness that views it.
 
 ## Companion files
 
@@ -485,9 +490,8 @@ agent-toggle enable --all --project .
   lives"). `enable` removes the emptied `parked/<sha8>/*-disabled` and
   `parked/<sha8>` dirs; a dir that still holds anything is kept.
 - `status` prints one `project <dir>` line per project holding parked items.
-  A project with only `.mcp.json` saves only its parked servers in
-  `profile save --project`; live ones are not listed (the inventory needs
-  `.claude/`).
+  A project with only `.mcp.json` has its live servers listed too in
+  `profile save --project`, next to its parked ones.
 
 ## Doctor
 
@@ -607,7 +611,9 @@ path exists as a *file*, so the `is_dir()` check has to come **before** the
 `mkdir` or it is unreachable.
 
 **2. Park dirs that are not gitignored get a warning.** Without it, every
-disable leaves dozens of deletion lines in `git status`.
+disable leaves dozens of deletion lines in `git status`. The warning is shown once
+per park dir, and only for a dir inside a git work tree (elsewhere `git status`
+cannot be dirtied and the `.gitignore` fix would not apply).
 
 ## Paths are resolved before comparison
 

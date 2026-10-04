@@ -504,6 +504,17 @@ def sync_markers(d: Path) -> list[str]:
         return []
 
 
+def git_toplevel(d: Path) -> Path | None:
+    """The resolved root of the git work tree containing `d`; None if `d` is in none
+    (or git is missing)."""
+    try:
+        p = subprocess.run(["git", "-C", str(d), "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, encoding="utf-8", timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return Path(p.stdout.strip()).resolve() if p.returncode == 0 and p.stdout.strip() else None
+
+
 def gitignored(path: Path, repo: Path) -> bool:
     """True if git ignores `path`. Unknown (no git / not a repo) counts as False."""
     try:

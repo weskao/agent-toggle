@@ -125,7 +125,8 @@ Fix only if one bites; none blocks a phase.
       `filter: /text█` with a hint (also in the menu fallback)
 - [x] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
 - [x] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
-- [ ] `.synced-from-*` warning repeats once per harness viewing the directory
+- [x] `.synced-from-*` warning repeats once per harness viewing the directory -- now once
+      per real directory, naming every viewer
 - [x] `aliases_from` on the harness record is metadata only
 - [x] `ui` and `cost` are user-scope only (no `--project`) -- both take `--project <dir>`
 - [x] picker has no profile key; profiles are CLI only -- `p` stages a saved profile or

@@ -46,7 +46,7 @@ from . import __version__, config, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
-from .mechanisms import dir_view, settle, validate_name
+from .mechanisms import dir_view, settle, sync_marker_note, validate_name
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
 
@@ -154,10 +154,8 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
                 view = dir_view(table, hname, t, home, sub)
                 parked = view.parked
                 shared.update(set(view.sharers) - {hname})
-                if markers := fs.sync_markers(view.live):
-                    out.say(f"                   ! {view.live} carries {', '.join(markers)} -- a "
-                            f"sync job may re-create parked items; park in the source harness",
-                            warn=True)
+                if msg := sync_marker_note(out, view):
+                    out.say(f"                   ! {msg}", warn=True)
                 # Skills are directories; agents and commands are files that may
                 # sit one level down. Counting rglob("*") for skills would report
                 # every file inside every skill.
@@ -353,6 +351,13 @@ def shim_refusal(dest: Path) -> str | None:
     return None if ours else "exists and lacks the agent-toggle shim marker"
 
 
+def _reads_as(p: Path, text: str) -> bool:
+    try:
+        return p.read_text(encoding="utf-8") == text
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
     supports skills; keep park dirs out of an existing harness-home .gitignore.
@@ -387,6 +392,19 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     f"{dest} belongs to {view.owner}: run install-shims for it",
                     show=False, home=str(home))
             continue
+        text = shim_text(hname)
+        others = [p for s in subs if s != sub
+                  and (home / s).resolve() != (home / sub).resolve()
+                  and (p := home / s / "agent-toggle" / "SKILL.md").is_file()
+                  and not p.is_symlink()]
+        same = next((p for p in others if _reads_as(p, text)), None)
+        if same and not dest.exists():
+            # an alias dir (OpenCode scans ~/.claude/skills, ~/.agents/skills) already serves
+            # this very shim: a second copy would only leave "which one wins" unchecked
+            out.row(hname, None, None, "install-shims", "skipped", f"covered by {same}",
+                    show=False, home=str(home))
+            out.say(f"  skipped  {dest.parent.parent} (covered by {same})")
+            continue
         if why := shim_refusal(dest):
             fix = (f"refused: {dest} {why}; fix: move it aside (or delete it if it is an "
                    f"older agent-toggle shim), then re-run install-shims")
@@ -395,10 +413,13 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
             continue
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(shim_text(hname), encoding="utf-8")
+            dest.write_text(text, encoding="utf-8")
         out.row(hname, None, None, "install-shims", "planned" if args.dry_run else "ok",
-                str(dest), show=False, home=str(home))
+                str(dest), show=False, home=str(home), also_seen=[str(p) for p in others])
         out.say(f"  {verb}  {dest}")
+        if others:       # e.g. the claude shim, whose text says `--harness` defaults to claude
+            out.say(f"    note: {hname} also loads {', '.join(map(str, others))} (a different "
+                    f"shim); which one wins is unchecked")
         installed += 1
         # A tracked park dir turns every disable into deletion noise in
         # `git status`; only touch a .gitignore that already exists.

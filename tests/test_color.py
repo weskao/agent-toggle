@@ -109,10 +109,12 @@ class ColorTest(SandboxCase):
 
     def test_warning_label_follows_stderr_tty_not_stdout(self) -> None:
         argv = ("disable", "skill", "demo-skill")
+        self.git_init()                                # the "NOT gitignored" warning needs a repo
         _, out, err = self.run_cli(*argv, out=io.StringIO(), err=_Tty())
         self.assertIn("\x1b[33mWARNING\x1b[0m", err)
         self.assertNotIn(ESC, out)
         self.setUp()                                   # fresh sandbox: demo-skill is enabled again
+        self.git_init()
         _, out, err = self.run_cli(*argv, out=_Tty(), err=io.StringIO())
         self.assertIn("WARNING", err)
         self.assertNotIn(ESC, err)

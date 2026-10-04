@@ -74,6 +74,10 @@ class SandboxCase(unittest.TestCase):
         self.cli_calls.append((cmd[1:], kw.get("cwd")))
         return subprocess.CompletedProcess(cmd, self.cli_rc, stdout="", stderr="")
 
+    def git_init(self, path: Path | None = None) -> None:
+        """Make `path` (default: the claude home) a git work tree, as a dotfiles repo is."""
+        subprocess.run(["git", "init", "-q", str(path or self.home)], check=True)
+
     def write(self, rel: str, text: str = "x") -> Path:
         p = self.home / rel
         p.parent.mkdir(parents=True, exist_ok=True)

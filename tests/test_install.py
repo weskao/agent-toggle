@@ -118,6 +118,29 @@ class InstallShimsCase(SandboxCase):
         (row,) = [r for r in env["results"] if r["harness"] == "opencode"]
         self.assertEqual(row["status"], "skipped")
 
+    def test_opencode_shim_skipped_when_an_alias_dir_already_serves_the_same_one(self) -> None:
+        oc = self.opencode_home(None)
+        twin = self.tmp / ".agents" / "skills" / "agent-toggle" / "SKILL.md"
+        twin.parent.mkdir(parents=True)
+        twin.write_text(cli.shim_text("opencode"), encoding="utf-8")
+        rc, env = self.run_cli("--harness", "opencode")
+        self.assertEqual(rc, 0)
+        (row,) = env["results"]
+        self.assertEqual(row["status"], "skipped")
+        self.assertEqual(row["detail"], f"covered by {twin}")
+        self.assertFalse(shim(oc).exists())
+
+    def test_opencode_shim_still_written_beside_the_claude_one_and_noted(self) -> None:
+        # the claude shim tells the agent `--harness` defaults to claude: wrong for OpenCode
+        self.opencode_home(None)
+        rc, env = self.run_cli()
+        self.assertEqual(rc, 0)
+        (row,) = [r for r in env["results"] if r["harness"] == "opencode"]
+        self.assertEqual(row["status"], "ok")
+        self.assertEqual(row["also_seen"], [str(shim(self.tmp / ".claude"))])
+        self.assertEqual(shim(self.tmp / ".config" / "opencode").read_text(encoding="utf-8"),
+                         cli.shim_text("opencode"))
+
     def test_no_harness_is_exit_4(self) -> None:
         for h in (".claude", ".codex"):
             os.rename(self.tmp / h, self.tmp / (h + "-gone"))

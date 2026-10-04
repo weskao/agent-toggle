@@ -98,6 +98,30 @@ class AliasBehaviour:
         self.assertTrue(any(".synced-from-test" in w
                             for w in self.run_json("status")[1]["warnings"]))
 
+    def test_sync_marker_warns_once_per_real_dir_naming_every_viewer(self) -> None:
+        (self.tmp / ".claude" / "skills" / ".synced-from-test").write_text("", encoding="utf-8")
+        hits = lambda env: [w for w in env["warnings"] if ".synced-from-test" in w]   # noqa: E731
+        status = hits(self.run_json("status")[1])
+        self.assertEqual(len(status), 1, status)
+        self.assertIn("viewed by claude, opencode", status[0])
+        disable = hits(self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1])
+        self.assertEqual(len(disable), 1, disable)
+        self.assertIn("viewed by claude, opencode", disable[0])
+        text = self.run_cli("status")[1]
+        self.assertEqual(text.count(".synced-from-test"), 1, text)
+
+    def test_gitignore_warning_once_per_park_dir_and_only_inside_a_work_tree(self) -> None:
+        none = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
+                ["warnings"] if "NOT gitignored" in w]
+        self.assertEqual(none, [])                      # no git work tree: nothing to fix
+        self.run_cli("enable", "skill", ITEM, "--harness", "opencode")
+        self.git_init()
+        warned = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
+                  ["warnings"] if "NOT gitignored" in w]
+        self.assertEqual(len(warned), 1, warned)
+        self.assertEqual(len(set(warned)), 1)
+        self.assertIn(f"{(self.tmp / '.claude').resolve()}/.gitignore", warned[0])
+
 
 @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
 class SymlinkAliasTest(AliasBehaviour, AliasBase):
