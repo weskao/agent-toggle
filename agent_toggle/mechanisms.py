@@ -2,8 +2,10 @@
 remove/re-add an MCP server."""
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import shlex
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -27,9 +29,19 @@ from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
 from .backends.plugin_cli import claude_bin, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import gitignored, prune_empty
-from .harnesses import PROBE_SUFFIXES, harnesses
+from .harnesses import PROBE_SUFFIXES, harnesses, project_view
 from .output import CliError, Result, die
-from .store import BATCH, check_entry, log, make_key, project_digest
+from .store import (
+    BATCH,
+    begin,
+    check_entry,
+    checkpoints,
+    end,
+    log,
+    make_key,
+    parse_key,
+    project_digest,
+)
 
 
 def fail_row(out: Result, dry_run: bool, harness: str, type_: str, action: str, name: str,
@@ -291,6 +303,145 @@ def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> Dir
                    sorted({hn for hn, _ in found}))
 
 
+def _logged_move(state: dict, key: str, action: str, entry: dict | None, src: Path,
+                 dest_dir: Path, dry_run: bool, out: Result) -> Path:
+    """move() under a write-ahead state entry (G13). The refusals run first and touch
+    nothing; a move that fails part-way is settled from what is on disk."""
+    target = move(src, dest_dir, True)
+    if dry_run:
+        return target
+    if entry is None:                    # an untracked parked item: nothing to record
+        return move(src, dest_dir)
+    _begin(state, key, action, entry)
+    try:
+        return move(src, dest_dir)
+    except OSError:
+        settle(state, key, out, inline=True)
+        raise
+
+
+def _begin(state: dict, key: str, action: str, entry: dict) -> None:
+    """store.begin; if the state save itself fails, nothing was touched: drop it."""
+    try:
+        begin(state, key, action, entry)
+    except OSError:
+        end(state, key)
+        raise
+
+
+def _exists(p: Path) -> bool:
+    return p.exists() or p.is_symlink()
+
+
+def _enable_cmd(key: str, entry: dict) -> str:
+    harness, digest, type_, name = parse_key(key)
+    return " ".join(["agent-toggle", "enable", type_, shlex.quote(name), "--harness", harness]
+                    + (["--project", shlex.quote(entry["project"])] if digest else []))
+
+
+def settle(state: dict, key: str, out: Result | None = None, *,
+           dry_run: bool = False, inline: bool = False) -> tuple[str, str]:
+    """Resolve the write-ahead entry `key` from what is on disk: (verdict, message).
+
+    `done`: the op landed -- record it; `undone`: it did not -- drop the record (and
+    a half copy); `stuck`: kept, and the message names the exact fix. Never
+    guesses: a flag's prior value is the `was` saved before the write. The entry
+    is untrusted (state is a user file), so it passes the same refusals as a
+    replay before anything is touched. dry_run (status / doctor) only reports;
+    `inline` (the op just failed in this run, its row says why) skips the `undone` note."""
+    p = state.get("pending", {}).get(key)
+    action, entry = (p.get("action"), p.get("entry")) if isinstance(p, dict) else (None, None)
+    mech = entry.get("mechanism") if isinstance(entry, dict) else None
+    fix = f"fix: check it, then delete {json.dumps(key)} under \"pending\" in {fs.state_file()}"
+    try:
+        if action not in ("disable", "enable") or mech not in ("flag", "move") \
+                or entry.get("connector"):
+            raise ValueError("not a pending disable/enable of a flag or a move")
+        if parse_key(key)[1] is None:
+            table = harnesses()
+        elif isinstance(entry.get("project"), str):
+            table = {"claude": project_view(Path(entry["project"]))}
+        else:
+            raise ValueError("project-scope key without a project")
+        if why := _entry_reason(entry, table, key,
+                                ("parked_at", "origin") if mech == "move" else ()):
+            raise ValueError(f"refused: {why}")
+        own = fs.companion_dir() / key.replace(":", "_")    # what park_companions uses
+        if any(not fs.contained(Path(c["to"]), own) for c in entry.get("companions") or []):
+            raise ValueError(f"refused: a companion outside {own}")
+        if action == "enable" and entry != state["disabled"].get(key):
+            raise ValueError("refused: the pending enable is not the recorded entry")
+    except CliError as e:
+        return _report(out, dry_run, "stuck", f"pending {key}: {e.msg}; {fix}")
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        return _report(out, dry_run, "stuck", f"pending {key}: {e}; {fix}")
+    what = f"interrupted {action} of {entry['harness']} {entry['type']} {entry['name']}"
+    if mech == "flag":
+        f = entry["flag"]
+        file, ptr, was = Path(f["file"]), tuple(f["pointer"]), f["was"]
+        try:
+            landed = read_flag(file, ptr) is (False if action == "disable" else was)
+        except FlagError as e:
+            return _report(out, dry_run, "stuck",
+                           f"{what}: {e}; fix: make sure {'.'.join(ptr)} is "
+                           f"{json.dumps(was)} in {file} (its value before the run)")
+    else:
+        parked, origin = Path(entry["parked_at"]), Path(entry["origin"])
+        src, dst = (origin, parked) if action == "disable" else (parked, origin)
+        if _exists(src) and _exists(dst):     # only between fs._copy_move's two renames
+            return _report(out, dry_run, "stuck",
+                           f"{what}: both {src} and {dst} exist (the copy is complete); "
+                           f"fix: check `diff -r {shlex.quote(str(src))} "
+                           f"{shlex.quote(str(dst))}`, then keep one -- "
+                           f"`rm -rf {shlex.quote(str(src))}` finishes the "
+                           f"{action}, `rm -rf {shlex.quote(str(dst))}` undoes it")
+        landed = _exists(dst)
+    disabled = landed == (action == "disable")
+    if dry_run:
+        return _report(out, True, "done" if landed else "undone",
+                       f"{what}: {'finished on disk' if landed else 'never reached disk'}; "
+                       f"the next agent-toggle change records it as "
+                       f"{'disabled' if disabled else 'enabled'}"
+                       + (f"; to restore it now: `{_enable_cmd(key, entry)}`" if disabled
+                          else "; nothing to fix"))
+    if mech == "move":
+        with contextlib.suppress(OSError):    # a stray dot-named copy, never the item
+            fs.remove_leftover(fs.move_leftovers(src, dst)[1 if landed else 0])
+    if landed and action == "disable":     # companions: the ones the killed run moved
+        state["disabled"][key] = {**entry, "companions": [
+            c for c in entry.get("companions") or [] if _exists(Path(c["to"]))]}
+    elif landed:
+        state["disabled"].pop(key, None)
+        if mech == "move":
+            stop = fs.parked_dir() if entry.get("project") else next(
+                (d for d in parked.parents if d.name.endswith("-disabled")), None)
+            if stop is not None:
+                prune_empty(parked.parent, stop)
+            # companions the killed run had not moved back yet
+            restore_companions({"companions": [c for c in entry.get("companions", [])
+                                               if _exists(Path(c["to"]))]}, out)
+    end(state, key)
+    log(action, entry["type"], entry["name"], "recovered",
+        "landed" if landed else "rolled back", harness=entry["harness"],
+        project=entry.get("project"), scope="project" if entry.get("project") else "user")
+    return _report(None if inline and not landed else out, False,
+                   "done" if landed else "undone",
+                   f"recovered {what}: {'finished' if landed else 'rolled back'}, "
+                   f"now {'disabled' if disabled else 'enabled'}")
+
+
+def _report(out: Result | None, dry_run: bool, verdict: str, msg: str) -> tuple[str, str]:
+    if out is not None:
+        out.warn(msg)
+    return verdict, msg
+
+
+def recover(state: dict, out: Result, dry_run: bool = False) -> None:
+    """Settle every write-ahead entry a killed run left (call under the lock)."""
+    for key in list(state.get("pending", {})):
+        settle(state, key, out, dry_run=dry_run)
+
+
 def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness: str,
                 out: Result, dry_run: bool = False, *, batch: str = BATCH,
                 optional: bool = False) -> tuple[int, list[str]]:
@@ -340,16 +491,24 @@ def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness:
             elif dry_run:
                 _ok(out, dry_run, harness, type_, action, name, "")
             else:
-                try:
-                    set_flag(file, pointer, False)
-                except (FlagError, fs.WriteError) as e:
-                    fails += fail(name, str(e))
-                    continue
-                state["disabled"][key] = {
+                new = {
                     "mechanism": "flag", "harness": harness, "type": type_, "name": name,
                     "flag": {"file": str(file), "pointer": list(pointer), "was": was},
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
+                try:
+                    _begin(state, key, "disable", new)
+                except OSError as e:
+                    fails += fail(name, f"state not saved, nothing changed: {e}")
+                    continue
+                try:
+                    set_flag(file, pointer, False)
+                except (FlagError, fs.WriteError) as e:
+                    settle(state, key, out, inline=True)
+                    fails += fail(name, str(e))
+                    continue
+                state["disabled"][key] = new
+                end(state, key)
                 _ok(out, dry_run, harness, type_, action, name,
                     f"disabled (set {'.'.join(pointer)} to false in {file})")
                 log(action, type_, name, "ok", str(file), harness=harness, batch=batch)
@@ -371,11 +530,18 @@ def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness:
             _ok(out, dry_run, harness, type_, action, name, "")
         else:
             try:
+                _begin(state, key, "enable", entry)
+            except OSError as e:
+                fails += fail(name, f"state not saved, nothing changed: {e}")
+                continue
+            try:
                 set_flag(file, pointer, entry["flag"]["was"])
             except (FlagError, fs.WriteError) as e:
+                settle(state, key, out, inline=True)
                 fails += fail(name, str(e))
                 continue
             state["disabled"].pop(key, None)
+            end(state, key)
             _ok(out, dry_run, harness, type_, action, name,
                 f"enabled (restored {'.'.join(pointer)} in {file})")
             log(action, type_, name, "ok", str(file), harness=harness, batch=batch)
@@ -446,14 +612,20 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 continue
             if proj and not dry_run:
                 fs.private_dir(fs.parked_dir())
+            new = {
+                "mechanism": "move", "harness": v.owner, "type": type_, "name": name,
+                "parked_at": str(v.parked / rel), "origin": str(src),
+                "companions": [], **({"project": pstr} if proj else {}),
+                **({"shared_with": [h for h in v.sharers if h != v.owner]}
+                   if len(v.sharers) > 1 else {}),
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            }
             try:
-                # ponytail: a project on another filesystem than ~/.agent-toggle makes
-                # shutil.move copy+delete (not atomic; symlinks kept as links, modes via
-                # copy2, ownership/xattrs may differ; a copy failing midway can leave a
-                # partial park target that later disables refuse to overwrite -- remove it
-                # by hand). Same-fs moves stay atomic renames.
-                target = move(src, (v.parked / rel).parent, dry_run)
-            except (OSError, FileNotFoundError, FileExistsError, NotADirectoryError) as e:
+                # Across filesystems (a project vs ~/.agent-toggle) this is fs._copy_move:
+                # ownership/xattrs may differ from a rename; see its crash guarantees.
+                target = _logged_move(state, key, "disable", new, src,
+                                      (v.parked / rel).parent, dry_run, out)
+            except OSError as e:
                 fails += fail(name, str(e))
                 continue
             row = _ok(out, dry_run, harness, type_, action, name, _shared_text(
@@ -461,8 +633,12 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                       **({"shared_with": others, "owner": v.owner} if others else {}))
             # project scope moves the item only: repo text must not steer other tracked
             # files out of a shared repo (companions are a user-scope heuristic)
+            def ahead(rec: dict, new=new, key=key) -> None:   # write-ahead per companion
+                new["companions"].append(rec)
+                begin(state, key, "disable", new)
             companions = [] if proj else park_companions(
-                target, ohome, key.replace(":", "_"), out, dry_run, src if dry_run else None)
+                target, ohome, key.replace(":", "_"), out, dry_run, src if dry_run else None,
+                before_move=ahead)
             row["companions"] = companions
             if proj:
                 row["project"] = pstr
@@ -470,14 +646,8 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                          f"status; restore with: "
                          f"agent-toggle enable {type_} {name} --project {proj}")
             if not dry_run:
-                state["disabled"][key] = {
-                    "mechanism": "move", "harness": v.owner, "type": type_, "name": name,
-                    "parked_at": str(target), "origin": str(src),
-                    "companions": companions, **({"project": pstr} if proj else {}),
-                    **({"shared_with": [h for h in v.sharers if h != v.owner]}
-                       if len(v.sharers) > 1 else {}),
-                    "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                }
+                state["disabled"][key] = {**new, "companions": companions}
+                end(state, key)
                 log(action, type_, name, "ok", str(target), harness=harness, batch=batch,
                     project=pstr, scope="project" if proj else "user")
         else:
@@ -503,12 +673,13 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             dest_parent = (Path(entry["origin"]).parent if entry
                            else (v.live / src.relative_to(v.parked)).parent)
             try:
-                target = move(src, dest_parent, dry_run)
-            except (OSError, FileExistsError, NotADirectoryError) as e:
+                target = _logged_move(state, key, "enable", entry, src, dest_parent, dry_run,
+                                      out)
+            except OSError as e:
                 fails += fail(name, str(e))
                 continue
-            if not dry_run:
-                prune_empty(src.parent, v.parked)
+            if not dry_run:       # a project's park dirs go too, up to parked_dir() (G12)
+                prune_empty(src.parent, fs.parked_dir() if proj else v.parked)
             _ok(out, dry_run, harness, type_, action, name,
                 _shared_text("enabled", v.owner, harness, others), restored_to=str(target),
                 **({"shared_with": others, "owner": v.owner} if others else {}),
@@ -517,6 +688,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 restore_companions(entry, out, dry_run)
                 if not dry_run:
                     state["disabled"].pop(key, None)
+                    end(state, key)
             if not dry_run:
                 log(action, type_, name, "ok", str(target), harness=harness, batch=batch,
                     project=pstr, scope="project" if proj else "user")
@@ -544,8 +716,9 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                   "unsupported", batch=batch)
         return len(names)
     fails = 0
+    tick = checkpoints(state, dry_run)
     for name in names:
-        fs.refresh_lock()
+        tick()
         if not valid_plugin_id(name):
             fails += fail_row(out, dry_run, harness, "plugin", action, name,
                               "refused: plugin id has characters outside [A-Za-z0-9._@:/-]",
@@ -606,8 +779,9 @@ def toggle_mcp(action: str, names: list[str], state: dict,
     fails = 0
 
     table = harnesses()
+    tick = checkpoints(state, dry_run)
     for name in names:
-        fs.refresh_lock()
+        tick()
         key = f"{harness}:mcp:{name}"
         entry = state["disabled"].get(key)
         need = () if (entry or {}).get("connector") else ("backup",)
@@ -783,8 +957,9 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
         return fail_row(out, dry_run, harness, "mcp", action, name, msg, batch=batch,
                         project=pstr)
 
+    tick = checkpoints(state, dry_run)
     for name in names:
-        fs.refresh_lock()
+        tick()
         key = make_key(harness, "mcp", name, project=project)
         entry = state["disabled"].get(key)
         bp = fs.backup_dir() / f"{digest}__{harness}__{name.replace('/', '_')}.json"
@@ -877,8 +1052,9 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
     def fail(name: str, msg: str) -> int:
         return fail_row(out, dry_run, harness, "mcp", action, name, msg, batch=batch)
 
+    tick = checkpoints(state, dry_run)
     for name in names:
-        fs.refresh_lock()
+        tick()
         if h.backend != "json" or file.name not in h.editable:
             fails += fail(name, f"{file.name} is not an editable {harness} file")
             continue

@@ -7,6 +7,7 @@ module constants.
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib
 import json
 import os
@@ -151,6 +152,12 @@ def _holder_alive(path: Path) -> bool:
     return True
 
 
+def lock_held() -> bool:
+    """True if a live run holds the lock (status/doctor then see its op in flight)."""
+    path = lock_file()
+    return path.is_file() and _holder_alive(path)
+
+
 def refresh_lock() -> None:
     """Bump the mtime of a lock WE hold, so a batch longer than LOCK_STALE is
     not mistaken for a crashed run. No-op when we do not hold it."""
@@ -195,8 +202,14 @@ def lock():
             except FileNotFoundError:
                 continue                 # released / taken over by a rival
             if time.monotonic() >= deadline:
+                # a killed run leaves its lock behind; say so instead of "another run"
+                dead = not WIN and path.is_file() and not _holder_alive(path)
                 raise Locked(f"{path} is held by another agent-toggle run "
-                             f"(waited {LOCK_WAIT:g}s)") from None
+                             f"(waited {LOCK_WAIT:g}s)"
+                             + (f"; its PID is not running (a killed run?) -- it expires "
+                                f"{LOCK_STALE / 60:g} min after it was taken, or remove "
+                                f"{path} if no agent-toggle is running" if dead else "")
+                             ) from None
             time.sleep(0.05)
     pid = str(os.getpid())
     try:
@@ -376,8 +389,96 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists -- refusing to overwrite")
 
-    shutil.move(str(src), str(target))
+    try:
+        os.rename(src, target)                      # same filesystem: one atomic step
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+        _copy_move(src, target)
     return target
+
+
+def move_leftovers(src: Path, target: Path) -> tuple[Path, Path]:
+    """(half copy, trash) a killed cross-fs move can leave beside `target` / `src`."""
+    return (target.with_name(f".{target.name}.agent-toggle-tmp"),
+            src.with_name(f".{src.name}.agent-toggle-del"))
+
+
+def remove_leftover(p: Path) -> None:
+    """Delete one of move_leftovers()' paths (a link is unlinked, never followed)."""
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p)
+    elif p.exists() or p.is_symlink():
+        p.unlink()
+
+
+def _fsync(path: Path | str) -> None:
+    """Flush one file's data or one dir's entries (POSIX; Windows has no dir fsync).
+    A dir fsync is best effort: some FUSE / SMB filesystems refuse it (EINVAL)."""
+    if WIN or os.path.islink(path):
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        if not os.path.isdir(path):
+            raise
+
+
+def _fsync_tree(root: Path) -> None:
+    if not root.is_dir() or root.is_symlink():
+        _fsync(root)
+        return
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            _fsync(os.path.join(dirpath, f))
+        _fsync(dirpath)
+
+
+def _copy_move(src: Path, target: Path) -> None:
+    """A cross-filesystem move that a kill cannot leave as two half copies (G12).
+
+    Copy into a temp sibling of `target`, rename it into place (atomic: same fs),
+    rename `src` aside (atomic: its own fs), then delete that. At every point
+    either `src` is intact or `target` is complete; the caller's write-ahead state
+    entry says which op was running (mechanisms.settle resolves it next run).
+    Symlinks stay links and modes follow copy2, as shutil.move's fallback did."""
+    tmp, trash = move_leftovers(src, target)
+    remove_leftover(tmp)                 # a killed earlier attempt's half copy
+    try:
+        if src.is_symlink():
+            os.symlink(os.readlink(src), tmp)
+        elif src.is_dir():
+            shutil.copytree(src, tmp, symlinks=True)
+        else:
+            shutil.copy2(src, tmp)
+        _fsync_tree(tmp)                 # flushed before the source goes (macOS: no F_FULLFSYNC)
+        # ponytail: stdlib has no atomic no-replace rename; re-check to shrink the race
+        # with something (a sync job) re-creating the target during a long copy
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(f"{target} appeared during the copy -- refusing to overwrite")
+        replace(tmp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            remove_leftover(tmp)
+        raise
+    try:
+        _fsync(target.parent)
+        remove_leftover(trash)           # only ever exists once its copy was complete
+        replace(src, trash)
+    except BaseException:                # src untouched and complete: drop our copy,
+        if src.exists() or src.is_symlink():   # renamed back first so `target` is never
+            with contextlib.suppress(OSError):  # partial (settle removes a left `tmp`)
+                replace(target, tmp)
+                remove_leftover(tmp)
+        raise
+    # ponytail: a trash dir that cannot be deleted (permissions) stays as a dot-named
+    # duplicate of what was parked; report it if that ever shows up in the wild.
+    with contextlib.suppress(OSError):
+        remove_leftover(trash)
 
 
 def prune_empty(start: Path, stop: Path) -> None:

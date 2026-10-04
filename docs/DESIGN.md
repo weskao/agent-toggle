@@ -260,7 +260,40 @@ resolve item  ──►  check editable/aliases  ──►  mechanism.disable/en
 
 Every mutating command acquires `~/.agent-toggle/lock` (O_EXCL create, PID
 inside, stale after 10 min) for the whole batch. Two concurrent runs: the
-second waits up to 5 s then fails loudly.
+second waits up to 5 s then fails loudly (saying so when the holder's PID is
+gone, i.e. a killed run left the lock).
+
+State is saved per item, not once per batch (G13). A flag write or a dir move
+is write-ahead: `store.begin` saves the full entry under `pending` (atomic
+state write) BEFORE touching disk, and the item's outcome moves it to
+`disabled` (or drops it) in memory; that next save -- the following item's
+`begin`, or `apply_plan`'s final save -- persists it. MCP and plugin items get a
+per-item checkpoint save instead (only when the item changed state). A killed
+run therefore loses at most the item in flight. Under the lock, before the plan,
+`mechanisms.recover` settles each leftover `pending` entry from disk:
+`done` (the flag holds the new value / the item sits at the target: record it),
+`undone` (it does not: drop the record and any half copy) or `stuck` (kept,
+reported with the exact fix: an unreadable flag file, a tampered entry, or a
+cross-fs move killed between its two renames). It never guesses: a flag's prior
+value is the `was` saved before the write. A failed item settles the same way.
+A parked item's companions are added to its `pending` entry (one more save) before
+each companion moves, so recovery records the ones that moved. A tampered entry
+is refused (same checks as a replay, companions only under their own
+`companions/<key>` dir, a pending enable must equal the recorded entry).
+`enable --all` settles leftovers before it builds its plan. `status` / `doctor` / a
+dry run (no lock) only report, and only when no live run holds the lock (POSIX:
+Windows cannot tell a live holder). Cost: one extra small atomic state
+write (one fsync) per item, ~0.25 ms on APFS for a 50-entry state.
+
+A move across filesystems (a `--project` dir vs `~/.agent-toggle`) is
+`fs._copy_move`: copy into `.<name>.agent-toggle-tmp` beside the target, rename
+that into place (atomic, same fs), rename the source to `.<name>.agent-toggle-del`
+(atomic, its fs), delete it. The copy is fsynced (files; dirs and the target parent best effort)
+before the source is renamed aside; the target is re-checked just before the
+rename into place; a source that cannot be renamed aside drops the copy again
+(renamed back to the temp name first, so the target is never partial).
+At every point the source is intact or the target complete. `enable` prunes the emptied `parked/<sha8>/*-disabled` and
+`parked/<sha8>` dirs (never a non-empty one, never outside `parked/`).
 
 ### 5.5 State schema v3
 
@@ -304,6 +337,10 @@ entries also store `mechanism: flag` but carry `"connector": true` and no `flag`
 Every log row follows `{ts, harness, type, name, action, result, batch,
 project, scope, detail}`; `batch` is one id per process and is what `undo`
 reverses.
+
+An optional top-level `"pending": {"<key>": {"action": "disable|enable",
+"entry": {...}}}` holds the op a run had in flight (§5.4); it is absent when
+nothing is in flight, so old files load unchanged and the schema stays v3.
 
 `store.py` migrates v2 → v3 on first load (adds `mechanism` from the
 presence of `backup`/`native`/`parked_at`). Migrations are forward-only and
@@ -635,11 +672,19 @@ Known gaps added by phase 2:
   `true`/`false` token changes; duplicate keys are still refused and a leading
   BOM is preserved.
 - The openclaw and opencode flag shapes are assumed, not verified (§11).
-- A project park across filesystems is copy + delete, not an atomic rename
-  (symlink and permission handling differ); an empty `parked/<sha8>/*-disabled`
-  dir can remain after `enable`.
-- A killed run between the flag write and the state save leaves the flag `false`
-  with no state entry; `enable` then asks the user to set it back by hand.
+- Fixed: a project park across filesystems is a crash-safe copy (temp sibling,
+  rename into place, source renamed aside then deleted; §5.4), and `enable` prunes
+  the emptied `parked/<sha8>/*-disabled` and `parked/<sha8>` dirs. Ownership and
+  xattrs may still differ from a rename's.
+- Fixed: a killed run between the flag write (or dir move, or companion move) and
+  the state save is recoverable: state is saved per item with a write-ahead
+  `pending` entry that the next run settles (§5.4).
+- MCP and plugin items have no write-ahead entry, only a per-item checkpoint: a
+  kill after `claude mcp remove` / `claude plugin disable` / the config edit and
+  before that save leaves the change with no state entry (the MCP backup stays in
+  `mcp-backups/`, which `doctor` lists). A recovered op is logged `recovered`, not
+  `ok`, so `undo` does not reverse it. After a real kill the lock blocks the next
+  run until it is stale (10 min) unless removed by hand; the error says so.
 - `undo` and `enable --all` trust the project dir recorded in the log or state,
   the same trust user-scope replay already places in them; project dirs are
   still validated (not `$HOME`, roots or tool dirs; must exist).

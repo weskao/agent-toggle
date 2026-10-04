@@ -114,7 +114,8 @@ def other_users(target: Path, item: Path, home: Path,
 
 
 def park_companions(item: Path, home: Path, key: str, out: Result | None = None,
-                    dry_run: bool = False, source: Path | None = None) -> list[dict]:
+                    dry_run: bool = False, source: Path | None = None,
+                    before_move=None) -> list[dict]:
     """Move companions used ONLY by this item; report the shared ones.
 
     Dry run: plan the same moves without making them (`source` = where the item
@@ -122,6 +123,7 @@ def park_companions(item: Path, home: Path, key: str, out: Result | None = None,
 
     Moving a shared helper (tg-send.sh is referenced by five different things)
     would silently break every other user, so sharing is a veto, not a warning.
+    `before_move({from, to})` runs before each real move (the caller's write-ahead).
     """
     out = out or Result()
     home = home.resolve()
@@ -134,6 +136,9 @@ def park_companions(item: Path, home: Path, key: str, out: Result | None = None,
             continue
         dest = fs.companion_dir() / key / comp.relative_to(home).parent
         try:
+            if before_move and not dry_run:
+                move(comp, dest, True)               # refusals first, nothing touched
+                before_move({"from": str(comp), "to": str(dest / comp.name)})
             target = move(comp, dest, dry_run)
         except (OSError, FileExistsError, NotADirectoryError) as e:
             out.say(f"    ! companion {comp.name}: {e}", warn=True)

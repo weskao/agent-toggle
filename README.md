@@ -463,8 +463,11 @@ agent-toggle enable --all --project .
   text, so it may hold auth headers). `enable` restores the file byte for byte
   if it is unchanged since the disable, otherwise merges the entry back in and
   reformats.
-- Moves across filesystems fall back to copy + delete (not atomic). An empty
-  `parked/<sha8>/*-disabled` dir may remain after `enable`; `doctor` ignores it.
+- A move across filesystems copies into a temp dir beside the target, renames it
+  into place, then deletes the source, so a killed run leaves either the source
+  intact or the target complete, and the next run settles it (see "Where state
+  lives"). `enable` removes the emptied `parked/<sha8>/*-disabled` and
+  `parked/<sha8>` dirs; a dir that still holds anything is kept.
 - `status` prints one `project <dir>` line per project holding parked items.
   A project with only `.mcp.json` saves only its parked servers in
   `profile save --project`; live ones are not listed (the inventory needs
@@ -489,8 +492,8 @@ passes the same tamper checks `enable` runs, modes no looser than `0600` /
 | `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
 | `unverified` | no version could be read, or the row has nothing to check |
-| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one after `enable` is ignored) |
-| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
+| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
+| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool, an op a killed run left in flight that needs you (`pending: stuck`, with the exact fix) |
 
 Only `error` makes the exit code `1`; each problem row names the command that
 fixes it. `--harness X` for a harness that is not installed is a `note` (exit
@@ -518,9 +521,10 @@ comments and commas are kept. JSON5 (unquoted keys, single quotes, hex) and file
 that repeat a key are **refused**, never rewritten; a leading BOM is kept as is; a
 missing key is refused, never invented. An openclaw skill
 uses the flag only when `skills.entries.<name>` already exists, otherwise its
-directory is moved. If a run is killed between the flag write and the state
-save, the flag is `false` with no state entry: `enable` then tells you to set it
-back by hand. Please report a real install that differs.
+directory is moved. The state entry (with the flag's previous value) is saved
+before the flag is written, so a run killed in between is settled by the next
+run, never guessed (see "Where state lives"). Please report a real install that
+differs.
 
 ## Safety checks
 
@@ -545,13 +549,26 @@ bookkeeping.
 
 | file | contents |
 |---|---|
-| `state.json` | current disabled list (schema v3; atomic write, mode `0600`) |
-| `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item) |
+| `state.json` | current disabled list (schema v3; atomic write, mode `0600`), saved before each flag write or dir move with the op in flight under an optional `pending` key, and after each MCP / plugin item |
+| `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item; the error says when its PID is gone, i.e. a killed run left it) |
 | `log.jsonl` | one line per operation (mode `0600`), see below |
 | `mcp-backups/` | `<harness>__<server>.json`, or `<sha8>__<harness>__<server>.json` for a project `.mcp.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
+
+A killed run loses at most the one item in flight. If that was a flag write or a
+dir move (with its companions), its `pending` record (the full entry, a flag's
+previous value included) lets the next `disable` / `enable` / `enable --all` /
+`undo` / ... finish it (it reached disk: recorded) or drop it (it did not), with
+a warning and a `recovered` log row (which `undo` does not reverse). `status` and
+`doctor` report it, with `agent-toggle enable ...` when the item ends up
+disabled. The one case left to you is a cross-filesystem move killed between its
+two renames: both copies are complete, and the report names the `diff -r` to
+check and the `rm -rf` that keeps either one. MCP and plugin items are saved
+per item (when the next one starts), without a `pending` record: a kill inside that window
+leaves the change unrecorded (an MCP server's backup stays in `mcp-backups/`).
+A killed run also leaves its `lock`; the next run's error says so.
 
 Each `log.jsonl` row is `{ts, harness, type, name, action, result, batch,
 project, scope, detail}`. `batch` is one id per run (what `undo` reverses);

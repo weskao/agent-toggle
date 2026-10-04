@@ -270,7 +270,9 @@ class StateTest(DoctorCase):
         (proj / ".claude" / "skills" / "demo-skill" / "SKILL.md").write_text("x", encoding="utf-8")
         for verb in ("disable", "enable"):
             self.assertEqual(self.run_cli(verb, "skill", "demo-skill", "--project", str(proj))[0], 0)
-        self.assertTrue((fs.parked_dir() / store.project_digest(proj)).is_dir())   # the leftover
+        park = fs.parked_dir() / store.project_digest(proj)
+        self.assertFalse(park.exists())                  # enable prunes it now (G12)
+        (park / "skills-disabled").mkdir(parents=True)   # a leftover from an older version
         rc, rows = self.doctor()
         self.assertEqual(rc, 0, rows)
         self.assertEqual(self.rows(rows, "warn"), [])

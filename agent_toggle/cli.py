@@ -46,7 +46,7 @@ from . import __version__, config, cost, doctor, fs, ops, profiles, store, undo
 from .backends.plugin_cli import claude_bin
 from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
-from .mechanisms import dir_view, validate_name
+from .mechanisms import dir_view, settle, validate_name
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
 
@@ -109,6 +109,11 @@ def cmd_status(state: dict, out: Result, only: str | None = None) -> None:
         out.say(f"WARNING {fs.state_dir()} is group/world readable -- backups may hold "
                 f"auth headers; fix: chmod 700 {fs.state_dir()}", warn=True)
     out.say(f"claude  {claude or 'NOT FOUND -- plugin/mcp actions will fail'}")
+    if state.get("pending") and fs.lock_held():
+        out.say("WARNING another agent-toggle run is in progress (it holds the lock)", warn=True)
+    else:
+        for key in state.get("pending", {}):      # an op a killed run left in flight
+            out.say(f"WARNING {settle(state, key, dry_run=True)[1]}", warn=True)
     if legacy_state_dir.exists():
         done = any(k.startswith("claude:") for k in state["disabled"])
         legacy = "imported" if done else "present"

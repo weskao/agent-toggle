@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- **ops:** A killed run is recoverable: state is saved per item, with a write-ahead `pending` entry (the flag's previous value included) before each flag write or dir move that the next run finishes or rolls back, and `status` / `doctor` report with the fix; a cross-filesystem project park copies into a temp sibling and renames it into place, and `enable` prunes the emptied `parked/<sha8>` dirs
 - **install-shims:** Write the OpenCode shim into its first `skills.paths` dir when one is set (falling back to `skills/`); never overwrite the shim of another installed harness whose dir it redirects onto (skipped, "belongs to <owner>")
 
 ## [0.2.0] - 2026-10-03

@@ -14,7 +14,7 @@ from pathlib import Path
 from . import fs, store
 from .backends.flag_json import jsonc_loads
 from .harnesses import Harness, harnesses
-from .mechanisms import _refusal, dir_view
+from .mechanisms import _refusal, dir_view, settle
 from .output import CliError, Result
 from .store import load_state
 
@@ -247,7 +247,9 @@ def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel:
 
 def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> None:
     entries = state["disabled"].values()
-    tracked = {e["parked_at"] for e in entries
+    pending = [p["entry"] for p in state.get("pending", {}).values()
+               if isinstance(p, dict) and isinstance(p.get("entry"), dict)]
+    tracked = {e["parked_at"] for e in (*entries, *pending)
                if isinstance(e, dict) and isinstance(e.get("parked_at"), str)}
     seen: set[Path] = set()
     for h in table.values():
@@ -266,7 +268,7 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
     if only:
         return
     digests = set()
-    for k in state["disabled"]:
+    for k in (*state["disabled"], *state.get("pending", {})):
         try:
             digests.add(store.parse_key(k)[1])
         except ValueError:
@@ -321,6 +323,17 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
                                                                     *(e.get("shared_with") or ()))):
                 continue
             _check_entry(out, key, e, table)
+        live = bool(state.get("pending")) and fs.lock_held()
+        if live:
+            _row(out, None, None, None, "note", "another agent-toggle run is in progress (it "
+                 "holds the lock); its in-flight op is not checked")
+        for key, p in {} if live else state.get("pending", {}).items():   # a killed run's op
+            if harness and not (isinstance(p, dict) and isinstance(p.get("entry"), dict)
+                                and p["entry"].get("harness") == harness):
+                continue
+            verdict, msg = settle(state, key, dry_run=True)
+            _row(out, None, None, key, "error" if verdict == "stuck" else "warn", msg,
+                 pending=verdict)
         _check_orphans(out, state, table, harness)
     if not harness:
         _check_modes(out)
