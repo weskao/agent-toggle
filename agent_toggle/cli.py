@@ -12,8 +12,8 @@ to the targets -- a user's `git status` must not change because of our
 bookkeeping.
 
 Usage:
-    agent_toggle.py ui [--dry-run]             # interactive picker (curses, else numbered menu)
-    agent_toggle.py cost [--type T]            # startup token estimates, biggest first
+    agent_toggle.py ui [--dry-run] [--project D]   # interactive picker (curses, else numbered menu)
+    agent_toggle.py cost [--type T] [--project D]  # startup token estimates, biggest first
     agent_toggle.py disable <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable  <type> <name>...   [--harness H] [--dry-run]
     agent_toggle.py enable --all [--harness H] [--dry-run]   # restore everything
@@ -215,12 +215,17 @@ def parked_drift(items: list[Path], parked: Path, live: Path,
 
 
 def cmd_cost(state: dict, out: Result, harness: str | None = None,
-             type_: str | None = None) -> None:
-    """Estimated startup tokens per item, biggest first. Read-only."""
-    items = [i for i in cost.inventory(store.scope_state(state), harnesses(), out.warn)
+             type_: str | None = None, project: str | None = None) -> None:
+    """Estimated startup tokens per item, biggest first. Read-only. With `project`, that
+    project's .claude and .mcp.json only (no plugins), else user scope."""
+    proj = profiles.project_dir(project, harness)       # exit 4 like disable --project
+    scoped, table = profiles.scope(state, proj)
+    items = [i for i in cost.inventory(scoped, table, out.warn, plugins=proj is None)
              if (not harness or harness in (i.harness, *i.shared_with))
              and (not type_ or i.type == type_)]
     items.sort(key=lambda i: (-i.tokens, -i.would_save, i.harness, i.type, i.name))
+    if proj:
+        out.say(f"project {proj}")
     for i in items:
         what = (f"~{i.tokens:>6} tok  {i.basis}" if i.enabled
                 else f"~{0:>6} tok  parked, would save ~{i.would_save} tok  ({i.basis})")
@@ -237,24 +242,28 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
             f"~{saved} tok already saved by parked items  "
             f"(chars/{cost.CHARS_PER_TOKEN} estimate, +-25%)")
     out.row(harness, type_, None, "cost", "ok", "total", show=False, items=len(items),
-            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA)
+            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA,
+            **({"project": str(proj)} if proj else {}))
 
 
-def cmd_ui(state: dict, out: Result, dry_run: bool = False) -> None:
+def cmd_ui(state: dict, out: Result, dry_run: bool = False, project: str | None = None,
+           harness: str | None = None) -> None:
+    proj = profiles.project_dir(project, harness)       # exit 4 like disable --project
+    scoped, table = profiles.scope(state, proj)
     try:
         from .ui import picker as ui
     except ImportError:                      # no curses (Windows without windows-curses)
         from .ui import menu as ui
-    changes = ui.pick(store.scope_state(state), harnesses(), plugins=not dry_run,
-                      color=use_color(sys.stdout, out.color))
+    changes = ui.pick(scoped, table, plugins=not dry_run and proj is None,
+                      color=use_color(sys.stdout, out.color), project=proj, dry_run=dry_run)
     if changes is None:
         out.say("cancelled -- nothing changed")
         return
     if not changes:
         out.say("no changes")
         return
-    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name)
-                   for r in changes), key=lambda op: op[:3])
+    plan = sorted((ops.Op(r.harness, r.type, "enable" if r.staged else "disable", r.name,
+                          str(proj) if proj else None) for r in changes), key=lambda op: op[:3])
     # the picker's state copy may be stale: apply_plan re-reads it under the lock
     ops.apply_plan(plan, out, dry_run, batch=store.BATCH, headers=True)
     if dry_run:
@@ -468,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser("ui", aliases=["pick"], parents=[common], help="interactive picker")
     up.add_argument("--dry-run", action="store_true",
                     help="show the plan for what you stage; change nothing")
+    up.add_argument("--project", metavar="dir", help=PROJECT_HELP)
     sub.add_parser("status", parents=[common], help="health check")
     ls = sub.add_parser("list", parents=[common], help="what is currently disabled")
     ls.add_argument("type", nargs="?", choices=TYPES)
@@ -475,6 +485,8 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser("cost", parents=[common],
                         help="estimated startup tokens per item, biggest first")
     cp.add_argument("--type", choices=TYPES, help="only this resource type")
+    cp.add_argument("--project", metavar="dir",
+                    help="price this project's <dir>/.claude and <dir>/.mcp.json, not user scope")
     sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
@@ -523,9 +535,9 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "ui":
             if out.json_mode:
                 die("ui is interactive; --json is not supported", 2)
-            cmd_ui(load_state(write_back=False), out, args.dry_run)
+            cmd_ui(load_state(write_back=False), out, args.dry_run, args.project, args.harness)
         elif cmd == "cost":
-            cmd_cost(load_state(write_back=False), out, args.harness, args.type)
+            cmd_cost(load_state(write_back=False), out, args.harness, args.type, args.project)
         elif cmd == "status":
             cmd_status(load_state(write_back=False), out, args.harness)
         elif cmd == "list":

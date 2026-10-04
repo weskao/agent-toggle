@@ -307,4 +307,8 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
         shared = e.get("shared_with")
         add(h, t, n, False, est,
             [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
-    return items
+    # a project dir symlinked out of the project (to ~/.claude/skills) is user scope
+    outside = {(n, t) for n, h in table.items() if h.project is not None
+               for t, subs in h.dirs.items()
+               if any(not (h.home / s).resolve().is_relative_to(h.project) for s in subs)}
+    return [i for i in items if (i.harness, i.type) not in outside]

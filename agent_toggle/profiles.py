@@ -89,23 +89,24 @@ def _validate(doc) -> dict:
     return doc
 
 
+def scope(state: dict, project: Path | None) -> tuple[dict, dict]:
+    """(state, harness table) of ONE scope: user scope, or `project` (a resolved
+    --project dir; claude layout only). Feed both to `cost.inventory`."""
+    return (store.scope_state(state, project),
+            {"claude": project_view(project)} if project else harnesses())
+
+
 def _inventory(out: Result, plugins: bool,
                project: Path | None = None) -> dict[tuple[str, str, str], bool]:
     """(harness, type, name) -> live now, in ONE scope: user scope, or (`project`, a
     resolved --project dir) that project's .claude only -- the two never mix.
     Reuses the cost inventory (one owner per shared dir)."""
-    state = store.scope_state(store.load_state(write_back=False), project)
-    table = {"claude": project_view(project)} if project else harnesses()
-    # a project dir symlinked out of the project (to ~/.claude/skills) is user scope
-    outside = {t for t, subs in table["claude"].dirs.items()
-               if any(not (table["claude"].home / s).resolve().is_relative_to(project)
-                      for s in subs)} if project else set()
+    state, table = scope(store.load_state(write_back=False), project)
     return {(i.harness, i.type, i.name): i.enabled
-            for i in cost.inventory(state, table, out.warn, plugins and not project)
-            if i.type not in outside}
+            for i in cost.inventory(state, table, out.warn, plugins and not project)}
 
 
-def _project(arg: str | None, only: str | None) -> Path | None:
+def project_dir(arg: str | None, only: str | None) -> Path | None:
     """The resolved --project dir (claude layout only, exit 4 otherwise), or None."""
     if arg is None:
         return None
@@ -142,12 +143,18 @@ def cmd_save(arg: str, out_file: str | None, only: str | None, out: Result,
             path=str(path), items=len(items))
 
 
-def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result,
-              project: Path | None = None) -> None:
+def load_scoped(arg: str, project: Path | None = None) -> dict:
+    """The validated profile `arg`; exit 2 when its scope does not match `project`."""
     doc = _load(arg)
     if (doc.get("scope", "user") == "project") != (project is not None):
         die(f"profile {arg!r} is {doc.get('scope', 'user')}-scope: "
             + ("pass --project <dir>" if project is None else "drop --project"), 2)
+    return doc
+
+
+def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result,
+              project: Path | None = None) -> None:
+    doc = load_scoped(arg, project)
     inv = _inventory(out, plugins=not dry_run and (not only or only == "claude"),  # dry run: no CLI
                      project=project)
     plan, same, skipped = [], 0, 0
@@ -171,8 +178,13 @@ def cmd_apply(arg: str, only: str | None, dry_run: bool, out: Result,
             f"{same} already as profiled, {skipped} skipped")
 
 
+def stored() -> list[Path]:
+    """The saved profile files, by name."""
+    return sorted(fs.profiles_dir().glob("*.json")) if fs.profiles_dir().is_dir() else []
+
+
 def cmd_list(out: Result) -> None:
-    files = sorted(fs.profiles_dir().glob("*.json")) if fs.profiles_dir().is_dir() else []
+    files = stored()
     if not files:
         out.say("no profiles saved")
     for p in files:
@@ -198,7 +210,7 @@ def cmd_profile(args, out: Result) -> None:
         die("--dry-run only applies to `profile apply` / `diff`", 2)
     if args.project is not None and action == "list":
         die("--project does not apply to `profile list`", 2)
-    project = _project(args.project, args.harness)
+    project = project_dir(args.project, args.harness)
     if action == "save":
         cmd_save(target, args.out, args.harness, out, project)
     elif action == "list":

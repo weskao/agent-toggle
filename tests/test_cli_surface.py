@@ -242,6 +242,7 @@ class SpellingTest(CliCase):
         cases = (
             ["status"], ["list"], ["list", "skill"], ["ui"], ["ui", "--dry-run"],
             ["cost"], ["cost", "--type", "skill"], ["cost", "--harness", "codex"],
+            ["cost", "--project", str(proj)], ["ui", "--dry-run", "--project", str(proj)],
             ["disable", "skill", "demo-skill", "--dry-run"],
             ["enable", "skill", "demo-skill", "--dry-run"],
             ["install-shims", "--dry-run"],

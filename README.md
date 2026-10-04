@@ -110,10 +110,10 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 | command | what it does |
 |---|---|
-| `ui` | interactive picker — cost column, sort, filters; `--dry-run` shows the plan for what you stage and changes nothing |
+| `ui` | interactive picker — cost column, sort, filters, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
-| `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters) |
+| `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
 | `install-shims` | write the skill shim into every installed harness; refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
@@ -139,7 +139,7 @@ Flags accepted by every command, before or after the subcommand:
   `{ExceptionType}: {message}` -- always emit it, with `"ok": false`.
   Exception: `--help` / `--version` print plain text even with `--json`, and
   `ui` is interactive so it rejects `--json` (exit 2).
-- `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `profile
+- `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `ui` / `cost` / `profile
   save|apply|diff`) switches to project scope; see [Project scope](#project-scope).
 - `--version` prints the version.
 - `AGENT_TOGGLE_CLI_TIMEOUT=<seconds>` overrides the timeout of every `claude` CLI call
@@ -201,14 +201,14 @@ agent-toggle ui
 ```
 
 ```
- filter: telegram█
+ filter: /telegram█   typing: Backspace edits, Ctrl-U clears, Enter applies, Esc quits (nothing applied)
  *[x]    (92)  claude   command telegram-summary
   [ ]    (61)  claude   skill   telegram-display
   [x]      48   claude   skill   telegram-group-send
   [x]      20   claude   mcp     telegram-example
 
  4 shown  |  ~68 tok  |  harness:all type:all sort:name  |  1 staged -- Enter to apply
- Tab tick  Enter apply  Esc cancel  s sort  h/t filter  ? keys  / type to filter
+ Tab tick  Enter apply  Esc cancel  s sort  h/t filter  p profile  ? keys  / type to filter
 ```
 
 The number column is the estimated startup tokens (chars / 4, about +-25 %);
@@ -221,8 +221,9 @@ shells out).
 | `s` | cycle sort: name, cost (biggest first) |
 | `h` | cycle the harness filter |
 | `t` | cycle the type filter |
+| `p` | profiles: stage a saved one, or save the live state (see below) |
 | `?` | show the key list |
-| `/` | start typing a filter |
+| `/` | start typing a filter: the top line shows `filter: /text█` and a hint (text, so it reads without colour) |
 | any other printable character | appends to the filter (terms are ANDed, case-insensitive) |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `↑` `↓` / `Ctrl-P` `Ctrl-N` | move; `PgUp`/`PgDn` jump a screen |
@@ -230,9 +231,17 @@ shells out).
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel — nothing is applied |
 
-`s`, `h`, `t` and `?` are commands while the filter is empty. Press `/` first
+`s`, `h`, `t`, `p` and `?` are commands while the filter is empty. Press `/` first
 to type a filter that begins with one of them (the example above is typed
 `/telegram`); once the filter is non-empty, every letter just types.
+
+`p` opens a prompt over the list of saved profiles: type a number or name (or
+`apply <name>`) and Enter to **stage** that profile's ticks (only the items it
+mentions; ones this machine lacks are skipped), then Enter in the picker applies
+them like any other tick -- so `ui --dry-run` previews a profile and a stray
+`p` changes nothing. `save <name>` writes the live state (not your staged ticks) as
+a profile, with the same name rules and project scope as `profile save`; it is
+off under `--dry-run`. Esc closes the prompt.
 
 The checkbox shows the **enabled** state: `[x]` is live, `[ ]` is parked. A
 `*` marks a row you changed.
@@ -246,8 +255,9 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
 Without curses, `ui` falls back to a numbered menu with the same staging and the
 same result: type row numbers (`1 3 5-7`) to tick or untick, `/text` to filter,
-`s` / `h` / `t` to sort and cycle the harness and type filters, `a` to apply, `q`
-(or end of input) to cancel.
+`s` / `h` / `t` to sort and cycle the harness and type filters (`/` alone clears the
+filter), `p` to list profiles, `p <number|name>` to stage one and `p save <name>`
+to save the live state, `a` to apply, `q` (or end of input) to cancel.
 
 ## What each harness supports
 
@@ -436,8 +446,10 @@ bulk operations with `--dry-run`.
 Claude layout only: `--harness codex --project ...` exits `4`, as does a
 missing directory or one with neither `.claude/` nor `.mcp.json`. `$HOME`, its
 ancestors, the tool's own state dir and the harness homes are refused (exit
-`2`) -- that is user scope. `list` and `enable --all` run the same checks. `cost` and
-`ui` are user-scope only.
+`2`) -- that is user scope. `list`, `enable --all`, `cost` and `ui` run the same
+checks. `cost --project` prices that project's items only (no plugins), and
+`ui --project` stages and applies in project scope (its `p` key saves and applies
+project profiles).
 
 ```sh
 agent-toggle disable skill demo-skill --project .

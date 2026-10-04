@@ -12,10 +12,12 @@ instead of fighting the curses display for the terminal.
 from __future__ import annotations
 
 import curses
+from pathlib import Path
 
-from .model import SORTS, Row, collect, cycle, match, visible  # noqa: F401  (re-exported)
+from .model import (SORTS, Row, collect, cycle, header_text, match, profile_command,  # noqa: F401
+                    profile_listing, visible)
 
-HELP = "Tab tick  Enter apply  Esc cancel  s sort  h/t filter  ? keys  / type to filter"
+HELP = "Tab tick  Enter apply  Esc cancel  s sort  h/t filter  p profile  ? keys  / type to filter"
 LONG_HELP = (
     "Keys",
     "",
@@ -26,9 +28,11 @@ LONG_HELP = (
     "  s                    cycle sort: name -> cost (biggest first)",
     "  h                    cycle the harness filter",
     "  t                    cycle the type filter",
+    "  p                    profiles: apply a saved one (stages it) or save the live state",
     "  ?                    this screen",
-    "  /                    start typing a filter (needed to type a filter that",
-    "                       begins with s, h, t or ?; any other letter just types)",
+    "  /                    start typing a filter: the top line shows `/text` and a cursor",
+    "                       block (needed for a filter that begins with s, h, t, p or ?;",
+    "                       any other letter just types)",
     "  Backspace, Ctrl-U    edit / clear the filter",
     "",
     "Cost is ~tokens loaded at session start (chars/4); a parked row shows",
@@ -73,13 +77,14 @@ def init_colors(color: bool) -> bool:
 
 
 def draw(win, rows: list[Row], query: str, cur: int, top: int, pending: int,
-         chips: str = "", color: bool = False) -> None:
+         chips: str = "", color: bool = False, typing: bool = False, note: str = "") -> None:
     win.erase()
     height, width = win.getmaxyx()
     body = max(1, height - 3)
 
-    header = f" filter: {query}█" if query else " filter: (type to narrow, ? for keys)"
-    win.addnstr(0, 0, header.ljust(width - 1), width - 1, curses.A_BOLD)
+    header = header_text(query, typing)             # text cue, so monochrome reads too
+    win.addnstr(0, 0, header.ljust(width - 1), width - 1,
+                curses.A_BOLD | (curses.A_REVERSE if typing or query else 0))
 
     for i in range(body):
         idx = top + i
@@ -114,7 +119,10 @@ def draw(win, rows: list[Row], query: str, cur: int, top: int, pending: int,
     if pending:
         count += f"  |  {pending} staged -- Enter to apply"
     win.addnstr(height - 2, 0, count.ljust(width - 1), width - 1, curses.A_BOLD)
-    win.addnstr(height - 1, 0, " " + HELP.ljust(width - 2), width - 1, curses.A_DIM)
+    if note:                                          # last profile result, until the next key
+        win.addnstr(height - 1, 0, (" " + note).ljust(width - 1), width - 1, curses.A_BOLD)
+    else:
+        win.addnstr(height - 1, 0, " " + HELP.ljust(width - 2), width - 1, curses.A_DIM)
     win.noutrefresh()
     curses.doupdate()
 
@@ -131,11 +139,45 @@ def show_help(win) -> None:
         pass
 
 
-def loop(win, rows: list[Row], color: bool = False) -> list[Row] | None:
+def ask_profile(win) -> str:
+    """The profile prompt: saved profiles listed, one line read (Enter keeps it, Esc or
+    Ctrl-C gives "" = cancel). The grammar is `model.profile_command`'s."""
+    text = ""
+    while True:
+        win.erase()
+        height, width = win.getmaxyx()
+        lines = (profile_listing(), "", "number or name = stage that profile; `save <name>` = "
+                 "save what is live now", "Enter runs it, Esc cancels")
+        try:                                  # a tiny or just-resized window must not crash
+            for y, line in enumerate(lines[:max(0, height - 1)]):
+                win.addnstr(y, 0, line, max(0, width - 1))
+            win.addnstr(min(len(lines), height - 1), 0, f"profile> {text}\u2588",
+                        max(0, width - 1), curses.A_BOLD)
+            win.refresh()
+        except curses.error:
+            pass
+        try:
+            key = win.get_wch()
+        except (curses.error, KeyboardInterrupt):
+            return ""
+        if key in ("\x1b", "\x03"):
+            return ""
+        if key in ("\n", "\r", curses.KEY_ENTER):
+            return text
+        if key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+            text = text[:-1]
+        elif key == "\x15":
+            text = ""
+        elif isinstance(key, str) and key.isprintable():
+            text += key
+
+
+def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
+         dry_run: bool = False) -> list[Row] | None:
     color = init_colors(color)
     curses.curs_set(0)
     win.keypad(True)
-    query, cur, top = "", 0, 0
+    query, cur, top, note = "", 0, 0, ""
     typing = False                     # True after `/`: s/h/t/? are then letters, not commands
     harness, type_, sort = "all", "all", "name"
     harness_opts = ["all", *sorted({n for r in rows for n in (r.harness, *r.shared)})]
@@ -153,12 +195,13 @@ def loop(win, rows: list[Row], color: bool = False) -> list[Row] | None:
 
         pending = sum(1 for r in rows if r.changed)
         draw(win, shown, query, cur, top, pending,
-             f"harness:{harness} type:{type_} sort:{sort}", color)
+             f"harness:{harness} type:{type_} sort:{sort}", color, typing, note)
 
         try:
             key = win.get_wch()
         except (curses.error, KeyboardInterrupt):
             return None
+        note = ""
 
         if key in ("\x1b", "\x03"):                       # Esc / Ctrl-C
             return None
@@ -181,8 +224,10 @@ def loop(win, rows: list[Row], color: bool = False) -> list[Row] | None:
             cur = 0
         elif key == "\x15":                               # Ctrl-U
             query, typing, cur = "", False, 0
-        elif not (typing or query) and key in ("s", "h", "t", "?", "/"):
-            if key == "s":
+        elif not (typing or query) and key in ("s", "h", "t", "p", "?", "/"):
+            if key == "p":
+                note = profile_command(rows, ask_profile(win), project, dry_run)
+            elif key == "s":
                 sort = cycle(SORTS, sort)
             elif key == "h":
                 harness = cycle(harness_opts, harness)
@@ -199,7 +244,8 @@ def loop(win, rows: list[Row], color: bool = False) -> list[Row] | None:
         # KEY_RESIZE and anything else just redraw
 
 
-def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False) -> list[Row] | None:
+def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False,
+         project: Path | None = None, dry_run: bool = False) -> list[Row] | None:
     """`plugins=False` skips the `claude plugin list` call (a dry run never shells out)."""
     notes: list[str] = []
     rows = collect(state, harnesses, notes.append, plugins)
@@ -207,7 +253,7 @@ def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False
         print("nothing to show")
         return None
     try:
-        return curses.wrapper(loop, rows, color)
+        return curses.wrapper(loop, rows, color, project, dry_run)
     finally:
         for n in notes:                 # after curses is torn down, where they are readable
             print(f"WARNING  {n}")

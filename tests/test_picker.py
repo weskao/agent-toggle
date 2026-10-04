@@ -3,13 +3,15 @@
 The data tests use `ui.model`, so they run where curses does not exist (Windows)."""
 from __future__ import annotations
 
+import json
 import unittest
 from unittest import mock
 
 from base import SandboxCase
 
-from agent_toggle import mechanisms
+from agent_toggle import fs, mechanisms, profiles
 from agent_toggle.harnesses import build
+from agent_toggle.output import CliError, Result
 from agent_toggle.ui import model
 
 try:
@@ -130,7 +132,160 @@ class FakeWin:
 
     def erase(self): pass
     def noutrefresh(self): pass
+    def refresh(self): pass
     def keypad(self, flag): pass
+
+
+class TypingCueTest(unittest.TestCase):
+    """G3: typing mode is visible as text (a `/` prefix, a cursor block, a hint), never as
+    colour alone."""
+
+    def test_header_text_idle_and_typing(self) -> None:
+        self.assertIn("press / to type", model.header_text("", False))
+        self.assertNotIn("\u2588", model.header_text("", False))
+        empty = model.header_text("", True)               # `/` pressed, nothing typed yet
+        self.assertIn("filter: /\u2588", empty)
+        self.assertIn("Esc quits", empty)
+        self.assertIn("filter: /abc\u2588", model.header_text("abc", True))
+        # a filter typed without `/` (a non-command first letter) reads the same
+        self.assertIn("filter: /abc\u2588", model.header_text("abc", False))
+
+    @unittest.skipIf(picker is None, "curses unavailable")
+    def test_draw_shows_the_cue_in_monochrome(self) -> None:
+        with mock.patch.object(picker.curses, "doupdate", create=True):
+            for typing, query in ((False, ""), (True, ""), (True, "tel")):
+                win = FakeWin()
+                picker.draw(win, [], query, 0, 0, 0, "chips", color=False, typing=typing)
+                y, x, text, attr = win.calls[0]
+                self.assertEqual(text.rstrip(), model.header_text(query, typing)[:59].rstrip())
+                self.assertEqual(bool(attr & picker.curses.A_REVERSE), typing or bool(query))
+
+    @unittest.skipIf(picker is None, "curses unavailable")
+    def test_loop_slash_turns_the_cue_on_and_backspace_off(self) -> None:
+        rows = [picker.Row("claude", "skill", "a", True)]
+        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
+                                 create=True):
+            win = FakeWin(["/", "x", "\x7f", "\x1b"])
+            self.assertIsNone(picker.loop(win, rows))
+        headers = [c[2].strip() for c in win.calls if c[0] == 0]
+        self.assertEqual([h.split("   ")[0] for h in headers],
+                         ["filter: (press / to type one, ? for keys)", "filter: /\u2588",
+                          "filter: /x\u2588", "filter: (press / to type one, ? for keys)"])
+
+
+class ProfileKeyTest(SandboxCase):
+    """G9: the profile prompt's grammar, on rows, with no curses."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for n in ("alpha", "beta"):
+            self.write(f"skills/{n}/SKILL.md")
+        self.table = {"claude": build(self.tmp)["claude"]}
+        self.rows = model.collect({"version": 3, "disabled": {}}, self.table, plugins=False)
+
+    def stored(self, name: str, items: list[tuple[str, bool]], **extra) -> None:
+        fs.private_dir(fs.profiles_dir())
+        (fs.profiles_dir() / f"{name}.json").write_text(json.dumps({
+            "version": 1, "items": [{"harness": "claude", "type": "skill", "name": n, "live": live}
+                                    for n, live in items], **extra}), encoding="utf-8")
+
+    def test_listing_and_names(self) -> None:
+        self.assertIn("no profiles saved", model.profile_listing())
+        self.stored("work", [])
+        self.stored("play", [])
+        self.assertEqual(model.profile_names(), ["play", "work"])
+        self.assertEqual(model.profile_listing(), "profiles: 1) play  2) work")
+
+    def test_apply_stages_by_name_or_number_and_never_writes(self) -> None:
+        self.stored("work", [("alpha", False), ("beta", True), ("ghost", False)])
+        before = [p.read_bytes() for p in sorted(self.home.rglob("*")) if p.is_file()]
+        msg = model.profile_command(self.rows, "work")
+        self.assertEqual(msg, "profile work: 1 staged, 1 already as profiled, "
+                              "1 not on this machine -- Enter to apply")
+        self.assertEqual([(r.name, r.staged) for r in self.rows], [("alpha", False), ("beta", True)])
+        self.assertEqual([r.name for r in self.rows if r.changed], ["alpha"])
+        self.assertEqual([p.read_bytes() for p in sorted(self.home.rglob("*")) if p.is_file()], before)
+        self.rows[0].staged = True                       # numbers and `apply` are the same thing
+        self.assertIn("1 staged", model.profile_command(self.rows, "1"))
+        self.rows[0].staged = True
+        self.assertIn("1 staged", model.profile_command(self.rows, "apply work"))
+
+    def test_apply_overrides_an_earlier_tick_only_for_items_it_mentions(self) -> None:
+        self.stored("work", [("alpha", True)])
+        self.rows[0].staged, self.rows[1].staged = False, False     # user unticked both
+        model.profile_command(self.rows, "work")
+        self.assertEqual([r.staged for r in self.rows], [True, False])
+
+    def test_save_writes_the_live_state_through_profiles(self) -> None:
+        self.rows[0].staged = False                      # a staged tick is NOT saved
+        msg = model.profile_command(self.rows, "save work")
+        self.assertIn("saved profile work: 2 items", msg)
+        doc = json.loads((fs.profiles_dir() / "work.json").read_text(encoding="utf-8"))
+        self.assertEqual([(i["name"], i["live"]) for i in doc["items"]],
+                         [("alpha", True), ("beta", True)])
+        self.assertNotIn("scope", doc)
+
+    def test_save_in_a_dry_run_writes_nothing(self) -> None:
+        self.assertIn("--dry-run", model.profile_command(self.rows, "save work", dry_run=True))
+        self.assertFalse(fs.profiles_dir().exists())
+
+    def test_names_are_validated_like_the_cli(self) -> None:
+        for bad in ("bad:name", "CON", "a/b", "../x"):
+            line = f"save {bad}"
+            with self.assertRaises(CliError) as cli_err:
+                profiles.cmd_save(bad, None, None, Result(json_mode=True))
+            self.assertEqual(model.profile_command(self.rows, line), f"error: {cli_err.exception.msg}")
+        self.assertFalse(fs.profiles_dir().exists())
+        self.assertTrue(model.profile_command(self.rows, "nope").startswith("error: cannot read profile"))
+        self.assertEqual(model.profile_command(self.rows, "save"), model.PROFILE_USAGE)
+        self.assertEqual(model.profile_command(self.rows, "  "), "")
+        # an OS-level refusal is a message, never a crash of the picker
+        self.assertTrue(model.profile_command(self.rows, "save " + "x" * 300).startswith("error: "))
+        # typeable-but-odd input is a message too: a unicode digit, a NUL, a lone surrogate
+        for odd in ("\u00b2", "save a\x00b", "a\x00b", "save a\ud800"):
+            self.assertTrue(model.profile_command(self.rows, odd).startswith("error: "), odd)
+
+    def test_scope_mismatch_is_the_cli_error(self) -> None:
+        self.stored("proj", [("alpha", False)], scope="project")
+        self.assertEqual(model.profile_command(self.rows, "proj"),
+                         "error: profile 'proj' is project-scope: pass --project <dir>")
+        self.assertFalse(any(r.changed for r in self.rows))
+
+    @unittest.skipIf(picker is None, "curses unavailable")
+    def test_curses_prompt_then_enter_returns_the_staged_rows(self) -> None:
+        self.stored("work", [("alpha", False)])
+        keys = ["p", "w", "o", "r", "k", "x", "\x7f", "\n", "\n"]       # p, `work`, Enter, Enter
+        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
+                                 create=True):
+            win = FakeWin(keys, size=(12, 70))
+            out = picker.loop(win, self.rows)
+        self.assertEqual([r.name for r in out], ["alpha"])
+        self.assertTrue(any("profile> work" in c[2] for c in win.calls))
+        self.assertTrue(any("1) work" in c[2] for c in win.calls))
+        self.assertTrue(any("profile work: 1 staged" in c[2] for c in win.calls))
+        # Esc at the prompt stages nothing (even a full valid name) and the picker carries on
+        self.rows[0].staged = True
+        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
+                                 create=True):
+            keys = ["p", *"work", "\x1b", "\n"]
+            self.assertEqual(picker.loop(FakeWin(keys, size=(12, 70)), self.rows), [])
+        # a 2-row window: the prompt clips instead of raising curses.error
+        class Tiny(FakeWin):
+            def addnstr(self, y, x, text, n, attr=0):
+                if y >= self.size[0]:
+                    raise picker.curses.error("out of window")
+                super().addnstr(y, x, text, n, attr)
+        self.assertEqual(picker.ask_profile(Tiny(["a", "\n"], size=(2, 40))), "a")
+
+    @unittest.skipIf(picker is None, "curses unavailable")
+    def test_p_is_a_filter_letter_after_slash_and_is_in_the_help(self) -> None:
+        with mock.patch.multiple(picker.curses, doupdate=mock.DEFAULT, curs_set=mock.DEFAULT,
+                                 create=True):
+            win = FakeWin(["/", "p", "\x1b"], size=(12, 70))
+            picker.loop(win, self.rows)
+        self.assertFalse(any("profile>" in c[2] for c in win.calls))
+        self.assertIn("p profile", picker.HELP)
+        self.assertTrue(any("  p " in line for line in picker.LONG_HELP))
 
 
 @unittest.skipIf(picker is None, "curses unavailable")

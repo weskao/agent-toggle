@@ -457,11 +457,22 @@ help. Picker additions, all within stdlib curses:
   skips them, it never shells out). Flag-mechanism items (phase 2: openclaw
   plugins and flagged skills, opencode mcp) are listed live from the config file (entries with a boolean `enabled` only) and
   parked from state; a flag-disabled skill shows as disabled;
-- `/` starts typing a text filter; `s`, `h`, `t`, `?` are commands only while
+- `/` starts typing a text filter; `s`, `h`, `t`, `p`, `?` are commands only while
   the filter is empty, so a filter beginning with one of them needs the leading
-  `/` (landed in phase 1). `?` shows the keys;
-- `--dry-run` shows the plan and exits. A `p` key to apply a profile is **not
-  built**: phase 2 ships profiles as CLI only (§5.7); the picker has no profile key yet.
+  `/` (landed in phase 1). `?` shows the keys. A filter being typed shows as
+  `filter: /text█` plus a hint on the top line (reversed too) -- text, so a
+  monochrome terminal reads it; the menu fallback prints `filter:/text` and says
+  `/` alone clears (`model.header_text`);
+- `p` is the profile key (curses prompt over the saved names; menu: `p`,
+  `p <number|name>`, `p save <name>`). One grammar, `model.profile_command`:
+  `[apply] <number|name>` only STAGES the profile's ticks on the rows (items it
+  names that are not on screen are skipped), so Enter applies them through the
+  normal plan and `--dry-run` previews them; `save <name>` calls `profiles.cmd_save`
+  (live state, not staged ticks; off under `--dry-run`). Names, scope and errors
+  come from `profiles.py` unchanged;
+- `--dry-run` shows the plan and exits. `--project <dir>` (as on `disable`) scopes
+  the picker, and `cost`, to one project: the claude project view only, its
+  state entries only, no plugin rows, and the plan's ops carry the project.
 
 Windows: `pip install agent-toggle[windows]` pulls `windows-curses`; without
 it `ui/menu.py` provides a numbered-menu fallback (filter prompt → numbered
@@ -636,8 +647,8 @@ runs this pattern in production:
   in the inventory (picker and `cost`) when exactly one listed id matches; an
   ambiguous bare name stays its own parked row. `enable` on the full id does not
   clear a state entry recorded under the bare name -- `enable <bare name>` does.
-- Picker typing mode (after `/`) has no on-screen cue; the header only shows the
-  typed text.
+- Fixed: picker typing mode (after `/`) now shows `filter: /text█` plus a hint on the
+  top line (§5.10).
 - With OpenCode installed, `disable --harness opencode` warns "NOT gitignored" once
   per scanned skill dir (incl. `~/.agents/skills-disabled`, whose suggested
   `.gitignore` fix cannot apply), and OpenCode sees two `agent-toggle` shims
@@ -660,8 +671,8 @@ runs this pattern in production:
 
 Known gaps added by phase 2:
 
-- `ui` and `cost` are user-scope only (no `--project`).
-- The picker has no profile key (§5.10); profiles are CLI only.
+- Fixed: `ui` and `cost` take `--project <dir>` like `disable` (§5.10).
+- Fixed: the picker has a profile key, `p` (§5.10).
 - Fixed: on Python 3.10 (no `tomllib`) a TOML edit is parse-checked by a stdlib-only
   structural validator (`agent_toggle/toml_check.py`: the codex/grok subset, duplicate
   tables/keys rejected, values not decoded) on top of the textual one-block check;

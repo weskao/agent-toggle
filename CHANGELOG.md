@@ -2,6 +2,7 @@
 
 ### 🚀 Features
 
+- **ui:** A filter being typed shows as `filter: /text█` with a hint on the picker's top line (the menu fallback prints `filter:/text` and says `/` alone clears); a `p` key lists saved profiles, stages one (Enter then applies it, so `ui --dry-run` previews it) or saves the live state as a named profile, with the CLI's name and scope checks; `ui` and `cost` take `--project <dir>` like `disable` (project scope only, no plugin rows)
 - **opencode:** Skill dirs follow OpenCode 2.0.22: `skills.paths` is additive and read from `opencode.json` or `opencode.jsonc` (JSONC, bare-list form, `~` / `$HOME/` / `${HOME}/` expanded), plus `skill/`, `~/.claude/skills` and `~/.agents/skills`; relative entries (session-cwd based) are skipped
 - **flag-json:** Rewrite JSONC configs in place (comments and trailing commas kept); JSON5 is still refused
 - **fs:** Parse-check TOML edits on Python 3.10 with a stdlib structural validator; `doctor` no longer reports codex/grok `config.toml` as `unverified` there
