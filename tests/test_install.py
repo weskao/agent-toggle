@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -62,6 +63,60 @@ class InstallShimsCase(SandboxCase):
         self.assertEqual(self.installed(), set())
         self.assertEqual((self.tmp / ".claude" / ".gitignore").read_text(encoding="utf-8"), "junk\n")
         self.assertTrue(all(r["status"] in ("planned", "skipped") for r in env["results"]))
+
+    def opencode_home(self, cfg: dict | None) -> Path:
+        oc = self.tmp / ".config" / "opencode"
+        oc.mkdir(parents=True)
+        if cfg is not None:
+            (oc / "opencode.json").write_text(json.dumps(cfg), encoding="utf-8")
+        return oc
+
+    def test_opencode_shim_follows_skills_paths(self) -> None:
+        oc = self.opencode_home({"skills": {"paths": ["$HOME/mine/skills", "~/other"]}})
+        (self.tmp / "mine").mkdir()
+        rc, env = self.run_cli("--harness", "opencode")
+        self.assertEqual(rc, 0)
+        self.assertTrue(shim(self.tmp / "mine").is_file())         # first path, created
+        self.assertFalse(shim(oc).exists())                        # not the default dir
+        self.assertFalse((self.tmp / "other").exists())
+
+    def test_opencode_shim_defaults_without_redirect_or_with_unusable_one(self) -> None:
+        oc = self.opencode_home(None)
+        self.assertEqual(self.run_cli("--harness", "opencode")[0], 0)
+        self.assertTrue(shim(oc).is_file())
+        shutil.rmtree(oc / "skills")
+        (oc / "opencode.json").write_text(
+            json.dumps({"skills": ["/no/such/parent/skills"]}), encoding="utf-8")
+        self.assertEqual(self.run_cli("--harness", "opencode")[0], 0)
+        self.assertTrue(shim(oc).is_file())
+
+    def test_opencode_redirect_keeps_the_marker_refusal(self) -> None:
+        self.opencode_home({"skills": {"paths": ["~/mine/skills"]}})
+        mine = shim(self.tmp / "mine")
+        mine.parent.mkdir(parents=True)
+        mine.write_text("my own skill\n", encoding="utf-8")
+        rc, env = self.run_cli("--harness", "opencode")
+        self.assertEqual(rc, 1)
+        self.assertIn("lacks the agent-toggle shim marker", env["results"][0]["detail"])
+        self.assertEqual(mine.read_text(encoding="utf-8"), "my own skill\n")
+
+    def test_targeted_opencode_run_never_overwrites_the_owners_shim(self) -> None:
+        self.opencode_home({"skills": {"paths": ["~/.codex/skills"]}})
+        self.assertEqual(self.run_cli("--harness", "codex")[0], 0)
+        before = shim(self.tmp / ".codex").read_text(encoding="utf-8")
+        rc, env = self.run_cli("--harness", "opencode")
+        self.assertEqual(env["results"][0]["status"], "skipped")
+        self.assertIn("belongs to codex", env["results"][0]["detail"])
+        self.assertEqual(shim(self.tmp / ".codex").read_text(encoding="utf-8"), before)
+
+    def test_shim_not_written_twice_into_a_shared_dir(self) -> None:
+        self.opencode_home({"skills": ["~/.claude/skills"]})       # opencode -> claude's dir
+        rc, env = self.run_cli()
+        self.assertEqual(rc, 0)
+        self.assertEqual(shim(self.tmp / ".claude").read_text(encoding="utf-8"),
+                         cli.shim_text("claude"))                   # not overwritten by opencode's
+        (row,) = [r for r in env["results"] if r["harness"] == "opencode"]
+        self.assertEqual(row["status"], "skipped")
 
     def test_no_harness_is_exit_4(self) -> None:
         for h in (".claude", ".codex"):

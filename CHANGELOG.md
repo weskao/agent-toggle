@@ -2,8 +2,13 @@
 
 ### 🚀 Features
 
+- **opencode:** Skill dirs follow OpenCode 2.0.22: `skills.paths` is additive and read from `opencode.json` or `opencode.jsonc` (JSONC, bare-list form, `~` / `$HOME/` / `${HOME}/` expanded), plus `skill/`, `~/.claude/skills` and `~/.agents/skills`; relative entries (session-cwd based) are skipped
 - **flag-json:** Rewrite JSONC configs in place (comments and trailing commas kept); JSON5 is still refused
 - **fs:** Parse-check TOML edits on Python 3.10 with a stdlib structural validator; `doctor` no longer reports codex/grok `config.toml` as `unverified` there
+
+### 🐛 Bug Fixes
+
+- **install-shims:** Write the OpenCode shim into its first `skills.paths` dir when one is set (falling back to `skills/`); never overwrite the shim of another installed harness whose dir it redirects onto (skipped, "belongs to <owner>")
 
 ## [0.2.0] - 2026-10-03
 

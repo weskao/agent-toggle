@@ -359,7 +359,20 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     show=False, home=str(home))
             continue
         found += 1
-        dest = home / h.dirs["skill"][0] / "agent-toggle" / "SKILL.md"
+        # dirs[0] is OpenCode's first skills.paths redirect when set; if its parent dir
+        # is missing, fall back to the first in-home dir instead of creating a tree.
+        subs = h.dirs["skill"]
+        sub = subs[0] if not Path(subs[0]).is_absolute() or (home / subs[0]).parent.is_dir() \
+            else "skills"
+        dest = home / sub / "agent-toggle" / "SKILL.md"
+        view = dir_view(table, hname, "skill", home, sub)
+        if view.owner != hname and table[view.owner].home.is_dir():
+            # a redirect onto another installed harness's dir: that harness writes its own
+            # shim there; never overwrite it with this harness's text
+            out.row(hname, None, None, "install-shims", "skipped",
+                    f"{dest} belongs to {view.owner}: run install-shims for it",
+                    show=False, home=str(home))
+            continue
         if why := shim_refusal(dest):
             fix = (f"refused: {dest} {why}; fix: move it aside (or delete it if it is an "
                    f"older agent-toggle shim), then re-run install-shims")

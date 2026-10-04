@@ -1,7 +1,6 @@
 """The harness table: which harnesses exist, where they live, what they support."""
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +8,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from . import fs
+from .backends import flag_json
 from .output import die
 
 TYPES = ("skill", "agent", "command", "rule", "plugin", "mcp")
@@ -36,7 +36,6 @@ class Harness:
     # type -> (file relative to home, pointer tuple; "<name>" is replaced by the item name)
     flags: Mapping[str, tuple] = field(default_factory=dict)
     editable: frozenset[str] = frozenset()   # files the tool may write
-    aliases_from: tuple[str, ...] = ()
     project: Path | None = None              # set only on a --project view (resolved dir)
     # harness version this row's layout was last checked against (docs/harnesses.md);
     # "unverified" = no version found, or nothing in the row to check
@@ -66,24 +65,51 @@ def opencode_home(home: Path) -> Path:
     return (Path(xdg) if os.path.isabs(xdg) else home / ".config") / "opencode"
 
 
+def _expand_home(p: str, home: Path) -> str | None:
+    """`~`, `~/x`, `$HOME/x`, `${HOME}/x` against `home` (not the process env, so a
+    sandboxed home is honoured); an absolute path as is; anything else (a relative
+    path, `~user`, other `$VARS`) -> None."""
+    for pre in ("~", "$HOME", "${HOME}"):
+        if p == pre or p.startswith(pre + "/"):
+            return str(home / p[len(pre) + 1:])
+    return p if os.path.isabs(p) else None
+
+
 def opencode_skill_dirs(home: Path, oc: Path) -> tuple[str, ...]:
-    """OpenCode's skill dirs: its own `skills/` plus every `opencode.json` ->
-    `skills.paths[]` entry (the redirect DESIGN s4 pins; on the surveyed machine
-    it points at codex's skills dir). A path is `~/`-expanded against `home`, a
-    relative one is taken relative to `oc` (assumption: DESIGN does not say).
+    """Every dir OpenCode (2.0.22, DESIGN s11 q2) scans for skills, configured
+    redirects first (so `dirs["skill"][0]` is where `install-shims` writes):
+
+    1. `skills.paths[]` from `opencode.json`, else `opencode.jsonc` (the first that
+       exists wins; JSONC allowed; `skills` may be `{"paths": [...]}` or a bare
+       list). `~`, `$HOME/`, `${HOME}/` expand against `home`. A relative entry
+       resolves against the session cwd, which this home-based table does not
+       have, so it is skipped (a `--project` view is claude-shaped only).
+    2. `<oc>/skills` and `<oc>/skill`: `paths` is additive, they stay scanned.
+    3. `~/.claude/skills` and `~/.agents/skills`, but only when OpenCode is
+       installed (`oc` exists): they are other harnesses' dirs, so `dir_view`
+       treats them as one shared dir (parked once under its owner).
+
     Extra dirs are absolute strings, which `home / sub` passes through intact.
     A missing or malformed file adds nothing: the table build never fails.
     """
-    try:
-        paths = json.loads((oc / "opencode.json").read_text(encoding="utf-8"))["skills"]["paths"]
-    except (OSError, ValueError, KeyError, TypeError):
-        paths = []
-    extra = []
-    for p in paths if isinstance(paths, list) else []:
-        if isinstance(p, str) and p:
-            q = home / p[2:] if p.startswith("~/") else oc / p
-            extra.append(str(q))
-    return tuple(dict.fromkeys(("skills", *extra)))
+    paths: object = []
+    for name in ("opencode.json", "opencode.jsonc"):
+        try:
+            text = (oc / name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        except ValueError:          # not UTF-8: unreadable, never fatal
+            break
+        try:
+            skills = flag_json.jsonc_loads(text)["skills"]
+            paths = skills.get("paths") if isinstance(skills, dict) else skills
+        except (ValueError, KeyError, TypeError):
+            pass
+        break
+    extra = [q for p in paths if isinstance(p, str) and p
+             and (q := _expand_home(p, home)) is not None] if isinstance(paths, list) else []
+    compat = [str(home / ".claude" / "skills"), str(home / ".agents" / "skills")] if oc.is_dir() else []
+    return tuple(dict.fromkeys((*extra, "skills", "skill", *compat)))
 
 
 def build(home: Path) -> dict[str, Harness]:
@@ -113,7 +139,7 @@ def build(home: Path) -> dict[str, Harness]:
                 mcp=McpSpec("toml", grok / "config.toml", ("mcp_servers",)),
                 verified="1.0.44"),
         # DESIGN s4: command/*.md; skills may be redirected by opencode.json.
-        # Assumption (DESIGN s11 q2): with no skills.paths, `skills/` is its own dir.
+        # Skill dirs: see opencode_skill_dirs (DESIGN s11 q2, answered on 2.0.22).
         Harness("opencode", oc,
                 dirs={"skill": opencode_skill_dirs(home, oc), "command": ("command",)},
                 # ASSUMED shape (DESIGN s4/s11, not verified on a real install):
@@ -121,7 +147,7 @@ def build(home: Path) -> dict[str, Harness]:
                 mechanisms={"skill": "move", "command": "move", "mcp": "flag"},
                 flags={"mcp": ("opencode.json", ("mcp", "<name>", "enabled"))},
                 editable=frozenset({"opencode.json"}),
-                aliases_from=("skills.paths",), verified="2.0.22"),
+                verified="2.0.22"),
         # ASSUMED shapes (DESIGN s4/s11, not verified on a real install):
         # `skills.entries.<name>.enabled` and `plugins.entries.<name>.enabled` in
         # openclaw.json. A skill uses the flag only when its entry exists, else

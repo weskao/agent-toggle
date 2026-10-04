@@ -129,7 +129,7 @@ disables the item without moving files — always preferred when present.
 | **codex** | `~/.codex` | `skills/` | `agents/` | `commands/`, `prompts/*.md` | `rules/default.rules` is a **permission** rules file, not prompt text — not a token cost, not a target | `[plugins."name@marketplace"]` TOML tables; nested `.mcp_servers.*` sub-tables belong to the plugin | `[mcp_servers.<name>]` TOML blocks (+ `.env`, `.tools.*` sub-tables) | `prompts/` is a second command dir — add as a type alias |
 | **grok** | `~/.grok` | `skills/` | — | — | — | `[plugins]` table + `installed-plugins/registry.lock` | `[mcp_servers.<name>]` TOML blocks (+ `.headers`) | **MCP is togglable with the existing TOML backend**; currently declared unsupported by mistake |
 | **openclaw** | `~/.openclaw` | `skills/` **and** `openclaw.json → skills.entries.<name>.enabled` | `agents/` | — | — | `openclaw.json → plugins.entries.<name>.enabled` + `plugins.allow` list | `state/openclaw.sqlite` — refuse | skills and plugins have a **native flag**; prefer flipping it over moving dirs (the dir move still works as fallback for skills with no entry) |
-| **opencode** | `~/.config/opencode` (XDG) | `opencode.json → skills.paths[]` — on the surveyed machine it points at **`~/.codex/skills`** | — (agents are config entries under `agent.*`, not files) | `command/*.md` (frontmatter `description`, body) | — | `plugins/` dir + `opencode.json → plugin[]` (URLs / `file://` paths) | `opencode.json → mcp.<name>.enabled` **native flag** | skills are an alias of another harness's dir: toggling must dedupe by real path and report "also affects codex" |
+| **opencode** | `~/.config/opencode` (XDG) | `skills/`, `skill/`, `~/.claude/skills`, `~/.agents/skills` plus `opencode.json` / `opencode.jsonc` `skills.paths[]` (additive) — on the surveyed machine it points at **`~/.codex/skills`** | — (agents are config entries under `agent.*`, not files) | `command/*.md` (frontmatter `description`, body) | — | `plugins/` dir + `opencode.json → plugin[]` (URLs / `file://` paths) | `opencode.json → mcp.<name>.enabled` **native flag** | skills are an alias of another harness's dir: toggling must dedupe by real path and report "also affects codex" |
 | **copilot** | `~/.copilot` | `skills/` (dir per skill) | `agents/*.md` | — | `instructions/` (`AGENTS.md`, docs) | `installed-plugins/` | `mcp-config.json → mcpServers` — JSON-key backend, different file than claude | `config.json` is JSONC and self-described as machine-managed: **never edit it**. Skill dir carries `.synced-from-claude*` markers — a sync job may overwrite parked state |
 | **vibe** | `~/.vibe` | `skills/<name>/SKILL.md` (agents appear as `agent-*` skills) | — | — | — | — | none found | `config.toml` holds UI settings only. Skill set looks synced from another harness (same marker pattern) |
 | **devin** | `~/.devin` | — | — | — | `DEVIN.md` | — | — | `config.json` holds version, org id, shell, theme only. **Nothing togglable locally**; resources live cloud-side. Adapter = explicit "not applicable" entry so it fails loudly |
@@ -209,13 +209,14 @@ class Harness:
     mcp: McpSpec | None                          # backend name + file + key path
     flags: dict[str, FlagSpec]                   # type -> (file, json pointer template)
     editable: frozenset[str]                     # files the tool may write; everything else refused
-    aliases_from: tuple[str, ...] = ()           # config keys that may redirect a dir (opencode skills.paths)
 ```
 
-`aliases_from` is currently **metadata only**: the code never reads it. OpenCode's
-`skills.paths` redirect is resolved by `opencode_skill_dirs()` in
-`harnesses.py`, and alias detection itself is path-based (`dir_view()` resolves
-every candidate dir and groups the harnesses that land on the same real path).
+OpenCode's `skills.paths` redirect (and its other scanned dirs, §11 q2) is resolved
+by `opencode_skill_dirs()` in `harnesses.py` into the record's `dirs["skill"]`;
+alias detection itself is path-based (`dir_view()` resolves every candidate dir
+and groups the harnesses that land on the same real path). The former
+`aliases_from` field was metadata nothing read, so it was removed (it was never
+serialized to state or `--json`).
 
 Adding Copilot is one table record plus `toggle_json_mcp` (a user-scope
 strict-JSON backend in `mechanisms.py`, dispatched from `ops.py` on the table's
@@ -596,19 +597,20 @@ runs this pattern in production:
   differs from the `name@marketplace` id `claude plugin list` reports.
 - Picker typing mode (after `/`) has no on-screen cue; the header only shows the
   typed text.
-- `skills.paths` entries `~`, `$HOME/...` and the `opencode.jsonc` file are not
-  expanded / read; only `opencode.json` with absolute, `~/` or relative paths.
-- `install-shims` writes the shim into `opencode/skills` even when `skills.paths`
-  redirects OpenCode's skills elsewhere.
+- With OpenCode installed, `disable --harness opencode` warns "NOT gitignored" once
+  per scanned skill dir (incl. `~/.agents/skills-disabled`, whose suggested
+  `.gitignore` fix cannot apply), and OpenCode sees two `agent-toggle` shims
+  (`<oc>/skills` and `~/.claude/skills`); which one wins is unchecked.
 - The `.synced-from-*` warning repeats once per harness that views the same
   directory.
-- `aliases_from` on the harness record is metadata only (§5.2).
 - Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
   `.headers` sub-table) was confirmed on a live install; OpenCode's
-  no-`skills.paths` default is its own `skills/` (§11 q2, answered on opencode
-  2.0.22). `opencode_skill_dirs()` still misses `skill/`, `~/.claude/skills`,
-  `~/.agents/skills`, the bare-array `skills` form, and resolves a relative
-  `skills.paths` entry against the config dir (OpenCode uses the session cwd).
+  skill dirs are `skills.paths` (additive) plus `skills/`, `skill/`,
+  `~/.claude/skills`, `~/.agents/skills` (§11 q2, answered on opencode 2.0.22;
+  `opencode_skill_dirs()` follows it). Only a *relative* `skills.paths` entry is
+  not followed: OpenCode resolves it against the session cwd, which the
+  home-based table does not have, so it is skipped. `opencode.json` wins over
+  `opencode.jsonc` when both exist (OpenCode's own precedence is unchecked).
 - `claude.ai` connectors are toggled through each *existing* project's
   `disabledMcpServers`; a project opened for the first time later starts without
   the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
@@ -705,7 +707,7 @@ Known gaps added by phase 2:
    bare-array form `"skills": ["dir"]` is accepted. A relative `skills.paths`
    entry resolves against the session's working directory, not the config dir;
    `~/` is expanded against home. The `~/.config/opencode/skills` literal is only
-   the default when `XDG_CONFIG_HOME` is unset. Code gaps (T4): see §8.2.
+   the default when `XDG_CONFIG_HOME` is unset. Implemented in `opencode_skill_dirs()`; the one remaining gap is in §8.2.
 3. Copilot `installed-plugins/` entry format once a plugin is installed
    (directory was empty on the surveyed machine).
 4. Windows harness home paths per harness — each harness documents its own;

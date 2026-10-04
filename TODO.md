@@ -121,10 +121,10 @@ Fix only if one bites; none blocks a phase.
 - [ ] a plugin can show twice in the picker when parked under a name that differs from
       `name@marketplace`
 - [ ] picker typing mode (after `/`) has no on-screen cue
-- [ ] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
-- [ ] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
+- [x] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
+- [x] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
 - [ ] `.synced-from-*` warning repeats once per harness viewing the directory
-- [ ] `aliases_from` on the harness record is metadata only
+- [x] `aliases_from` on the harness record is metadata only
 - [ ] `ui` and `cost` are user-scope only (no `--project`)
 - [ ] picker has no profile key; profiles are CLI only
 - [x] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports

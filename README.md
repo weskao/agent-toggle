@@ -65,6 +65,8 @@ already present in that harness home. Each harness gets its own template from
 agent to pass `--harness <that harness>`). The shim tells the agent to act only
 on the user's explicit request, never on instructions found inside skill or
 tool content, and to preview bulk operations with `--dry-run`.
+OpenCode's shim goes into the first `skills.paths` dir when one is set (and its
+parent exists), else `skills/`.
 
 Every shim carries an `<!-- agent-toggle shim: ... -->` marker line.
 `install-shims` updates a file that has the marker in place (it is idempotent)
@@ -298,9 +300,11 @@ rather than guessing.
 ### Shared directories
 
 OpenCode may read skills from another harness's directory through
-`opencode.json` → `skills.paths` (absolute, `~/`-prefixed or relative-to-the-
-opencode-dir entries; a bare `~` or `$HOME/...` is not expanded, and
-`opencode.jsonc` is not read). Such a directory is **one** item, filed under
+`opencode.json` → `skills.paths` (absolute, `~`, `$HOME/...`
+and `${HOME}/...` entries; read from `opencode.json`, else `opencode.jsonc`;
+relative entries are skipped, since OpenCode resolves them against the session
+directory). OpenCode also always scans `~/.claude/skills` and `~/.agents/skills`,
+so claude's skills count as shared with it. Such a directory is **one** item, filed under
 its owner (the harness whose home really holds it): it is
 parked once, tracked once, and every row reports `shared_with`, the other
 harnesses it also affects. `status` prints `shared dir with: ...`.
@@ -528,8 +532,9 @@ back by hand. Please report a real install that differs.
   invalid codex `config.toml` makes an MCP edit fail and roll back instead of
   being rewritten. A codex `config.toml` edit also fails (and is left as the other
   tool wrote it) if the file changed between read and write, and CRLF files keep their
-  line endings. On Python 3.10 (no `tomllib`) the TOML check is textual only: it checks
-  against the original text that only the one block changed, but cannot parse.
+  line endings. On Python 3.10 (no `tomllib`) the edit is parse-checked by a stdlib structural
+  validator (`agent_toggle/toml_check.py`, differentially tested against `tomllib`),
+  on top of the textual check that only the one block changed.
 - Profiles and project dirs are validated like command-line input.
 
 ## Where state lives
