@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from base import CAN_SYMLINK
@@ -343,6 +344,70 @@ class ReadOnlyTest(DoctorCase):
         self.assertEqual(snapshot(self.tmp), before)
         self.assertEqual(self.cli_calls, [])
         self.assertFalse(fs.lock_file().exists())
+
+
+class CompanionTest(DoctorCase):
+    """Companion files: parked file present, no orphans, never both live and parked."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("scripts/only-mine.sh", "#!/bin/sh")
+        self.write("skills/solo/SKILL.md", "run scripts/only-mine.sh")
+        self.assertEqual(self.run_cli("disable", "skill", "solo")[0], 0)
+        (comp,) = self.state()["claude:skill:solo"]["companions"]
+        self.origin, self.parked = Path(comp["from"]), Path(comp["to"])
+        self.assertTrue(self.parked.is_file())
+
+    def comp_rows(self, rows: list[dict], status: str) -> list[dict]:
+        return [r for r in self.rows(rows, status) if "companion" in r["detail"]]
+
+    def test_healthy_companion_is_silent(self) -> None:
+        rc, rows = self.doctor()
+        self.assertEqual((rc, self.comp_rows(rows, "error"), self.comp_rows(rows, "warn")), (0, [], []))
+
+    def test_missing_parked_companion_is_an_error_with_a_fix(self) -> None:
+        self.parked.unlink()
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 1)
+        (bad,) = self.comp_rows(rows, "error")
+        self.assertEqual((bad["type"], bad["name"]), ("skill", "solo"))
+        self.assertIn("parked file missing", bad["detail"])
+        self.assertIn("fix: ", bad["detail"])
+        self.assertIn("agent-toggle enable skill solo", bad["detail"])
+
+    def test_live_and_parked_together_is_an_error(self) -> None:
+        self.origin.write_text("copy", encoding="utf-8")
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 1)
+        (bad,) = self.comp_rows(rows, "error")
+        self.assertIn("both live", bad["detail"])
+        self.assertIn("fix: ", bad["detail"])
+
+    def test_orphan_parked_companion_is_a_warning(self) -> None:
+        stray = self.parked.parent / "stray.sh"
+        stray.write_text("x", encoding="utf-8")
+        rc, rows = self.doctor()
+        self.assertEqual(rc, 0)
+        (w,) = self.comp_rows(rows, "warn")
+        self.assertIn(str(stray), w["detail"])
+        self.assertIn("fix: ", w["detail"])
+
+    def test_pending_entries_are_not_reported_as_companion_problems(self) -> None:
+        raw = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        entry = raw["disabled"].pop("claude:skill:solo")
+        raw["pending"] = {"claude:skill:solo": {"action": "disable", "entry": entry}}
+        fs.state_file().write_text(json.dumps(raw), encoding="utf-8")
+        _, rows = self.doctor()
+        self.assertEqual(self.comp_rows(rows, "warn") + self.comp_rows(rows, "error"), [])
+
+    def test_killed_enable_keeps_the_key_in_both_and_is_not_a_companion_error(self) -> None:
+        raw = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        raw["pending"] = {"claude:skill:solo": {"action": "enable",
+                                                "entry": raw["disabled"]["claude:skill:solo"]}}
+        fs.state_file().write_text(json.dumps(raw), encoding="utf-8")
+        self.parked.rename(self.origin)               # the enable already moved it back
+        _, rows = self.doctor()
+        self.assertEqual(self.comp_rows(rows, "warn") + self.comp_rows(rows, "error"), [])
 
 
 if __name__ == "__main__":

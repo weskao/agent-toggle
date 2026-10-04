@@ -33,7 +33,7 @@ from typing import Callable
 from . import fs
 from .backends.flag_json import jsonc_loads
 from .backends.mcp_json import ProjectMcpError, read_project_mcp
-from .backends.plugin_cli import claude_bin, run_cli
+from .backends.plugin_cli import READ_TIMEOUT, claude_bin, run_cli
 from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
 
 CHARS_PER_TOKEN = 4
@@ -223,7 +223,7 @@ def list_plugins(warn: Callable[[str], None]) -> list[dict]:
     exe = claude_bin()
     if not exe:
         return []
-    ok, text = run_cli(exe, ["plugin", "list", "--json"])
+    ok, text = run_cli(exe, ["plugin", "list", "--json"], timeout=READ_TIMEOUT)
     try:       # run_cli merges stderr into the text: skip any notice before the array
         data = json.JSONDecoder().raw_decode(text, max(text.find("["), 0))[0] if ok else None
     except ValueError:
@@ -254,9 +254,13 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                               0 if enabled else est[0], est[1], est[2], tuple(shared)))
 
     for hname, h in table.items():
-        if not h.home.is_dir():
+        # a --project view with only .mcp.json has no .claude dir, but its servers are live
+        only_mcp = not h.home.is_dir() and h.project is not None and h.mcp is not None
+        if not h.home.is_dir() and not only_mcp:
             continue
         for type_ in h.types:
+            if only_mcp and type_ != "mcp":
+                continue
             if type_ in h.dirs:
                 for sub in h.dirs[type_]:
                     v = dir_view(table, hname, type_, h.home, sub)
@@ -275,9 +279,11 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                 for name in live_mcp(h.home, h.backend):
                     add(hname, type_, name, True, mcp_estimate(hname, counts.get(name)))
 
+    listed: list[str] = []                # canonical `name@marketplace` ids, for the parked rows
     claude = table.get("claude")
     if plugins and claude and claude.home.is_dir() and "plugin" in claude.types:
         for p in list_plugins(warn):
+            listed.append(p["id"])
             root = p.get("installPath")
             add("claude", "plugin", p["id"], p.get("enabled", True) is not False,
                 plugin_estimate(Path(root)) if isinstance(root, str)
@@ -291,6 +297,10 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
             est = mcp_estimate(h, backup_tools(e))
         elif t == "plugin":
             est = (0, None, "not in plugin list")
+            if "@" not in n:              # parked as `name`; the live id is `name@marketplace`
+                full = [i for i in listed if i.partition("@")[0] == n]
+                if len(full) == 1:        # ambiguous (several marketplaces): keep it as parked
+                    n = full[0]
         else:
             parked = e.get("parked_at")
             est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)

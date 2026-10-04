@@ -628,10 +628,14 @@ runs this pattern in production:
 
 ### 8.2 Known gaps (non-critical, found at the phase 0 + 1 gate)
 
-- `run_cli` in `backends/plugin_cli.py` uses a fixed 120 s timeout for every
-  `claude plugin ...` call.
-- A plugin can show twice in the picker when it is parked under a name that
-  differs from the `name@marketplace` id `claude plugin list` reports.
+- Fixed: `run_cli` takes a per-call `timeout` (30 s for read-only `plugin list`, 120 s
+  for every other call); `AGENT_TOGGLE_CLI_TIMEOUT` (seconds, > 0)
+  overrides both, an invalid value is ignored with a warning, and the timeout error
+  names the variable.
+- Fixed: a plugin parked as `name` collapses into the listed `name@marketplace` row
+  in the inventory (picker and `cost`) when exactly one listed id matches; an
+  ambiguous bare name stays its own parked row. `enable` on the full id does not
+  clear a state entry recorded under the bare name -- `enable <bare name>` does.
 - Picker typing mode (after `/`) has no on-screen cue; the header only shows the
   typed text.
 - With OpenCode installed, `disable --harness opencode` warns "NOT gitignored" once
@@ -702,7 +706,12 @@ Known gaps added by phase 2:
   edits run under a write-ahead `pending` entry. An old whole-file backup still
   restores exactly as before and is not rewritten; disabling the server again
   replaces it.
-- `doctor` does not check companion files.
+- Fixed: `doctor` checks companion files (`companions.py`): each recorded companion's
+  parked file exists (`error`), is not also live at its origin (`error`), and nothing
+  under `~/.agent-toggle/companions/` lacks a state entry (`warn`). `pending` entries
+  are reported by their own rows, not here.
+- Fixed: `profile save --project` (and the cost inventory) lists the live servers of a
+  project that has only `.mcp.json` and no `.claude/`.
 
 ---
 

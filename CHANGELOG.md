@@ -8,6 +8,9 @@
 
 ### 🐛 Bug Fixes
 
+- **plugin-cli:** `run_cli` takes a per-call timeout: 30 s for read-only `plugin list`, 120 s for every other call; `AGENT_TOGGLE_CLI_TIMEOUT` (seconds, > 0) overrides both, an invalid value is ignored with a warning, and the timeout error names the variable
+- **cost:** A plugin parked as `name` no longer shows twice next to the `name@marketplace` row `claude plugin list` reports; and `profile save --project` lists the live servers of a project that has only `.mcp.json` (no `.claude/`)
+- **doctor:** Check companion files: a recorded companion whose parked file is missing or that is also live is an `error`, a parked companion with no state entry is a `warn`, each with a fix
 - **ops:** A killed run is recoverable: state is saved per item, with a write-ahead `pending` entry (the flag's previous value included) before each flag write or dir move that the next run finishes or rolls back, and `status` / `doctor` report with the fix; a cross-filesystem project park copies into a temp sibling and renames it into place, and `enable` prunes the emptied `parked/<sha8>` dirs
 - **mcp-json:** A project `.mcp.json` backup holds only the toggled server's entry (its value, its exact text and its neighbours' names), no longer the whole file text with other servers' auth headers; `disable` cuts only that entry's bytes, `enable` re-inserts them into the current file (byte for byte when unchanged) and rolls back unless only that entry was added, both under a write-ahead `pending` entry. Old whole-file backups still restore as before and are not rewritten; disabling the server again replaces one
 - **install-shims:** Write the OpenCode shim into its first `skills.paths` dir when one is set (falling back to `skills/`); never overwrite the shim of another installed harness whose dir it redirects onto (skipped, "belongs to <owner>")

@@ -116,10 +116,11 @@ Checked against the code on 2026-10-03; every §6.1 row is done.
 
 Fix only if one bites; none blocks a phase.
 
-- [ ] `run_cli` uses a fixed 120 s timeout for every `claude plugin ...` call
-      (`backends/plugin_cli.py`)
-- [ ] a plugin can show twice in the picker when parked under a name that differs from
-      `name@marketplace`
+- [x] `run_cli` uses a fixed 120 s timeout for every `claude plugin ...` call
+      (`backends/plugin_cli.py`) -- now 30 s for read-only `plugin list`, 120 s for
+      every other call, `AGENT_TOGGLE_CLI_TIMEOUT` overrides both
+- [x] a plugin can show twice in the picker when parked under a name that differs from
+      `name@marketplace` -- the parked row now collapses into the listed `name@marketplace` one
 - [ ] picker typing mode (after `/`) has no on-screen cue
 - [x] `skills.paths`: `~`, `$HOME/...` not expanded; `opencode.jsonc` not read
 - [x] `install-shims` writes into `opencode/skills` even when `skills.paths` redirects
@@ -136,12 +137,12 @@ Fix only if one bites; none blocks a phase.
       temp copy + rename, and `enable` prunes the empty park dirs
 - [x] a killed run between a flag write and the state save leaves the flag `false`
       with no state entry -- now a write-ahead `pending` entry the next run settles
-- [ ] `profile save --project` lists only parked servers for a project with only
-      `.mcp.json`
+- [x] `profile save --project` lists only parked servers for a project with only
+      `.mcp.json` -- its live servers are listed too
 - [x] project `.mcp.json` backups hold the whole file text (mode `0600`), which can
       include other servers' auth headers -- now only the toggled entry, put back by a
       byte-preserving re-insert; old whole-file backups still restore
-- [ ] `doctor` does not check companion files
+- [x] `doctor` does not check companion files -- parked file present, no orphans, never both live and parked
 
 ## Housekeeping
 

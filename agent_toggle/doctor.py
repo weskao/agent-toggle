@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import filecmp
 import json
+import os
 from pathlib import Path
 
 from . import fs, store
@@ -297,6 +298,59 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
                  f"delete it yourself once the server is confirmed restored")
 
 
+def _recorded_companions(e) -> list[tuple[str, str]]:
+    """(origin, parked) pairs of one state entry; malformed records are `_check_entry`'s."""
+    comps = e.get("companions") if isinstance(e, dict) else None
+    return [(c["from"], c["to"]) for c in comps if isinstance(c, dict)
+            and isinstance(c.get("from"), str) and isinstance(c.get("to"), str)] \
+        if isinstance(comps, list) else []
+
+
+def _check_companions(out: Result, state: dict, only: str | None) -> None:
+    """Companion files (companions.py): every recorded one is parked and not also live,
+    and nothing under the companion dir lacks an entry. `pending` (write-ahead) entries
+    are the settle rows' business: not checked, but their files are not orphans either."""
+    tracked: set[str] = set()
+    for key, e in state["disabled"].items():
+        pairs = _recorded_companions(e)
+        tracked.update(to for _, to in pairs)
+        if key in state.get("pending", {}):      # a killed enable leaves the key in both
+            continue
+        if only and not (isinstance(e, dict) and only in (e.get("harness"), *(e.get("shared_with") or ()))):
+            continue
+        try:
+            ident = store.parse_key(key)
+            enable = enable_cmd(key, e)
+        except ValueError:                       # malformed key: _check_entry reports it
+            continue
+        ident = (ident[0], ident[2], ident[3])
+        for origin, to in pairs:
+            parked, live = Path(to).exists(), Path(origin).exists() or Path(origin).is_symlink()
+            if not parked:
+                _row(out, *ident, "error", f"companion parked file missing: {to}; fix: put it back "
+                     f"there and run `{enable}`, or move your copy to {origin} and remove the "
+                     f"entry from {fs.state_file()}")
+            elif live:
+                _row(out, *ident, "error", f"companion is both live ({origin}) and parked ({to}); "
+                     f"fix: compare them, delete the copy you do not want, then run `{enable}`")
+    for p in state.get("pending", {}).values():
+        e = p.get("entry") if isinstance(p, dict) else None
+        tracked.update(to for _, to in _recorded_companions(e))
+    root = fs.companion_dir()
+    if not root.is_dir():
+        return
+    for top in sorted(root.iterdir()):
+        if (only and not top.name.startswith(f"{only}_")) or top.name.startswith("."):
+            continue
+        for dirpath, _, files in os.walk(top):
+            for f in sorted(files):
+                p = Path(dirpath) / f
+                if not f.startswith(".") and str(p) not in tracked:
+                    _row(out, None, None, f, "warn", f"{p} is a parked companion with no state "
+                         f"entry; fix: move it back under its harness home by hand (the path "
+                         f"below {top} mirrors the one under that home), or delete it")
+
+
 def _check_modes(out: Result) -> None:
     for p in (fs.state_file(), *fs.backup_dir().glob("*.json")):
         if fs.too_open(p, 0o077):
@@ -335,6 +389,7 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
             _row(out, None, None, key, "error" if verdict == "stuck" else "warn", msg,
                  pending=verdict)
         _check_orphans(out, state, table, harness)
+        _check_companions(out, state, harness)
     if not harness:
         _check_modes(out)
     errors = sum(r["status"] == "error" for r in out.rows)

@@ -265,5 +265,33 @@ class PerfAndDryRunTest(CliCase):
         self.assertFalse(fs.state_file().exists())
 
 
+class PluginDedupeTest(CliCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli_rc = 0
+
+    def listing(self, *items: dict) -> None:
+        plugin_cli.runner = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps(list(items)), stderr="")
+
+    def names(self) -> list[str]:
+        return [r["name"] for r in self.run_json("cost", "--type", "plugin")[1]["results"] if r["name"]]
+
+    def test_parked_bare_name_and_live_id_are_one_row(self) -> None:
+        self.assertEqual(self.run_cli("disable", "plugin", "demo")[0], 0)     # parked as `demo`
+        self.listing({"id": "demo@mkt", "enabled": False})
+        self.assertEqual(self.names(), ["demo@mkt"])
+
+    def test_ambiguous_bare_name_stays_a_separate_parked_row(self) -> None:
+        self.run_cli("disable", "plugin", "demo")
+        self.listing({"id": "demo@a", "enabled": True}, {"id": "demo@b", "enabled": True})
+        self.assertEqual(sorted(self.names()), ["demo", "demo@a", "demo@b"])
+
+    def test_full_id_parked_is_still_one_row(self) -> None:
+        self.run_cli("disable", "plugin", "demo@mkt")
+        self.listing({"id": "demo@mkt", "enabled": False})
+        self.assertEqual(self.names(), ["demo@mkt"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -142,6 +142,9 @@ Flags accepted by every command, before or after the subcommand:
 - `--project <dir>` (`disable` / `enable` / `enable --all` / `list` / `profile
   save|apply|diff`) switches to project scope; see [Project scope](#project-scope).
 - `--version` prints the version.
+- `AGENT_TOGGLE_CLI_TIMEOUT=<seconds>` overrides the timeout of every `claude` CLI call
+  (default 30 s for read-only `plugin list`, 120 s for every other call); a
+  non-positive or non-numeric value is ignored with a warning.
 - `-v` / `--verbose` (or `AGENT_TOGGLE_DEBUG=1`) adds a traceback on stderr for
   unexpected errors; otherwise they are a single `error:` line.
 - `--color auto|always|never` sets ANSI color for human output: green ok, red errors,
@@ -484,8 +487,8 @@ Read-only: no lock, no state write-back, no `claude` CLI call. For each
 installed harness it compares the live layout with the table row (expected
 dirs and config keys), then cross-checks `state.json` against disk (parked
 item present, origin dir present, backup present, project dir present, entry
-passes the same tamper checks `enable` runs, modes no looser than `0600` /
-`0700`). Rows (`action: doctor`) carry a status:
+passes the same tamper checks `enable` runs, companion files present and not also
+live, modes no looser than `0600` / `0700`). Rows (`action: doctor`) carry a status:
 
 | status | meaning |
 |---|---|
@@ -493,12 +496,12 @@ passes the same tamper checks `enable` runs, modes no looser than `0600` /
 | `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
 | `unverified` | no version could be read, or the row has nothing to check |
-| `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
-| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool, an op a killed run left in flight that needs you (`pending: stuck`, with the exact fix) |
+| `warn` | loose file modes; a parked item or companion file with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
+| `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files (companions included) are gone or fail the tamper checks, a companion both live and parked, a flag re-enabled outside the tool, an op a killed run left in flight that needs you (`pending: stuck`, with the exact fix) |
 
 Only `error` makes the exit code `1`; each problem row names the command that
 fixes it. `--harness X` for a harness that is not installed is a `note` (exit
-`0`). Companion files are not checked.
+`0`).
 
 A harness item parked with no state entry also carries `orphan`, and its fix
 follows from it: `identical` (the live copy has the same content: delete the
