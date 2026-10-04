@@ -129,7 +129,8 @@ Fix only if one bites; none blocks a phase.
 - [ ] picker has no profile key; profiles are CLI only
 - [ ] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports
       `unverified`)
-- [ ] JSONC / JSON5 config is refused, never rewritten
+- [x] JSONC / JSON5 config is refused, never rewritten -- JSONC is now rewritten in place
+      (comments and trailing commas kept); JSON5 stays refused
 - [ ] project park across filesystems is copy + delete, not atomic; an empty
       `parked/<sha8>/*-disabled` dir can remain after `enable`
 - [ ] a killed run between a flag write and the state save leaves the flag `false`

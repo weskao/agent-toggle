@@ -300,7 +300,7 @@ def toggle_flag(action: str, type_: str, names: list[str], state: dict, harness:
     a name with no flag entry (disable) or no flag state entry (enable) is not
     handled here: it comes back in `rest` for the dir-move path. Otherwise every
     name is handled and a missing/unsafe flag is an error row. The flag shapes
-    are ASSUMED (DESIGN s4/s11); JSONC/JSON5 is refused by flag_json."""
+    are ASSUMED (DESIGN s4/s11); JSONC is edited in place, JSON5 refused by flag_json."""
     table = harnesses()
     h = table[harness]
     rest: list[str] = []

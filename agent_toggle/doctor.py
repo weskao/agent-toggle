@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import filecmp
 import json
-import re
 from pathlib import Path
 
 from . import fs, store
+from .backends.flag_json import jsonc_loads
 from .harnesses import Harness, harnesses
 from .mechanisms import _refusal, dir_view
 from .output import CliError, Result
@@ -22,8 +22,6 @@ STYLE = {"ok": "green", "error": "red", "warn": "yellow",
          "absent": "dim", "note": "dim", "unverified": "dim"}
 TAG = {"ok": "v", "absent": "-", "note": "i", "unverified": "?", "warn": "!", "error": "x"}
 NEED = {"move": ("parked_at", "origin"), "remove_backup": ("backup",)}
-# strings (kept) | comments | trailing commas: what makes strict JSON into JSONC
-_JSONC = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
 
 
 def _row(out: Result, harness, type_, name, status: str, detail: str, **extra) -> None:
@@ -44,7 +42,7 @@ def _read_json(file: Path) -> tuple[object, str, str]:
         return json.loads(text), "ok", ""
     except ValueError as e:
         try:                                    # parses once comments/commas are gone: JSONC
-            json.loads(_JSONC.sub(lambda m: m[0] if m[0][0] == '"' else "", text))
+            jsonc_loads(text)
             return None, "jsonc", ""
         except ValueError:
             return None, "broken", f"is not valid JSON ({e})"
@@ -61,9 +59,9 @@ def _walk(data: object, path) -> tuple[bool, object]:
 def _file_row(out: Result, hname, type_, name, file: Path, kind: str, why: str, lead: str,
               jsonc_ok: bool = True) -> None:
     """The row for a JSON file that did not load as strict JSON."""
-    if kind == "jsonc" and jsonc_ok:     # JSONC/JSON5 is the harness's own format, not corruption
-        _row(out, hname, type_, name, "note", f"unsupported format: {file} has comments or trailing "
-             f"commas (JSONC/JSON5); agent-toggle will not edit it, doctor cannot check it")
+    if kind == "jsonc" and jsonc_ok:     # JSONC is the harness's own format, not corruption
+        _row(out, hname, type_, name, "note", f"{file} has comments or trailing commas (JSONC); "
+             f"agent-toggle edits its flags in place and keeps them, doctor does not check its keys")
     else:
         _row(out, hname, type_, name, "error", f"{lead}{file} " + (why or "is not valid JSON"))
 

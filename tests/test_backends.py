@@ -517,6 +517,29 @@ class FlagJsonTest(SandboxCase):
             with self.subTest(label):
                 self.flip(text, ptr)
 
+    def test_jsonc_keeps_comments_and_trailing_commas(self) -> None:
+        text = ('// top comment\n{\n'
+                '  "url": "https://example.com/a//b", /* "enabled": false */\n'
+                '  "note": "say \\"/* hi */\\" // not a comment",\n'
+                '  "mcp": {\n'
+                '    "example-mcp": {\n'
+                '      // "enabled": false,\n'
+                '      "enabled": /* inline */ true,\r\n'
+                '      "tools": ["a", "b",],\n'
+                '    },\n'
+                '  },\n'
+                '}\n')
+        self.flip(text, ("mcp", "example-mcp", "enabled"))
+        self.flip('\ufeff/* bom */{"mcp": {"example-mcp": {"enabled": false,},},}',
+                  ("mcp", "example-mcp", "enabled"), old="false")
+
+    def test_strip_jsonc_is_length_preserving(self) -> None:
+        text = '{"a": "//x", /* c\n */ "b": [1,], "c": ",}", // t\n}'
+        masked = flag_json.strip_jsonc(text)
+        self.assertEqual(len(masked), len(text))
+        self.assertEqual(masked.count("\n"), text.count("\n"))
+        self.assertEqual(flag_json.jsonc_loads(text), {"a": "//x", "b": [1], "c": ",}"})
+
     def test_false_flag_turns_true(self) -> None:
         self.flip('{"mcp": {"example-mcp": {"enabled": false}}}',
                   ("mcp", "example-mcp", "enabled"), old="false")
@@ -543,12 +566,16 @@ class FlagJsonTest(SandboxCase):
                                       ' "enabled": false}}}', "duplicate"),
             "duplicate elsewhere": ('{"x": 1, "x": 2, "mcp": {"example-mcp":'
                                     ' {"enabled": true}}}', "duplicate"),
-            "jsonc comment": ('{\n  // comment\n  "mcp": {"example-mcp": {"enabled": true}}\n}',
-                              "not strict JSON"),
-            "jsonc trailing comma": ('{"mcp": {"example-mcp": {"enabled": true,}}}',
-                                     "not strict JSON"),
+            "jsonc duplicate": ('{\n  // c\n  "mcp": {"example-mcp": {"enabled": true,'
+                                ' /* c */ "enabled": false,},}', "duplicate"),
             "json5 unquoted key": ('{mcp: {"example-mcp": {"enabled": true}}}',
-                                   "not strict JSON"),
+                                   "JSON5 is not supported"),
+            "json5 single quotes": ("{'mcp': {\"example-mcp\": {\"enabled\": true}}}",
+                                    "JSON5 is not supported"),
+            "json5 hex": ('{"n": 0x1F, "mcp": {"example-mcp": {"enabled": true}}}',
+                          "JSON5 is not supported"),
+            "unterminated block comment": ('{/* "mcp": {"example-mcp": {"enabled": true}}}',
+                                           "not strict JSON"),
             "NaN": ('{"n": NaN, "mcp": {"example-mcp": {"enabled": true}}}',
                     "not strict JSON"),
             "top level not an object": ('[true]', "not found"),

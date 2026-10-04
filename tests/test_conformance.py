@@ -214,9 +214,18 @@ class FlagMechanismTest(CliCase):
         self.assertEqual(rc, 1)
         self.assertEqual(self.raw("openclaw"), before)
 
-    def test_jsonc_is_refused_untouched(self) -> None:
+    def test_jsonc_round_trips_with_comments_kept(self) -> None:
         f = self.tmp / self.FILES["opencode"]
-        f.write_text('{ // note\n "mcp": {"example-mcp": {"enabled": true}}}', encoding="utf-8")
+        f.write_text('{ // note\n "mcp": {"example-mcp": {"enabled": true,},},}', encoding="utf-8")
+        before = f.read_bytes()
+        self.assertEqual(self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")[0], 0)
+        self.assertEqual(f.read_bytes(), before.replace(b"true", b"false"))
+        self.assertEqual(self.run_cli("enable", "mcp", "example-mcp", "--harness", "opencode")[0], 0)
+        self.assertEqual(f.read_bytes(), before)
+
+    def test_json5_is_refused_untouched(self) -> None:
+        f = self.tmp / self.FILES["opencode"]
+        f.write_text("{ mcp: {'example-mcp': {enabled: true}}}", encoding="utf-8")
         before = f.read_bytes()
         rc, out, _ = self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")
         self.assertEqual(rc, 1)

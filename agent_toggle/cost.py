@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import fs
+from .backends.flag_json import jsonc_loads
 from .backends.mcp_json import ProjectMcpError, read_project_mcp
 from .backends.plugin_cli import claude_bin, run_cli
 from .mechanisms import _valid_name, dir_view, live_mcp, live_names, resolve_item
@@ -171,7 +172,7 @@ def flag_names(h, type_: str) -> list[str]:
     rel, pointer = h.flags[type_]
     prefix = pointer[:pointer.index("<name>")] if "<name>" in pointer else pointer[:-1]
     try:
-        node = json.loads((h.home / rel).read_text(encoding="utf-8").removeprefix("\ufeff"))
+        node = jsonc_loads((h.home / rel).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     for k in prefix:

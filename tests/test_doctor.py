@@ -140,13 +140,13 @@ class LayoutTest(DoctorCase):
         (self.tmp / ".claude.json").write_text('{"mcpServers": {},}', encoding="utf-8")
         self.assertEqual(self.doctor("--harness", "claude")[0], 1)
 
-    def test_jsonc_is_an_unsupported_note_not_corruption(self) -> None:
+    def test_jsonc_is_a_note_not_corruption(self) -> None:
         self.oc.write_text('{\n  // comment\n  "mcp": {"example-mcp": {"enabled": true,},},\n}\n',
                            encoding="utf-8")
         rc, rows = self.doctor()
         self.assertEqual(rc, 0, rows)
         (note,) = self.rows(rows, "note", harness="opencode", type="mcp")
-        self.assertIn("unsupported format", note["detail"])
+        self.assertIn("edits its flags in place", note["detail"])
 
 
 class StateTest(DoctorCase):

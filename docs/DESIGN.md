@@ -622,9 +622,14 @@ Known gaps added by phase 2:
 - On Python 3.10 (no `tomllib`) a TOML edit is checked textually against the original
   (only the one block removed or appended), not parsed; `doctor` reports an existing
   codex/grok `config.toml` as `unverified` there.
-- JSONC / JSON5 config (`opencode.json`, `openclaw.json`) is refused, never
-  rewritten; the flag edits require strict JSON (no comments, no trailing
-  commas, no duplicate keys; a leading BOM is preserved).
+- JSON5 config (unquoted keys, single quotes, hex, `NaN` -- `openclaw.json` may be
+  JSON5) is refused, never rewritten: a re-serialise would drop the user's
+  comments and layout, and a hand-written JSON5 walker is not worth it while
+  both real installs were strict JSON (§11 q5/q6). Fixed: JSONC (`//` and
+  `/* */` comments, trailing commas) is rewritten in place -- the flag walk runs
+  on a length-preserving mask (`flag_json.strip_jsonc`) and only the one
+  `true`/`false` token changes; duplicate keys are still refused and a leading
+  BOM is preserved.
 - The openclaw and opencode flag shapes are assumed, not verified (§11).
 - A project park across filesystems is copy + delete, not an atomic rename
   (symlink and permission handling differ); an empty `parked/<sha8>/*-disabled`
@@ -712,5 +717,6 @@ Known gaps added by phase 2:
 6. opencode: is `mcp.<name>.enabled` in `opencode.json` the real flag, and does
    a real `opencode.json` stay free of comments and trailing commas (it may be
    JSONC)? Answered on opencode 2.0.22: `mcp.<name>.enabled` is a boolean on every
-   server and the file was strict JSON; JSONC stays refused in case another install
-   uses it.
+   server and the file was strict JSON. JSONC is supported anyway (only the flag
+   token is rewritten, comments and trailing commas kept) in case another install
+   uses it; JSON5 stays refused (§8.2).

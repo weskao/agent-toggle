@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### 🚀 Features
+
+- **flag-json:** Rewrite JSONC configs in place (comments and trailing commas kept); JSON5 is still refused
+
 ## [0.2.0] - 2026-10-03
 
 ### 🚀 Features

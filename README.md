@@ -508,10 +508,11 @@ were since seen on one real install each (openclaw 2026.7.1-2, opencode 2.0.22; 
 - `opencode.json`: `mcp.<name>.enabled`
 
 The edit changes one boolean token and nothing else, is verified after writing
-and rolled back on any mismatch (bytes and file mode). Files that are not
-strict JSON (JSONC / JSON5 -- comments, trailing commas) or that repeat a key are
-**refused**, never rewritten; a leading BOM is kept as is; a missing key is
-refused, never invented. An openclaw skill
+and rolled back on any mismatch (bytes and file mode). JSONC (`//` and `/* */`
+comments, trailing commas) is edited the same way: only the flag token changes,
+comments and commas are kept. JSON5 (unquoted keys, single quotes, hex) and files
+that repeat a key are **refused**, never rewritten; a leading BOM is kept as is; a
+missing key is refused, never invented. An openclaw skill
 uses the flag only when `skills.entries.<name>` already exists, otherwise its
 directory is moved. If a run is killed between the flag write and the state
 save, the flag is `false` with no state entry: `enable` then tells you to set it
