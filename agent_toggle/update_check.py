@@ -152,7 +152,11 @@ def check(
     cached = _load_cache(cache_path)
     latest = _valid_version(cached.get("latest"))
     checked_at = cached.get("checked_at")
-    fresh = isinstance(checked_at, (int, float)) and stamp - float(checked_at) < ttl_seconds
+    try:
+        age = stamp - float(checked_at) if isinstance(checked_at, (int, float)) else -1.0
+    except OverflowError:                       # a huge int in a hand-edited cache
+        age = -1.0
+    fresh = 0 <= age < ttl_seconds              # a future, inf or nan stamp is stale
     if not fresh:
         try:
             fetched = _latest_from_body((fetch or fetch_pypi)(dist_name, timeout))

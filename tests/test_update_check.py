@@ -88,6 +88,14 @@ class CheckTest(UpdateCheckCase):
         self.assertEqual(found.latest, "0.10.0")
         self.assertEqual(calls, [(DIST, update_check.DEFAULT_TIMEOUT)])
 
+    def test_a_future_or_non_finite_stamp_is_stale(self):
+        for stamp in (2_000_000.0, float("inf"), float("nan"), 10 ** 400):
+            calls: list = []
+            self.cache.write_text(json.dumps({"checked_at": stamp, "latest": "0.9.2"}),
+                                  encoding="utf-8")
+            found = self.check(calls=calls)
+            self.assertEqual((found.latest, len(calls)), ("0.10.0", 1), stamp)
+
     def test_a_failed_fetch_stays_silent(self):
         self.assertIsNone(self.check(fetch=_offline))
 
