@@ -33,8 +33,7 @@ def toml_block(text: str, name: str) -> tuple[int, int] | None:
 
 def remove_verify(text: str, name: str, block: str):
     """verify() for a removal planned against `text`: the file is still exactly what we
-    read (no concurrent edit), and only that block is gone. The note says
-    `unverified (no tomllib)` when no TOML parser could also parse the result."""
+    read (no concurrent edit), only that block is gone, and the result parses."""
     parse = fs.toml_verify()
 
     def verify(before: str, after: str) -> str:

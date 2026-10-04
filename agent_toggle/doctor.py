@@ -102,23 +102,17 @@ def _check_layout(out: Result, h: Harness, table: dict) -> None:
     if h.mcp:
         spec, lead = h.mcp, "layout changed: "
         if spec.backend == "toml":
-            toml = fs._tomllib()
-            if toml is None:
-                state = "unverified" if spec.file.is_file() else "absent"
-                _row(out, h.name, "mcp", None, state, f"{spec.file}: no tomllib, not parsed"
-                     if state == "unverified" else f"{spec.file} does not exist (nothing to check)")
+            try:
+                data = fs.toml_parse(spec.file.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                _row(out, h.name, "mcp", None, "absent",
+                     f"{spec.file} does not exist (nothing to check)")
+            except (OSError, ValueError) as e:
+                _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} does not parse ({e})")
             else:
-                try:
-                    data = toml.loads(spec.file.read_text(encoding="utf-8"))
-                except FileNotFoundError:
+                if not _walk(data, spec.key_path)[0]:
                     _row(out, h.name, "mcp", None, "absent",
-                         f"{spec.file} does not exist (nothing to check)")
-                except (OSError, ValueError) as e:
-                    _row(out, h.name, "mcp", None, "error", f"{lead}{spec.file} does not parse ({e})")
-                else:
-                    if not _walk(data, spec.key_path)[0]:
-                        _row(out, h.name, "mcp", None, "absent",
-                             f"[{'.'.join(spec.key_path)}] not in {spec.file} (nothing to check)")
+                         f"[{'.'.join(spec.key_path)}] not in {spec.file} (nothing to check)")
         else:
             _json_at(out, h.name, "mcp", None, spec.file, spec.key_path, lead, jsonc_ok=False,
                      absent_ok=True)

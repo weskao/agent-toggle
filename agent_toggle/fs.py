@@ -308,17 +308,24 @@ def _tomllib():
         return None
 
 
+def toml_parse(text: str):
+    """Parse-check `text`: tomllib, or on Python 3.10 the structural checker in
+    toml_check. Raises ValueError. The result is a dict tree (values undecoded on 3.10)."""
+    toml = _tomllib()
+    if toml is not None:
+        return toml.loads(text)              # TOMLDecodeError is a ValueError
+    from . import toml_check
+    return toml_check.parse(text)
+
+
 def toml_verify(expected: str | None = None):
-    """verify(): the result parses (when tomllib exists) and, if given, equals
-    `expected` -- the before text with the one [mcp_servers.<name>] block
-    removed/appended. Note is `unverified (no tomllib)` only when neither ran."""
+    """verify(): the result parses (toml_parse) and, if given, equals `expected` --
+    the before text with the one [mcp_servers.<name>] block removed/appended."""
     def verify(before: str, after: str) -> str:
-        toml = _tomllib()
-        if toml is not None:
-            toml.loads(after)                # TOMLDecodeError is a ValueError
+        toml_parse(after)
         if expected is not None and after != expected:
             raise ValueError("result differs from the expected edit")
-        return "" if toml is not None or expected is not None else "unverified (no tomllib)"
+        return ""
     return verify
 
 

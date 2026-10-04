@@ -7,7 +7,8 @@ from unittest import mock
 
 from base import CAN_SYMLINK, SandboxCase
 
-from agent_toggle import fs
+from agent_toggle import fs, toml_check
+from test_conformance import FIXTURES
 
 
 class SafeMoveTest(SandboxCase):
@@ -188,10 +189,106 @@ class VerifyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             fs.toml_verify(self.AFTER)(self.BEFORE, self.AFTER + "y = 2\n")
 
-    def test_toml_verify_without_tomllib_is_textual(self) -> None:
+    def test_toml_verify_without_tomllib_is_textual_and_parsed(self) -> None:
         with mock.patch.object(fs, "_tomllib", lambda: None):
             self.assertEqual(fs.toml_verify(self.AFTER)(self.BEFORE, self.AFTER), "")
             with self.assertRaises(ValueError):
                 fs.toml_verify(self.AFTER)(self.BEFORE, self.AFTER + "y = 2\n")
-            self.assertEqual(fs.toml_verify()(self.BEFORE, self.AFTER),
-                             "unverified (no tomllib)")
+            self.assertEqual(fs.toml_verify()(self.BEFORE, self.AFTER), "")
+            with self.assertRaises(ValueError):
+                fs.toml_verify()(self.BEFORE, "[broken\n")
+            with self.assertRaises(ValueError):          # parse check runs even with `expected`
+                fs.toml_verify("[other]\nx = 1\nx = 2\n")(self.BEFORE, "[other]\nx = 1\nx = 2\n")
+
+
+VALID_TOML = [
+    "", "# only a comment\n", "a = 1", "a = 1 # trailing\r\nb = 2\r\n",
+    "[a]\n[a.b]\n[a.b.c]\nx = 1\n", "[a.b]\n[a]\nx = 1\n", '[a."q.k".\'l\']\nx = 1\n',
+    "[[t]]\nx = 1\n[[t]]\nx = 2\n[t.sub]\ny = 3\n[[t.list]]\n",
+    'a.b.c = 1\na.b.d = 2\n"q k" = 1\n\'l\' = 2\n1234 = 3\n',
+    '[f]\napple.color = "red"\n[f.apple.texture]\nsmooth = true\n',
+    's = "a \\"q\\" \\u00e9 \\U0001F600 \\\\"\nl = \'C:\\\\x\'\ne = ""\nf = \'\'\n',
+    's = """\nline one\n  two "quoted" ""\\\n   joined"""\n',
+    "s = \'\'\'\nraw \\ \'x\' \'\'\nend\'\'\'\'\'\n",
+    "i = [0, +1, -2, 1_000, 0xDEAD_beef, 0o17, 0b101]\nf = [1.5, -0.1, 6.0e2, 1e-3, 1_0.2_5, inf, -inf, nan]\n",
+    "t = [true, false]\nd = [1979-05-27, 07:32:00, 1979-05-27T07:32:00Z, 1979-05-27 07:32:00.5-07:00]\n",
+    "a = [\n  1, # one\n  2,\n]\nn = [[1, 2], [\"x\", [true]], []]\nm = [{x = 1}, {y = [1]}]\n",
+    "i = {a = 1, b.c = 2, d = {e = [1, 2]}}\ne = {}\n",
+    '[mcp_servers.x]\ncommand = "npx"\nargs = ["-y", "pkg"]\nenv = { TOKEN = "t" }\n',
+]
+BAD_TOML = {
+    "unterminated string": 'a = "abc\n',
+    "unterminated multiline": 'a = """abc\n',
+    "unterminated literal": "a = 'abc\nb = 1\n",
+    "newline in basic string": 'a = "ab\ncd"\n',
+    "bad escape": 'a = "\\q"\n',
+    "bad unicode escape": 'a = "\\u12"\n',
+    "bad header": "[a\nx = 1\n",
+    "empty header": "[]\n",
+    "header trailing junk": "[a] x = 1\n",
+    "mismatched aot header": "[[a]\n",
+    "duplicate key": "a = 1\na = 2\n",
+    "duplicate dotted key": "a.b = 1\na.b = 2\n",
+    "key vs dotted table": "a = 1\na.b = 2\n",
+    "duplicate table": "[a]\nx = 1\n[a]\ny = 2\n",
+    "duplicate nested table": "[a.b]\n[a.b]\n",
+    "table vs key": "a = 1\n[a]\n",
+    "aot vs table": "[a]\n[[a]]\n",
+    "table vs aot": "[[a]]\n[a]\n",
+    "extend inline table": "a = {x = 1}\n[a.y]\n",
+    "dotted table redefined": "[f]\na.b = 1\n[f.a]\n",
+    "missing equals": "a 1\n",
+    "missing value": "a =\n",
+    "key only": "a\n",
+    "two values": "a = 1 2\n",
+    "bad number": "a = 1.\nb = 01\n",
+    "bad bool": "a = True\n",
+    "unquoted string": "a = abc\n",
+    "unterminated array": "a = [1, 2\n",
+    "array missing comma": "a = [1 2]\n",
+    "unterminated inline": "a = {x = 1\n",
+    "inline trailing comma": "a = {x = 1,}\n",
+    "inline newline": "a = {x = 1,\ny = 2}\n",
+    "inline duplicate": "a = {x = 1, x = 2}\n",
+    "bad date": "a = 1979-13\n",
+    "control char": 'a = "x\x00y"\n',
+    "bare cr": "a = 1\rb = 2\n",
+}
+
+
+class TomlCheckTest(unittest.TestCase):
+    """The Python 3.10 fallback validator, forced on, and (on 3.11+) held to tomllib."""
+
+    def test_accepts_the_codex_and_grok_fixtures(self) -> None:
+        for f in FIXTURES.glob("*/.*/config.toml"):
+            with self.subTest(f=str(f)):
+                tree = toml_check.parse(f.read_text(encoding="utf-8"))
+                self.assertIn("example-mcp", tree["mcp_servers"])
+
+    def test_accepts_valid_snippets(self) -> None:
+        for text in VALID_TOML:
+            with self.subTest(text=text):
+                toml_check.parse(text)
+
+    def test_rejects_malformed_snippets(self) -> None:
+        for why, text in BAD_TOML.items():
+            with self.subTest(why=why), self.assertRaises(ValueError):
+                toml_check.parse(text)
+
+    def test_toml_parse_falls_back_when_tomllib_is_missing(self) -> None:
+        with mock.patch.object(fs, "_tomllib", lambda: None):
+            self.assertIn("a", fs.toml_parse("[a.b]\n"))
+            with self.assertRaises(ValueError):
+                fs.toml_parse("[a]\n[a]\n")
+
+    @unittest.skipIf(fs._tomllib() is None, "needs tomllib (3.11+)")
+    def test_never_looser_than_tomllib(self) -> None:
+        real = fs._tomllib()
+        texts = [f.read_text(encoding="utf-8") for f in FIXTURES.glob("*/.*/config.toml")]
+        for text in texts + VALID_TOML:
+            with self.subTest(text=text):
+                real.loads(text)
+                toml_check.parse(text)       # accepted by both
+        for why, text in BAD_TOML.items():
+            with self.subTest(why=why), self.assertRaises(ValueError):
+                real.loads(text)             # the snippet really is invalid TOML

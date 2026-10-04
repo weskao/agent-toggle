@@ -87,11 +87,20 @@ class LayoutTest(DoctorCase):
         self.assertEqual({r["harness"] for r in self.rows(rows, "absent", type="mcp")},
                          {"claude", "codex"})
 
-    def test_missing_toml_without_tomllib_is_absent_present_is_unverified(self) -> None:
+    def test_toml_without_tomllib_is_parsed_by_the_fallback(self) -> None:
         cfg = self.tmp / ".codex" / "config.toml"
         with mock.patch.object(fs, "_tomllib", lambda: None):
-            self.assertEqual(self.rows(self.doctor("--harness", "codex")[1], "unverified",
-                                       harness="codex", type="mcp")[0]["status"], "unverified")
+            rc, rows = self.doctor("--harness", "codex")
+            self.assertEqual(rc, 0, rows)
+            self.assertFalse([r for r in rows if r["status"] == "unverified" and r["type"] == "mcp"])
+            self.assertFalse(self.rows(rows, "absent", harness="codex", type="mcp"))
+            cfg.write_text("[mcp_servers.x]\n[mcp_servers.x]\n", encoding="utf-8")
+            rc, rows = self.doctor("--harness", "codex")
+            self.assertEqual(rc, 1)
+            self.assertIn("does not parse", self.rows(rows, "error", harness="codex", type="mcp")[0]["detail"])
+            cfg.write_text("[other]\nx = 1\n", encoding="utf-8")
+            self.assertEqual(len(self.rows(self.doctor("--harness", "codex")[1], "absent",
+                                           harness="codex", type="mcp")), 1)
             cfg.unlink()
             rc, rows = self.doctor("--harness", "codex")
         self.assertEqual(rc, 0, rows)

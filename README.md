@@ -484,7 +484,7 @@ passes the same tamper checks `enable` runs, modes no looser than `0600` /
 | `ok` | matches |
 | `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
-| `unverified` | could not be parsed here (an existing codex/grok `config.toml` on Python 3.10, which has no `tomllib`) |
+| `unverified` | no version could be read, or the row has nothing to check |
 | `warn` | loose file modes; a parked item with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one after `enable` is ignored) |
 | `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files are gone or fail the tamper checks, a flag re-enabled outside the tool |
 

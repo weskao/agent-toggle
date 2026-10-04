@@ -3,6 +3,7 @@
 ### 🚀 Features
 
 - **flag-json:** Rewrite JSONC configs in place (comments and trailing commas kept); JSON5 is still refused
+- **fs:** Parse-check TOML edits on Python 3.10 with a stdlib structural validator; `doctor` no longer reports codex/grok `config.toml` as `unverified` there
 
 ## [0.2.0] - 2026-10-03
 

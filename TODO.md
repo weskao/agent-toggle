@@ -127,8 +127,8 @@ Fix only if one bites; none blocks a phase.
 - [ ] `aliases_from` on the harness record is metadata only
 - [ ] `ui` and `cost` are user-scope only (no `--project`)
 - [ ] picker has no profile key; profiles are CLI only
-- [ ] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports
-      `unverified`)
+- [x] Python 3.10 TOML edits are checked textually, not parsed (`doctor` reports
+      `unverified`) -- now parse-checked by a stdlib structural validator
 - [x] JSONC / JSON5 config is refused, never rewritten -- JSONC is now rewritten in place
       (comments and trailing commas kept); JSON5 stays refused
 - [ ] project park across filesystems is copy + delete, not atomic; an empty

@@ -491,7 +491,7 @@ directories, and the promise that a disable never loses data.
 | 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | done: both shim templates carry a Safety section; `ops` warns when a plan disables a `rule` |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | done: argv form, and `mechanisms.valid_plugin_id` refuses any other id before `claude plugin ...` runs (`tests/test_platform.py`) |
-| 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the TOML check is textual only (see §8.2) |
+| 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the parse check there is the structural validator in `toml_check.py` (see §8.2) |
 | 7 | **Races and links** | one lock per batch; `safe_move` on one filesystem; refuse a park dir reached through a symlinked parent; same-user attackers are out of scope | lock and `safe_move` done |
 | 8 | **Supply chain** | zero runtime dependencies; PyPI trusted publishing (OIDC, no stored token); GitHub Actions pinned by commit SHA and kept current by Dependabot; workflows default to `contents: read` and only the publish job gets `id-token: write`; README pins installs to a tag, `git+<repo-url>@vX.Y.Z` | done: `.github/dependabot.yml`, workflows default to `contents: read`, only `publish` has `id-token: write`, README pins git installs to a tag |
 | 9 | **Installer overwrites**: `install-shims` writes into harness dirs | writes only its own shim files under `$HOME`-relative paths and refuses to overwrite a file that lacks the shim marker | done: `cli.SHIM_MARKER`; a file without it (or a symlink) is refused, a pre-marker shim is recognised (`tests/test_install.py`) |
@@ -619,9 +619,11 @@ Known gaps added by phase 2:
 
 - `ui` and `cost` are user-scope only (no `--project`).
 - The picker has no profile key (§5.10); profiles are CLI only.
-- On Python 3.10 (no `tomllib`) a TOML edit is checked textually against the original
-  (only the one block removed or appended), not parsed; `doctor` reports an existing
-  codex/grok `config.toml` as `unverified` there.
+- Fixed: on Python 3.10 (no `tomllib`) a TOML edit is parse-checked by a stdlib-only
+  structural validator (`agent_toggle/toml_check.py`: the codex/grok subset, duplicate
+  tables/keys rejected, values not decoded) on top of the textual one-block check;
+  `doctor` parses an existing `config.toml` there too. Tests cross-check it against
+  `tomllib` so it cannot drift looser.
 - JSON5 config (unquoted keys, single quotes, hex, `NaN` -- `openclaw.json` may be
   JSON5) is refused, never rewritten: a re-serialise would drop the user's
   comments and layout, and a hand-written JSON5 walker is not worth it while
