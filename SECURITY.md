@@ -40,6 +40,25 @@ commit `~/.agent-toggle/` to version control, and do not paste backup
 contents into issues or logs. `agent-toggle status --json` is safe to share;
 it reports names and paths, never backed-up values.
 
+## Network use: the update check
+
+agent-toggle has no telemetry and never uploads your resources, paths or state. It makes
+one network call, a default-on update check:
+
+- `GET https://pypi.org/pypi/agent-toggle/json`, on a background thread with a 0.8 s timeout;
+  nothing is sent beyond a normal HTTP GET with the User-Agent `agent-toggle-update-check`.
+- The answer is cached for 10 minutes in `~/.agent-toggle/update-check.json` (mode `0600`,
+  written atomically, never following a symlink).
+- Redirects are followed over https only; the response body is capped at 1 MB; version
+  strings are validated, and control characters are stripped before anything is printed.
+- A newer release is reported on stderr only; it never changes stdout or the exit code.
+  `Update now` runs `uv tool upgrade agent-toggle` as a fixed argument list, with no shell.
+- Opt out with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
+  (`agent-toggle config`).
+
+Settings live in `~/.agent-toggle/config.json` (mode `0600`, atomic). The Telegram bot
+token is not stored there: it is kept in the OS keystore through telegram-kit.
+
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through GitHub private security

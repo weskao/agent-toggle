@@ -7,7 +7,7 @@ behave identically (same output, same exit code):
 
 | command | also accepted as |
 |---|---|
-| `help` | `--help` |
+| `help [command]` | `--help [command]` |
 | `version` | `--version` |
 | `status` | `--status` |
 | `list` | `--list` |
@@ -25,6 +25,9 @@ Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:
   if the first argument is `--<command>` or bare `help` / `version`, rewrite it
   to the canonical form. Do not add per-command aliases.
+- `help` and `--help` take an optional command topic, and all three spellings
+  render the same text: `help config` == `--help config` == `config --help`.
+  `help <unknown>` exits 2.
 - Applies to commands only. Option flags (`--json`, `--dry-run`, `--harness`,
   `--project`, `--all`, `-v`) keep the `--` form: a bare `json` or `dry-run` would collide with a
   resource name such as `disable skill json`.

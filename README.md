@@ -87,11 +87,14 @@ with the `telegram` extra, which adds [telegram-kit](https://pypi.org/project/te
 ```sh
 uv tool install "agent-toggle[telegram]"     # or: pipx install "agent-toggle[telegram]"
 pip install -e ".[telegram]"                 # from a checkout
-agent-toggle config                          # bot token + chat id
+agent-toggle config                          # settings menu: bot token + chat id live under Notifications
 agent-toggle config sync-ci                  # set the two GitHub repository secrets
 ```
 
-Without the extra everything else works exactly as before; only `config` asks for it.
+Without the extra everything else works exactly as before. Only `config test`,
+`config sync-ci` (both exit `4` without it) and the Telegram rows of the
+[settings menu](#settings--config-menu) need it; bare `config` still opens, and
+those rows read `install agent-toggle[telegram]`.
 
 ## Shell completion
 
@@ -114,19 +117,23 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 | command | what it does |
 |---|---|
-| `ui` | interactive picker — cost column, sort, filters, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope |
+| `ui` (alias `pick`) | interactive picker — harness tabs, type groups, cost bars, filter, sort, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope; see [Interactive picker](#interactive-picker) |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
-| `install-shims` | write the skill shim into every installed harness; refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
+| `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
-| `config [test\|sync-ci]` | Telegram settings for the CI failure alerts; see [CI notifications](#ci-notifications) |
+| `config` | settings menu (curses, else a numbered list); `config --json` lists every setting; see [Settings & config menu](#settings--config-menu) |
+| `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
+| `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
 | `doctor` | read-only check of each harness layout and of `state.json` against disk; exit `1` only on an `error` row |
 | `migrate` | import an older `~/.claude-toggle/` state |
+
+Every command also works with a leading `--` (`agent-toggle --status`, `--help`, `--config`); this README uses the plain form.
 
 `<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
 `rule` is claude-only (`~/.claude/rules/*.md`, parked in `rules-disabled/`).
@@ -157,6 +164,8 @@ Flags accepted by every command, before or after the subcommand:
   and stays monochrome when the terminal has no colors). `--json` is never colored.
   `never` turns it off and `always` forces it even when piped; `auto` (default) checks
   `NO_COLOR`, then `FORCE_COLOR`, then `TERM=dumb`, and otherwise colors only on a TTY.
+  Precedence: `--color` flag > `AGENT_TOGGLE_COLOR` > the `color` [setting](#settings--config-menu)
+  > `auto`; `NO_COLOR` still wins over `auto`.
   `always` still stays plain on a Windows console that cannot do ANSI.
 
 Extra row fields: `list` rows carry `at`, `mechanism`, `companions`; `cost` rows
@@ -201,67 +210,177 @@ A colon addresses nesting: `demo:batch` is `commands/demo/batch.md`.
 ## Interactive picker
 
 ```sh
-agent-toggle ui
+agent-toggle ui          # alias: agent-toggle pick
 ```
 
 ```
- filter: /telegram█   typing: Backspace edits, Ctrl-U clears, Enter applies, Esc quits (nothing applied)
- *[x]    (92)  claude   command telegram-summary
-  [ ]    (61)  claude   skill   telegram-display
-  [x]      48   claude   skill   telegram-group-send
-  [x]      20   claude   mcp     telegram-example
-
- 4 shown  |  ~68 tok  |  harness:all type:all sort:name  |  1 staged -- Enter to apply
- Tab tick  Enter apply  Esc cancel  s sort  h/t filter  p profile  ? keys  / type to filter
+ agent-toggle  v0.2.0                                 5 resources · ~6.3k tok live · 1 staged (+300 tok)
+ All 5 │ claude 4 │ codex 2
+ / filter                                                                        type: All  sort: name
+ Skills 3 ─────────────────────────────────────────────────────────────│ beta
+  ●   alpha                             claude      1.2k █▎            │
+› ● + beta                              claude     (300) ▎             │ harness    claude
+  ●   zeta                              claude      5.0k █████         │ type       skill
+ Agents 1 ─────────────────────────────────────────────────────────────│ state      ○ parked
+  ●   gamma                             claude        50 ▏     +shared │            staged → live
+ Commands 1 ───────────────────────────────────────────────────────────│ path       ~/.claude/skills-disabled/beta
+  ●   delta                             codex         10 ▏             │ cost       0 now; ~300 tok if restored
+                                                                       │ since      2026-09-19 10:00:00
+ 5 of 5 shown · 2/5
+ Space toggle  Enter apply  Esc cancel  ? help  / filter  ←→ harness  t type  s sort  p profile  a all
 ```
 
-The number column is the estimated startup tokens (chars / 4, about +-25 %);
-a parked row shows `(N)`, what restoring it would load. Plugins appear as rows
-too (via `claude plugin list --json`; skipped under `ui --dry-run`, which never
-shells out).
+What is on screen:
+
+- **Title bar**: version and a summary (resources, live tokens, staged changes and their token effect).
+- **Harness tab bar**: `All` plus each enabled harness, with counts. Harnesses switched off in
+  the [settings](#settings--config-menu) are hidden.
+- **Rows grouped by type** (Skills, Agents, Commands, ...) under a heading with a count.
+  `●` is live, `○` parked (`*` / `o` in ASCII); a `+` / `-` before the name marks a staged change,
+  and `+shared` marks a directory another harness also reads.
+- **Cost column**: estimated startup tokens (chars / 4, about +-25 %) with a colored bar. A parked
+  row shows `(N)` in brackets, what restoring it would load. Plugins appear as rows too (via
+  `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
+- **Detail pane** at 100 columns or wider: harness, type, state, staged, path, cost, since,
+  mechanism, and what it is shared with.
+- **Key-chip footer** and a `?` help overlay.
 
 | key | action |
 |---|---|
-| `s` | cycle sort: name, cost (biggest first) |
-| `h` | cycle the harness filter |
+| `Space` / `Tab` | toggle the highlighted row (live / parked) and advance (while filtering, `Space` types a space) |
+| `Enter` | apply every staged change (with `--dry-run`: show the plan) |
+| `Esc` / `Ctrl-C` | cancel; nothing is applied |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
+| `/` | start a filter; any other non-command letter starts one too (terms are ANDed, case-insensitive) |
+| `Backspace` / `Ctrl-U` | delete one character / clear the filter |
+| `←` `→` | switch harness tab (also while typing a filter); `0` = All, `1`-`9` = that tab, `h` = next tab |
 | `t` | cycle the type filter |
+| `s` | cycle sort: name, cost (biggest first); applies within each type group |
 | `p` | profiles: stage a saved one, or save the live state (see below) |
 | `?` | show the key list |
-| `/` | start typing a filter: the top line shows `filter: /text█` and a hint (text, so it reads without colour) |
-| any other printable character | appends to the filter (terms are ANDed, case-insensitive) |
-| `Backspace` / `Ctrl-U` | delete one character / clear the filter |
-| `↑` `↓` / `Ctrl-P` `Ctrl-N` | move; `PgUp`/`PgDn` jump a screen |
-| `Tab` | tick / untick the highlighted row |
-| `Enter` | apply every staged change (with `--dry-run`: show the plan) |
-| `Esc` / `Ctrl-C` | cancel — nothing is applied |
+| `a` / `Ctrl-A` | toggle every visible row |
 
-`s`, `h`, `t`, `p` and `?` are commands while the filter is empty. Press `/` first
-to type a filter that begins with one of them (the example above is typed
-`/telegram`); once the filter is non-empty, every letter just types.
+The command keys (`t`, `s`, `p`, `h`, `a`, `0`-`9`, `?`) act only while no filter is active.
+Press `/` first to type a filter that begins with one of them; once the filter is non-empty,
+every letter just types.
+
+The start view (sort, harness tab, type filter) comes from the `picker_sort`, `picker_harness`
+and `picker_type` [settings](#settings--config-menu). A profile skips harnesses that are hidden
+and counts those items as `hidden by settings`; `ui --harness <name>` shows that harness even
+when it is switched off.
 
 `p` opens a prompt over the list of saved profiles: type a number or name (or
-`apply <name>`) and Enter to **stage** that profile's ticks (only the items it
+`apply <name>`) and Enter to **stage** that profile's changes (only the items it
 mentions; ones this machine lacks are skipped), then Enter in the picker applies
-them like any other tick -- so `ui --dry-run` previews a profile and a stray
-`p` changes nothing. `save <name>` writes the live state (not your staged ticks) as
+them like any other change, so `ui --dry-run` previews a profile and a stray
+`p` changes nothing. `save <name>` writes the live state (not your staged changes) as
 a profile, with the same name rules and project scope as `profile save`; it is
 off under `--dry-run`. Esc closes the prompt.
 
-The checkbox shows the **enabled** state: `[x]` is live, `[ ]` is parked. A
-`*` marks a row you changed.
-
 Nothing happens while the picker is open. Changes are staged, the screen is
-torn down, and only then do the real operations run — so their output (which
+torn down, and only then do the real operations run, so their output (which
 companion files moved, which were kept because they are shared) is readable
 instead of fighting curses for the terminal.
 
 Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
 Without curses, `ui` falls back to a numbered menu with the same staging and the
-same result: type row numbers (`1 3 5-7`) to tick or untick, `/text` to filter,
-`s` / `h` / `t` to sort and cycle the harness and type filters (`/` alone clears the
-filter), `p` to list profiles, `p <number|name>` to stage one and `p save <name>`
-to save the live state, `a` to apply, `q` (or end of input) to cancel.
+same result. It is grouped by type, with the same glyphs and color: type row
+numbers (`1 3 5-7`) to tick or untick, `/text` to filter (`/` alone clears it),
+`s` / `h` / `t` to sort and cycle the harness and type filters, `p` to list profiles,
+`p <number|name>` to stage one and `p save <name>` to save the live state, `a` to
+apply, `q` (or end of input) to cancel.
+
+The chrome (title, tabs, footer, help, detail labels) is translated when `language` is
+`zh-TW`; item names and paths are never translated.
+
+## Settings & config menu
+
+```sh
+agent-toggle config           # or: agent-toggle --config
+agent-toggle config --json    # every setting with its value and source; the token is masked
+```
+
+`config` opens the settings menu: curses on a terminal, a numbered list otherwise. Each change
+is saved the moment you make it. On a numbered list, end of input, `q` or an empty line exits `0`
+(safe in CI; note it reads piped digits, so an open stdin pipe waits).
+
+| group | rows |
+|---|---|
+| General | Check for updates, Color, Language, Default harness |
+| Harnesses | one On/Off per harness, with `found ~/.x` or `not on this machine` |
+| Picker | default sort, harness filter, type filter |
+| Notifications | Telegram bot token (masked), Telegram chat ID |
+| Tools | Health check (`doctor`), Install shims, Undo last change (asks y/n), Send test message, Sync CI secrets (asks y/n); their output shows in an overlay |
+
+Keys: `↑` `↓` move (wraps, skips headings), `←` `→` cycle a value, `Enter` / `Space` change or run
+the row, `r` reset the row, `R` reset everything (asks y/n), `q` / `Esc` / `Ctrl-C` quit. In an
+inline text field `Enter` commits, `Esc` cancels and `-` then `Enter` clears. A dim `env` tag
+marks a row whose value is overridden by an environment variable. The Language row switches the
+UI live.
+
+Settings live in `~/.agent-toggle/config.json` (mode `0600`, written atomically; keys the
+tool does not know are kept):
+
+| key | values | default | env override |
+|---|---|---|---|
+| `update_check` | `true` / `false` | `true` | `AGENT_TOGGLE_UPDATE_CHECK` |
+| `color` | `auto` / `always` / `never` | `auto` | `AGENT_TOGGLE_COLOR` |
+| `language` | `en` / `zh-TW` | `en` | `AGENT_TOGGLE_LANG` |
+| `default_harness` | a harness name | `claude` | `AGENT_TOGGLE_DEFAULT_HARNESS` |
+| `harness.<name>` | `true` / `false`, for `claude` `codex` `grok` `opencode` `openclaw` `copilot` `vibe` `devin` `agy` | `true` | |
+| `picker_sort` | `name` / `cost` | `name` | |
+| `picker_harness` | `all` or a harness name | `all` | |
+| `picker_type` | `all` or a type | `all` | |
+| `telegram_chat_id` | a number, `-100...` or `@channel` | unset | `TG_CHAT_ID` |
+
+The bot token is not in this file: it is in the OS keystore through telegram-kit
+(`TG_BOT_TOKEN` overrides it). An environment variable always beats the file; an
+invalid value in either is ignored with one warning on stderr.
+
+- `harness.<name>` off hides that harness from `ui`, `list`, `status` and `cost` (`list`, `status` and
+  `cost` print a dim `N hidden by settings` note, and `--json` carries it in `warnings`; an item shared with a harness that is still
+  on stays listed) and `install-shims` skips it; an explicit
+  `--harness <name>` still reaches it, `ui --harness <name>` included.
+- `default_harness` is what `disable` / `enable` act on without `--harness`, even when that
+  harness is switched off (with one warning on stderr);
+  `disable` / `enable --project` without `--harness` still default to `claude`.
+- `language` translates the config menu, help, update prompt and picker chrome; command output stays English.
+- Bare `config` works without the `[telegram]` extra; `config test` and `config sync-ci` are
+  unchanged and need it (exit `4` without it).
+
+## Update check
+
+On every invocation (unless disabled) agent-toggle checks PyPI for a newer release. It starts
+before the command and is offered after it, on every exit path; it overlaps the command and waits at most 0.8 s afterwards.
+
+- **On a terminal** (stdin and stderr are TTYs, no `--json`): a panel on stderr, "agent-toggle X
+  is available (you have Y)", with `Update now`, `Skip` and `Skip until next version`, a release
+  notes link, and `↑` `↓` `Enter` `q`. `Update now` runs `uv tool upgrade agent-toggle`; if that
+  fails you get a yellow warning with the command to run yourself.
+- **Off a terminal**: two stderr lines, `agent-toggle X is available (you have Y)` and
+  `  uv tool upgrade agent-toggle`.
+- It never changes the exit code or stdout, so `--json` output stays one document.
+
+It is one `GET https://pypi.org/pypi/agent-toggle/json` on a background thread with a 0.8 s
+timeout, cached for 10 minutes in `~/.agent-toggle/update-check.json`. Nothing is sent beyond a
+normal HTTP request with the User-Agent `agent-toggle-update-check`. See `SECURITY.md`
+for the hardening. To turn it off, set `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
+to off (the settings menu's "Check for updates").
+
+## Help
+
+```sh
+agent-toggle help               # grouped overview
+agent-toggle help config        # one command; same as: --help config, config --help
+```
+
+Help is grouped as Toggle (`ui`, `disable`, `enable`, `undo`, `profile`), Inspect (`status`,
+`list`, `cost`, `doctor`) and Setup (`config`, `install-shims`, `migrate`), with the global
+options, examples and exit codes. `help <command>` shows that command's usage, arguments,
+options and examples; `help help` is the overview, `help version` shows how to print the version,
+and an unknown command exits `2`. It honours `--color` and `NO_COLOR`, and is
+translated when `language` is `zh-TW`.
 
 ## What each harness supports
 
@@ -576,6 +695,8 @@ bookkeeping.
 | `companions/` | parked exclusive helper files |
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
+| `config.json` | [settings](#settings--config-menu) and the Telegram chat id (mode `0600`, atomic write, unknown keys kept) |
+| `update-check.json` | the [update check](#update-check)'s 10-minute cache (mode `0600`, atomic write) |
 
 A killed run loses at most the one item in flight. If that was a flag write or a
 dir move (with its companions), its `pending` record (the full entry, a flag's
@@ -646,19 +767,21 @@ runs. The message names the repository, branch, 7-character commit and a link to
 Set it up once, with the `telegram` extra installed (see [Install](#install)):
 
 ```sh
-agent-toggle config            # prompts for the bot token (hidden) and the chat id
+agent-toggle config            # settings menu: Notifications has the bot token (hidden) and chat id
 agent-toggle config test       # send one test message
 agent-toggle config sync-ci    # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on the repo
 ```
 
-`config` works like aicp's `--config`: Enter keeps the current value, `-` clears it.
-The bot token is kept only in the OS credential store (macOS Keychain, Linux Secret
-Service, Windows DPAPI) through telegram-kit, never in a file or on a command line, and
-is shown masked. With no credential store it refuses to store the token; set
-`TG_BOT_TOKEN` in the environment instead (`TG_CHAT_ID` likewise for the chat id). The
-chat id is ordinary configuration in `~/.agent-toggle/config.json`: a number, `-100...`
-for a group, or an `@channel`. `config sync-ci` needs the GitHub CLI (`gh`) signed in; it
-passes both values on stdin, and `--repo OWNER/REPO` / `--dry-run` work as elsewhere.
+In the [settings menu](#settings--config-menu) an inline field commits on `Enter`, cancels on
+`Esc`, and clears on `-` then `Enter`; the Tools group also has Send test message and Sync CI
+secrets (the same as `config test` / `config sync-ci`, and they need the extra). The bot token
+is kept only in the OS credential store (macOS Keychain, Linux Secret Service, Windows DPAPI)
+through telegram-kit, never in a file or on a command line, and is shown masked. With no
+credential store it refuses to store the token; set `TG_BOT_TOKEN` in the environment instead
+(`TG_CHAT_ID` likewise for the chat id). The chat id (`telegram_chat_id`) is ordinary
+configuration in `~/.agent-toggle/config.json`: a number, `-100...` for a group, or an
+`@channel`. `config sync-ci` needs the GitHub CLI (`gh`) signed in; it passes both values on
+stdin, and `--repo OWNER/REPO` / `--dry-run` work as elsewhere.
 
 To skip the tool, set the secrets by hand (each command prompts for the value):
 

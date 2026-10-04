@@ -2,10 +2,26 @@
 
 ### 🚀 Features
 
+- **update-check:** A default-on update check: on every invocation a background thread asks PyPI (`GET https://pypi.org/pypi/agent-toggle/json`, 0.8 s timeout, cached 10 minutes in `~/.agent-toggle/update-check.json`) and the result is offered after the command, on every exit path. On a TTY it is an arrow-key panel on stderr (`Update now` / `Skip` / `Skip until next version`, with a release notes link); off a TTY it is two stderr lines. It never changes the exit code or stdout (`--json` safe); `Update now` runs `uv tool upgrade agent-toggle` and a failure prints a warning. Opt out with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
+- **settings:** Typed settings in `~/.agent-toggle/config.json` (`update_check`, `color`, `language`, `default_harness`, `harness.<name>`, `picker_sort`, `picker_harness`, `picker_type`, `telegram_chat_id`); environment overrides `AGENT_TOGGLE_UPDATE_CHECK`, `AGENT_TOGGLE_COLOR`, `AGENT_TOGGLE_LANG`, `AGENT_TOGGLE_DEFAULT_HARNESS` beat the file; an invalid value is ignored with one warning. A harness set off is hidden from `ui`, `list`, `status` and `cost` (`list` / `status` / `cost` note `N hidden by settings`, and `--json` adds it to `warnings`; an item shared with a harness still on stays listed; a profile counts its items as hidden) and skipped by `install-shims`; an explicit `--harness` still works, `ui --harness` included, and `disable` / `enable` on an off `default_harness` still act but warn once. Color precedence: `--color` > `AGENT_TOGGLE_COLOR` > setting > auto, `NO_COLOR` still wins for auto
+- **config:** `config` opens a settings menu (curses on a TTY, a numbered list otherwise; EOF / `q` / empty exits 0): General, Harnesses (with `found ~/.x` / `not on this machine`), Picker, Notifications (bot token masked, chat ID) and Tools (health check, install shims, undo, send test message, sync CI secrets, shown in an overlay). It saves as you go, tags env-overridden rows `env`, resets a row (`r`) or all (`R`), and the Language row switches the UI live. `config --json` lists every setting with value and source (token masked). Bare `config` works without the `[telegram]` extra; `config test` and `config sync-ci` are unchanged and still need it
+- **help:** Styled, grouped help (Toggle / Inspect / Setup, examples, exit codes); `help <command>`, `--help <command>` and `<command> --help` give the same focused help, `help help` is the overview, `help version` shows the version usage, `help <unknown>` exits 2; it honours `--color` / `NO_COLOR` and never crashes on an ASCII-only stdout
+- **i18n:** `en` and `zh-TW` for the config menu, help, update prompt and picker chrome (setting `language` or `AGENT_TOGGLE_LANG`); command output stays English
+- **ui:** The picker is rebuilt: a title bar with version and summary, harness tabs (All plus each enabled harness, with counts), rows grouped by type, `●` live / `○` parked (ASCII `*` / `o`) and `+` / `-` staged markers, parked cost in brackets, a colored cost bar, a detail pane at 100 columns or wider, a key-chip footer and a `?` help overlay. Keys: `Space` / `Tab` toggle and advance, `←` `→` / `0`-`9` / `h` switch harness tab, `t` type, `s` sort within groups, `a` / `Ctrl-A` toggle all visible, `Home` / `End`; command keys act only while no filter is active. The start view comes from the `picker_*` settings, and the numbered fallback is grouped by type with glyphs and color
 - **ui:** A filter being typed shows as `filter: /text█` with a hint on the picker's top line (the menu fallback prints `filter:/text` and says `/` alone clears); a `p` key lists saved profiles, stages one (Enter then applies it, so `ui --dry-run` previews it) or saves the live state as a named profile, with the CLI's name and scope checks; `ui` and `cost` take `--project <dir>` like `disable` (project scope only, no plugin rows)
 - **opencode:** Skill dirs follow OpenCode 2.0.22: `skills.paths` is additive and read from `opencode.json` or `opencode.jsonc` (JSONC, bare-list form, `~` / `$HOME/` / `${HOME}/` expanded), plus `skill/`, `~/.claude/skills` and `~/.agents/skills`; relative entries (session-cwd based) are skipped
 - **flag-json:** Rewrite JSONC configs in place (comments and trailing commas kept); JSON5 is still refused
 - **fs:** Parse-check TOML edits on Python 3.10 with a stdlib structural validator; `doctor` no longer reports codex/grok `config.toml` as `unverified` there
+
+### 🔧 Changed
+
+- **readme:** The picker, config, update check and help are documented; the `[telegram]` extra is now needed only for `config test`, `config sync-ci` and the Telegram rows of the menu
+- **docs:** `docs/DESIGN.md` and `SECURITY.md` no longer say "no update checks / never phone home"; they describe the opt-out update check
+
+### 🔒 Security
+
+- **update-check:** Version strings from the network are validated and control characters stripped before printing; https-only redirects; 1 MB read cap; the cache is `0600`, written atomically and never follows a symlink; the upgrade command is a fixed argument list with no shell; no data is sent beyond a normal HTTP GET (User-Agent `agent-toggle-update-check`)
+- **settings:** `config.json` is `0600` and written atomically; the Telegram bot token stays in the OS keystore; an invalid `telegram_chat_id` is never echoed in a warning
 
 ### 🐛 Bug Fixes
 
