@@ -1,3 +1,34 @@
+## [0.3.0] - 2026-10-04
+
+### 🚀 Features
+
+- **flag-json:** Rewrite JSONC configs in place
+- **fs:** Parse-check TOML edits on Python 3.10
+- **ui:** Typing cue, profile key, and --project for ui and cost
+- Add typed settings, update check, i18n
+- **ui:** Overhaul picker, add config menu
+- **cli:** Add styled help, wire config and update
+
+### 🐛 Bug Fixes
+
+- **toml-check:** Match tomllib on implicit tables, quoted keys and dates
+- **opencode:** Follow skills.paths and jsonc for skill dirs and shims
+- **ops:** Write-ahead state so a killed run is recoverable
+- **mcp-json:** Back up only the toggled server entry
+- Plugin CLI timeouts, plugin dedupe, project profile servers, doctor companions
+- **status:** Show shared-dir warnings once and clean up alias residuals
+- **update:** Treat future or non-finite stamps as stale
+- **cli:** Respect -- in help topic and command help
+
+### 💼 Other
+
+- **deps:** Require telegram-kit 0.2.2
+
+### 📚 Documentation
+
+- **opencode:** Settle skills.paths default (q2)
+- **security:** Backup claim covers project .mcp.json only; record final-verification gaps
+- Document config menu, settings, update check
 ## [Unreleased]
 
 ### 🚀 Features
