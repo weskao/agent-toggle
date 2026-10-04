@@ -138,8 +138,9 @@ Fix only if one bites; none blocks a phase.
       with no state entry -- now a write-ahead `pending` entry the next run settles
 - [ ] `profile save --project` lists only parked servers for a project with only
       `.mcp.json`
-- [ ] project `.mcp.json` backups hold the whole file text (mode `0600`), which can
-      include other servers' auth headers
+- [x] project `.mcp.json` backups hold the whole file text (mode `0600`), which can
+      include other servers' auth headers -- now only the toggled entry, put back by a
+      byte-preserving re-insert; old whole-file backups still restore
 - [ ] `doctor` does not check companion files
 
 ## Housekeeping

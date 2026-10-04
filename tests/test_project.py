@@ -310,6 +310,17 @@ def _other_filesystem_dir() -> Path | None:
     return None
 
 
+def _loads_or_none(text: str):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+class Killed(BaseException):
+    """The process dies here (a SIGKILL skips every handler and `finally`)."""
+
+
 class ProjectMcpTest(ProjectCase):
     """`--project` .mcp.json entries: remove_backup, a direct JSON edit, no claude CLI."""
 
@@ -513,6 +524,185 @@ class ProjectMcpTest(ProjectCase):
         self.assertEqual(self.p("disable", "mcp", "example-mcp", project=bare)[0], 0)
         self.assertEqual(self.p("enable", "mcp", "example-mcp", project=bare)[0], 0)
         self.assertEqual((bare / ".mcp.json").read_text(encoding="utf-8"), self.text)
+
+
+    def backup(self) -> dict:
+        return json.loads(Path(self.state()[self.mkey]["backup"]).read_text(
+            encoding="utf-8"))["project_json"]
+
+    def test_backup_holds_only_the_toggled_entry(self) -> None:
+        key = store.make_key("claude", "mcp", "other-mcp", project=self.proj)
+        self.assertEqual(self.p("disable", "mcp", "other-mcp")[0], 0)
+        raw = Path(self.state()[key]["backup"]).read_text(encoding="utf-8")
+        self.assertNotIn("test-token-000", raw)               # the neighbour's header
+        self.assertNotIn("https://example.com", raw)
+        payload = json.loads(raw)["project_json"]
+        self.assertEqual(set(payload), {"name", "entry", "cut", "prev", "next"})
+        self.assertEqual((payload["name"], payload["entry"], payload["prev"], payload["next"]),
+                         ("other-mcp", self.SERVERS["other-mcp"], "example-mcp", None))
+        self.assertEqual(json.loads("{" + payload["cut"].strip(", \n") + "}"),
+                         {"other-mcp": self.SERVERS["other-mcp"]})
+
+    def test_restore_into_an_unchanged_file_is_byte_identical(self) -> None:
+        servers = {"first-mcp": {"args": ["a", 1]}, "example-mcp": {"url": "u"}, "last-mcp": {}}
+        for indent in (2, 4):
+            for crlf in (False, True):
+                for final_nl in (False, True):
+                    for keep in (servers, {"example-mcp": {"url": "u"}}):
+                        text = json.dumps({"k": [1, 2], "mcpServers": keep}, indent=indent)
+                        text += "\n" if final_nl else ""
+                        data = (text.replace("\n", "\r\n") if crlf else text).encode("utf-8")
+                        for name in keep:
+                            with self.subTest(indent=indent, crlf=crlf, nl=final_nl, name=name,
+                                              n=len(keep)):
+                                self.mcpfile.write_bytes(data)
+                                self.assertEqual(self.p("disable", "mcp", name)[0], 0)
+                                self.assertNotIn(name.encode(), self.mcpfile.read_bytes())
+                                self.assertEqual(self.p("enable", "mcp", name)[0], 0)
+                                self.assertEqual(self.mcpfile.read_bytes(), data)
+
+    def assert_one_insert(self, old: str, new: str, name: str) -> None:
+        """`new` is `old` with one contiguous chunk added: that one entry."""
+        n = len(new) - len(old)
+        chunks = [new[i:i + n] for i in range(len(old) + 1)
+                  if new[:i] == old[:i] and new[i + n:] == old[i:]]
+        self.assertTrue(chunks, new)
+        want = {name: self.SERVERS[name]}
+        self.assertTrue(any(_loads_or_none("{" + c.strip(", \r\n") + "}") == want
+                            for c in chunks), chunks)
+
+    def test_restore_after_the_user_edited_other_entries_keeps_those_edits(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        for edited in (                           # neighbour edited in place, odd layout kept
+                '{\n  "mcpServers": {\n    "other-mcp": {"command": "edited", "args": []}\n'
+                '  },\n  "k": 1\n}\n',
+                # a server added before it, 4-space indent: goes first again
+                '{\n    "mcpServers": {\n        "new-mcp": {},\n'
+                '        "other-mcp": {"command": "x"}\n    }\n}',
+                '{"mcpServers": {}}'):            # every server gone
+            with self.subTest(edited=edited):
+                self.mcpfile.write_bytes(edited.encode("utf-8"))
+                self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+                new = self.mcpfile.read_text(encoding="utf-8")
+                self.assert_one_insert(edited, new, "example-mcp")
+                self.assertEqual(list(json.loads(new)["mcpServers"])[0], "example-mcp")
+                self.p("disable", "mcp", "example-mcp")
+                self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), edited)
+
+    def test_restore_after_the_predecessor_goes_lands_at_the_end(self) -> None:
+        self.p("disable", "mcp", "other-mcp")             # prev example-mcp, last
+        edited = '{\n\t"mcpServers": {\n\t\t"a-mcp": {},\n\t\t"b-mcp": {}\n\t}\n}\n'
+        self.mcpfile.write_text(edited, encoding="utf-8")
+        self.assertEqual(self.p("enable", "mcp", "other-mcp")[0], 0)
+        new = self.mcpfile.read_text(encoding="utf-8")
+        self.assert_one_insert(edited, new, "other-mcp")
+        self.assertIn('\t\t"b-mcp": {},\n\t\t"other-mcp": ', new)
+        self.assertEqual(list(json.loads(new)["mcpServers"]), ["a-mcp", "b-mcp", "other-mcp"])
+
+    def test_an_old_whole_file_backup_still_restores_exactly(self) -> None:
+        from agent_toggle.backends import mcp_json
+        original = json.dumps({"mcpServers": self.SERVERS}, indent=4) + "\n"
+        self.mcpfile.write_text(original, encoding="utf-8")
+        self.p("disable", "mcp", "example-mcp")
+        bp = Path(self.state()[self.mkey]["backup"])
+        # what the pre-G15 disable wrote: the file re-dumped, and both whole texts
+        old_after = mcp_json._dump_like({"mcpServers": {"other-mcp": self.SERVERS["other-mcp"]}},
+                                        original)
+        old = json.dumps({"project_json": {"entry": self.SERVERS["example-mcp"],
+                                           "before": original, "after": old_after}})
+        bp.write_text(old, encoding="utf-8")
+        self.mcpfile.write_text(old_after, encoding="utf-8")
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), original)
+        self.assertEqual(bp.read_text(encoding="utf-8"), old)      # never rewritten
+        # file changed meanwhile: the old merge path, as before
+        self.p("disable", "mcp", "example-mcp")
+        bp.write_text(old, encoding="utf-8")
+        self.mcpfile.write_text('{"mcpServers": {"x-mcp": {}}}', encoding="utf-8")
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.servers(), {"x-mcp": {}, "example-mcp": self.SERVERS["example-mcp"]})
+
+    def test_a_tampered_backup_cannot_add_anything_else(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        after = self.mcpfile.read_bytes()
+        bp = Path(self.state()[self.mkey]["backup"])
+        good = self.backup()
+        for bad in ({"cut": '"example-mcp": {}, "evil-mcp": {"command": "x"},\n  '},
+                    {"cut": '"example-mcp": %s}, "evil": {' % json.dumps(good["entry"])},
+                    {"cut": "not json"}, {"cut": 1}, {"prev": 1}, {"name": "other-mcp"},
+                    {"cut": '"example-mcp": %s,' % ("[" * 100000)}):
+            with self.subTest(bad=bad):
+                bp.write_text(json.dumps({"project_json": {**good, **bad}}), encoding="utf-8")
+                rc, env = self.p("enable", "mcp", "example-mcp")
+                self.assertEqual(rc, 1, env)
+                self.assertIn("refused", env["results"][0]["detail"])
+                self.assertEqual(self.mcpfile.read_bytes(), after)
+                self.assertIn(self.mkey, self.state())
+
+    def test_crlf_only_inside_the_entry_survives(self) -> None:
+        data = b'{"mcpServers": {\r\n  "example-mcp": {}\r\n}}'
+        self.mcpfile.write_bytes(data)
+        self.p("disable", "mcp", "example-mcp")
+        self.assertEqual(self.mcpfile.read_bytes(), b'{"mcpServers": {}}')
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        self.assertEqual(self.mcpfile.read_bytes(), data)
+
+    def test_a_rolled_back_enable_keeps_the_entry_and_the_backup(self) -> None:
+        self.p("disable", "mcp", "example-mcp")
+        after, bp = self.mcpfile.read_bytes(), Path(self.state()[self.mkey]["backup"])
+        saved = bp.read_bytes()
+        with mock.patch.object(fs, "json_verify", lambda expected=None: self._boom):
+            rc, env = self.p("enable", "mcp", "example-mcp")
+        self.assertEqual(rc, 1)
+        self.assertIn("rolled back", env["results"][0]["detail"])
+        self.assertEqual(self.mcpfile.read_bytes(), after)
+        self.assertEqual(bp.read_bytes(), saved)
+        raw = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        self.assertIn(self.mkey, raw["disabled"])
+        self.assertNotIn("pending", raw)
+
+    def test_a_forged_pending_entry_cannot_delete_another_servers_backup(self) -> None:
+        okey = store.make_key("claude", "mcp", "other-mcp", project=self.proj)
+        self.p("disable", "mcp", "other-mcp")
+        state = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        other = Path(state["disabled"][okey]["backup"])
+        state["pending"] = {self.mkey: {"action": "disable", "entry": {
+            **state["disabled"][okey], "name": "example-mcp", "backup": str(other)}}}
+        fs.state_file().write_text(json.dumps(state), encoding="utf-8")
+        rc, env = self.run_json("enable", "--all")
+        self.assertTrue(other.exists())
+        self.assertIn("not the one declared", " ".join(env["warnings"]))
+
+    def kill_in_write(self, *argv: str, write: bool) -> None:
+        from agent_toggle.backends import mcp_json
+        real = mcp_json.write_project_mcp
+
+        def die(*a, **kw):
+            if write:
+                real(*a, **kw)
+            raise Killed
+        with mock.patch("agent_toggle.ops.save_state"), \
+                mock.patch("agent_toggle.mechanisms.write_project_mcp", side_effect=die), \
+                self.assertRaises(Killed):
+            self.p(*argv)
+
+    def test_a_killed_disable_is_settled_by_the_next_run(self) -> None:
+        self.kill_in_write("disable", "mcp", "example-mcp", write=False)
+        self.assertEqual(self.state(), {})                   # only the pending entry was saved
+        bp = fs.backup_dir() / f"{self.digest}__claude__example-mcp.json"
+        self.assertTrue(bp.exists())
+        self.assertEqual(self.run_json("enable", "--all")[0], 0)  # recover(): never on disk
+        self.assertFalse(bp.exists())
+        self.assertNotIn("pending", json.loads(fs.state_file().read_text(encoding="utf-8")))
+        self.kill_in_write("disable", "mcp", "example-mcp", write=True)
+        self.assertEqual(list(self.servers()), ["other-mcp"])
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)   # recorded, restored
+        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), self.text)
+        self.kill_in_write("disable", "mcp", "example-mcp", write=True)
+        self.kill_in_write("enable", "mcp", "example-mcp", write=True)
+        self.assertEqual(self.p("disable", "mcp", "other-mcp")[0], 0)   # settles the enable
+        self.assertNotIn(self.mkey, self.state())
+        self.assertIn("example-mcp", self.servers())
 
 
 class CrossFilesystemTest(ProjectCase):

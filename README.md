@@ -457,12 +457,13 @@ agent-toggle enable --all --project .
   Restore with that command, or `git checkout`; do not commit the deletion if
   the repo is shared.
 - `.mcp.json` is edited directly (no `claude` CLI) and must be **strict JSON**:
-  a BOM, comments or trailing commas are refused. `disable` rewrites the file in
-  its detected layout (tabs or 2 spaces, LF or CRLF) and saves a verbatim backup
-  at `mcp-backups/<sha8>__claude__<name>.json` (mode `0600`; it holds the file
-  text, so it may hold auth headers). `enable` restores the file byte for byte
-  if it is unchanged since the disable, otherwise merges the entry back in and
-  reformats.
+  a BOM, comments or trailing commas are refused. `disable` cuts only that
+  server's entry, leaving every other byte as it was, and saves a backup at
+  `mcp-backups/<sha8>__claude__<name>.json` (mode `0600`) holding only that entry
+  -- its own headers, never another server's. `enable` puts the entry's bytes
+  back into the current file (an unchanged file comes back byte for byte; after
+  other edits it goes after its old neighbour, else at the end, indented like the
+  file) and checks that nothing else changed.
 - A move across filesystems copies into a temp dir beside the target, renames it
   into place, then deletes the source, so a killed run leaves either the source
   intact or the target complete, and the next run settles it (see "Where state
@@ -566,7 +567,8 @@ a warning and a `recovered` log row (which `undo` does not reverse). `status` an
 disabled. The one case left to you is a cross-filesystem move killed between its
 two renames: both copies are complete, and the report names the `diff -r` to
 check and the `rm -rf` that keeps either one. MCP and plugin items are saved
-per item (when the next one starts), without a `pending` record: a kill inside that window
+per item (when the next one starts), without a `pending` record (a project `.mcp.json`
+edit has one): a kill inside that window
 leaves the change unrecorded (an MCP server's backup stays in `mcp-backups/`).
 A killed run also leaves its `lock`; the next run's error says so.
 

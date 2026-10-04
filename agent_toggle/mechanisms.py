@@ -19,6 +19,7 @@ from .backends.mcp_json import (
     _not_json,
     claude_mcp_config,
     claudeai_connector_names,
+    project_mcp_backup,
     project_mcp_remove,
     project_mcp_restore,
     read_project_mcp,
@@ -354,18 +355,23 @@ def settle(state: dict, key: str, out: Result | None = None, *,
     mech = entry.get("mechanism") if isinstance(entry, dict) else None
     fix = f"fix: check it, then delete {json.dumps(key)} under \"pending\" in {fs.state_file()}"
     try:
-        if action not in ("disable", "enable") or mech not in ("flag", "move") \
-                or entry.get("connector"):
-            raise ValueError("not a pending disable/enable of a flag or a move")
+        if action not in ("disable", "enable") or entry.get("connector") or not (
+                mech in ("flag", "move")
+                or (mech == "remove_backup" and entry.get("backend") == "project-json")):
+            raise ValueError("not a pending disable/enable of a flag, a move or a "
+                             "project .mcp.json entry")
         if parse_key(key)[1] is None:
             table = harnesses()
         elif isinstance(entry.get("project"), str):
             table = {"claude": project_view(Path(entry["project"]))}
         else:
             raise ValueError("project-scope key without a project")
-        if why := _entry_reason(entry, table, key,
-                                ("parked_at", "origin") if mech == "move" else ()):
+        need = {"move": ("parked_at", "origin"), "remove_backup": ("backup", "project")}
+        if why := _entry_reason(entry, table, key, need.get(mech, ())):
             raise ValueError(f"refused: {why}")
+        if mech == "remove_backup" and Path(entry["backup"]) != _project_backup_path(
+                parse_key(key)[1], entry["harness"], entry["name"]):
+            raise ValueError("refused: backup is not the one declared for this server")
         own = fs.companion_dir() / key.replace(":", "_")    # what park_companions uses
         if any(not fs.contained(Path(c["to"]), own) for c in entry.get("companions") or []):
             raise ValueError(f"refused: a companion outside {own}")
@@ -385,6 +391,12 @@ def settle(state: dict, key: str, out: Result | None = None, *,
             return _report(out, dry_run, "stuck",
                            f"{what}: {e}; fix: make sure {'.'.join(ptr)} is "
                            f"{json.dumps(was)} in {file} (its value before the run)")
+    elif mech == "remove_backup":         # project .mcp.json: is the server in the file?
+        try:
+            servers = read_project_mcp(Path(entry["project"]) / ".mcp.json")[1]["mcpServers"]
+        except ProjectMcpError as e:
+            return _report(out, dry_run, "stuck", f"{what}: {e}; {fix}")
+        landed = (entry["name"] in servers) == (action == "enable")
     else:
         parked, origin = Path(entry["parked_at"]), Path(entry["origin"])
         src, dst = (origin, parked) if action == "disable" else (parked, origin)
@@ -407,7 +419,15 @@ def settle(state: dict, key: str, out: Result | None = None, *,
     if mech == "move":
         with contextlib.suppress(OSError):    # a stray dot-named copy, never the item
             fs.remove_leftover(fs.move_leftovers(src, dst)[1 if landed else 0])
-    if landed and action == "disable":     # companions: the ones the killed run moved
+    if mech == "remove_backup":
+        if landed and action == "disable":
+            state["disabled"][key] = entry
+        elif action == "disable" and key not in state["disabled"]:    # never reached the
+            with contextlib.suppress(OSError):                         # file: backup is moot
+                Path(entry["backup"]).unlink(missing_ok=True)
+        elif landed:
+            state["disabled"].pop(key, None)
+    elif landed and action == "disable":   # companions: the ones the killed run moved
         state["disabled"][key] = {**entry, "companions": [
             c for c in entry.get("companions") or [] if _exists(Path(c["to"]))]}
     elif landed:
@@ -943,11 +963,14 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
     """`--project <dir>` MCP servers: remove_backup on the repo's own <dir>/.mcp.json.
 
     A direct, verified JSON edit (fs.checked_write, rolled back on any failure) with
-    NO claude CLI call. disable saves the raw entry, and the exact before/after file
-    text, in a private backup under fs.backup_dir() (never inside the project);
-    enable puts the file back byte for byte when it is still as we left it, else
-    merges the entry in. State keys carry the project digest, so a project entry
-    never meets the user-scope `claude:mcp:<name>` one (nor claude `local` scope).
+    NO claude CLI call, under a write-ahead `pending` entry (store.begin / settle).
+    disable cuts only the entry's bytes and saves just that entry -- its raw value,
+    its exact text and its neighbours' names, never the rest of the file (G15) -- in
+    a private backup under fs.backup_dir() (never inside the project); enable puts
+    those bytes back into the current file, so an unchanged file comes back byte for
+    byte. An old backup holding the whole before/after text still restores as it
+    did. State keys carry the project digest, so a project entry never meets the
+    user-scope `claude:mcp:<name>` one (nor claude `local` scope).
     """
     project = table[harness].project
     pstr, file, digest = str(project), project / ".mcp.json", project_digest(project)
@@ -962,7 +985,7 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
         tick()
         key = make_key(harness, "mcp", name, project=project)
         entry = state["disabled"].get(key)
-        bp = fs.backup_dir() / f"{digest}__{harness}__{name.replace('/', '_')}.json"
+        bp = _project_backup_path(digest, harness, name)
         if action == "disable":
             try:
                 raw, before, after = project_mcp_remove(file, name)
@@ -974,22 +997,23 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
                 continue
             if not dry_run:
                 fs.private_dir(fs.backup_dir())
-                fs.atomic_write(bp, json.dumps(
-                    {"project_json": {"entry": raw, "before": before, "after": after}},
-                    ensure_ascii=False, indent=2))
-                try:
-                    write_project_mcp(file, after, before)
-                except fs.WriteError as e:          # file rolled back; drop the backup
-                    if "restore failed" not in str(e):   # else it holds the only good copy
-                        bp.unlink(missing_ok=True)
-                    fails += fail(name, str(e))
-                    continue
-                state["disabled"][key] = {
+                fs.atomic_write(bp, json.dumps({"project_json": project_mcp_backup(before, name)},
+                                               ensure_ascii=False, indent=2))
+                new = {
                     "mechanism": "remove_backup", "harness": harness, "type": "mcp",
                     "name": name, "backend": "project-json", "backup": str(bp),
                     "scope": "project", "project": pstr,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
+                _begin(state, key, "disable", new)
+                try:
+                    write_project_mcp(file, after, before, name, raw)
+                except fs.WriteError as e:   # settled from disk: rolled back -> backup dropped
+                    settle(state, key, out, inline=True)
+                    fails += fail(name, str(e))
+                    continue
+                state["disabled"][key] = new
+                end(state, key)
                 log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch,
                     project=pstr, scope="project")
             _ok(out, dry_run, harness, "mcp", action, name,
@@ -1002,15 +1026,16 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
             fails += fail(name, f"{name} is not disabled in project {pstr}")
             continue
         refused = _refusal(entry, table, key, ("backup",))
-        if not refused and Path(entry["backup"]).name.split("__")[0] != digest:
-            refused = "refused: backup belongs to another project"
+        if not refused and Path(entry["backup"]) != bp:
+            refused = ("refused: backup belongs to another project"
+                       if Path(entry["backup"]).name.split("__")[0] != digest
+                       else "refused: backup is not the one declared for this server")
         if refused:
             fails += fail(name, refused)
             continue
         try:
             payload = json.loads(Path(entry["backup"]).read_text(encoding="utf-8"))["project_json"]
-            if not (isinstance(payload["entry"], dict) and isinstance(payload["before"], str)
-                    and isinstance(payload["after"], str)):
+            if not (isinstance(payload["entry"], dict) and _project_backup_ok(payload, name)):
                 raise TypeError("bad field")
         except OSError:
             fails += fail(name, f"backup missing at {entry['backup']}")
@@ -1020,19 +1045,39 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
             continue
         try:
             current, text = project_mcp_restore(file, name, payload)
-            if not dry_run:
-                write_project_mcp(file, text, current)
-        except (ProjectMcpError, fs.WriteError) as e:
+        except ProjectMcpError as e:
             fails += fail(name, str(e))
             continue
         if not dry_run:
+            _begin(state, key, "enable", entry)
+            try:
+                write_project_mcp(file, text, current, name, payload["entry"])
+            except fs.WriteError as e:
+                settle(state, key, out, inline=True)
+                fails += fail(name, str(e))
+                continue
             state["disabled"].pop(key, None)
+            end(state, key)
             log(action, "mcp", name, "ok", harness=harness, batch=batch, project=pstr,
                 scope="project")
         _ok(out, dry_run, harness, "mcp", action, name,
             "restored (open a NEW session for it to load)", project=pstr,
             backup=entry["backup"])
     return fails
+
+
+def _project_backup_path(digest: str, harness: str, name: str) -> Path:
+    return fs.backup_dir() / f"{digest}__{harness}__{name.replace('/', '_')}.json"
+
+
+def _project_backup_ok(payload: dict, name: str) -> bool:
+    """A project backup's fields have the right types: the per-entry form (G15) or
+    the old whole-file `before` / `after` form, which still restores."""
+    if "cut" in payload:
+        return payload.get("name") == name and isinstance(payload["cut"], str) and all(
+            f in payload and (payload[f] is None or isinstance(payload[f], str))
+            for f in ("prev", "next"))
+    return isinstance(payload["before"], str) and isinstance(payload["after"], str)
 
 
 def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
