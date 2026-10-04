@@ -108,6 +108,11 @@ class HelpTest(SandboxCase):
         self.assertEqual(self.run_cli("help", "--harness", "codex", "--config"),
                          self.run_cli("help", "config"))
 
+    def test_double_dash_before_a_topic_or_after_a_command(self) -> None:
+        self.assertEqual(self.run_cli("help", "--", "--status"), self.run_cli("help", "status"))
+        for argv in (("list", "--", "--help"), ("status", "--", "-h")):
+            self.assertEqual(self.run_cli(*argv)[0], 2, argv)
+
     def test_unknown_topic_is_a_usage_error(self) -> None:
         rc, out, err = self.run_cli("help", "nope")
         self.assertEqual((rc, out), (2, ""))

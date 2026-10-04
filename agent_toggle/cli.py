@@ -545,8 +545,14 @@ def help_request(argv: list[str]) -> tuple[bool, str | None]:
         words = [a for j, a in enumerate(rest)           # skip flags and their values; an
                  if a not in flags and not a.startswith(("--harness=", "--color="))   # unknown
                  and (j == 0 or rest[j - 1] not in ("--harness", "--color"))]         # --X is a topic
-        return True, words[0] if words else None
-    if argv[i] in COMMANDS and {"--help", "-h"} & set(argv[i + 1:]):
+        topic = words[0] if words else None
+        if topic and topic.startswith("--") and topic[2:] in (*COMMANDS, "version", "help"):
+            topic = topic[2:]                       # `help -- --status` == `help status`
+        return True, topic
+    rest = argv[i + 1:]
+    if "--" in rest:                                # `list -- --help` is an operand, not help
+        rest = rest[:rest.index("--")]
+    if argv[i] in COMMANDS and {"--help", "-h"} & set(rest):
         return True, argv[i]
     return False, None
 
