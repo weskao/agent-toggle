@@ -660,6 +660,13 @@ def main(argv: list[str] | None = None) -> int:
 def _main(argv: list[str], color: str) -> int:
     out = Result(next((a for a in argv if a in COMMANDS), ""), "--json" in argv, color)
     try:
+        # no command: picker on a TTY, else help with exit 2; --json keeps the usage error
+        bare = _command_index(argv) >= len(argv) and "--json" not in argv
+        if bare:
+            tty = sys.stdin.isatty() and sys.stdout.isatty()
+            argv = [*argv, "ui" if tty else "--help"]
+            out.command = "ui" if tty else ""
+            bare = not tty
         wants_help, topic = help_request(argv)
         if wants_help:
             topic = None if topic == "help" else topic
@@ -671,7 +678,7 @@ def _main(argv: list[str], color: str) -> int:
                     else helptext.command_help(topic, on, default) if topic
                     else helptext.top_help(on, default))
             print(ui_theme.encodable(text, sys.stdout))     # an ASCII stdout must not crash
-            return 0
+            return 2 if bare else 0
         args = build_parser().parse_args(argv)
         out.command = "ui" if args.command == "pick" else args.command
         out.json_mode = getattr(args, "json", False)

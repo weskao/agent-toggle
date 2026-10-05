@@ -211,6 +211,7 @@ A colon addresses nesting: `demo:batch` is `commands/demo/batch.md`.
 
 ```sh
 agent-toggle ui          # alias: agent-toggle pick
+agent-toggle             # same, on a terminal; elsewhere prints help and exits 2
 ```
 
 ```

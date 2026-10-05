@@ -113,6 +113,15 @@ class HelpTest(SandboxCase):
         for argv in (("list", "--", "--help"), ("status", "--", "-h")):
             self.assertEqual(self.run_cli(*argv)[0], 2, argv)
 
+    def test_no_command_prints_help_off_a_tty_and_opens_the_picker_on_one(self) -> None:
+        rc, out, _ = self.run_cli()
+        self.assertEqual((rc, out), (2, self.run_cli("help")[1]))     # 2: still a usage error
+        self.assertEqual(self.run_cli("--color", "never")[1], self.run_cli("help")[1])
+        with mock.patch.object(sys, "stdin", _Tty()), mock.patch.object(cli, "cmd_ui") as ui:
+            rc, _, _ = self.run_cli(out=_Tty())
+        self.assertEqual(rc, 0)
+        ui.assert_called_once()
+
     def test_unknown_topic_is_a_usage_error(self) -> None:
         rc, out, err = self.run_cli("help", "nope")
         self.assertEqual((rc, out), (2, ""))
