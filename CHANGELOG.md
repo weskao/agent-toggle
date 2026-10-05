@@ -1,3 +1,20 @@
+## [0.4.0] - 2026-10-05
+
+### 🚀 Features
+
+- **ui:** Fuzzy path search, harness colors, spinner
+
+### 🐛 Bug Fixes
+
+- **cli:** Open picker on TTY with no command
+
+### ⚡ Performance
+
+- **inventory:** Scan in parallel, skip hidden dirs
+
+### ⚙️ Miscellaneous Tasks
+
+- Ignore local codegraph index
 ## [0.3.0] - 2026-10-04
 
 ### 🚀 Features
