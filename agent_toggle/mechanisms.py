@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import shlex
 import time
@@ -227,12 +228,15 @@ def live_names(base: Path, type_: str) -> list[str]:
         return sorted(p.name for p in base.iterdir()
                       if (p.is_dir() or p.is_symlink()) and not p.name.startswith("."))
     names = []
-    for p in sorted(base.rglob("*")):
-        if p.name.startswith("."):
-            continue
-        if p.suffix in (".md", ".toml", ".yaml", ".yml") or p.is_symlink() or (p.is_file() and not p.suffix):
-            rel = p.relative_to(base).with_suffix("")
-            names.append(rel.as_posix().replace("/", ":"))
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]   # never descend into hidden dirs
+        for n in (*files, *dirs):
+            p = Path(root, n)
+            if n.startswith("."):
+                continue
+            if p.suffix in (".md", ".toml", ".yaml", ".yml") or p.is_symlink() or (p.is_file() and not p.suffix):
+                rel = p.relative_to(base).with_suffix("")
+                names.append(rel.as_posix().replace("/", ":"))
     return sorted(set(names))
 
 

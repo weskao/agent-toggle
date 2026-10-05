@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -218,6 +219,11 @@ def plugin_estimate(root: Path) -> Estimate:
     return tokens, chars, basis or "empty bundle"
 
 
+def _fill(item: Item, est: Estimate) -> None:
+    item.tokens, item.would_save = (est[0], 0) if item.enabled else (0, est[0])
+    item.chars, item.basis = est[1], est[2]
+
+
 def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: None,
               plugins: bool = True) -> list[Item]:
     """Every togglable item once: live, then parked-only. A dir shared by several
@@ -230,12 +236,24 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                for e in state.get("disabled", {}).values()
                if isinstance(e, dict) and e.get("mechanism") == "flag"}
 
-    def add(h: str, t: str, n: str, enabled: bool, est: Estimate, shared=()) -> None:
+    pool = ThreadPoolExecutor(max_workers=16)     # ponytail: I/O-bound reads; GIL is released
+    claude = table.get("claude")
+    plugin_job = (pool.submit(list_plugins, warn)       # a ~0.2-0.7 s subprocess, overlapped
+                  if plugins and claude and claude.home.is_dir() and "plugin" in claude.types
+                  else None)
+    deferred: list[tuple[Item, Callable[[], Estimate]]] = []   # file reads, run in parallel below
+
+    def add(h: str, t: str, n: str, enabled: bool, est, shared=()) -> None:
+        """`est` is an Estimate, or a no-arg callable returning one (read later, in a pool)."""
         enabled = enabled and (h, t, n) not in flagged
         if (h, t, n) not in seen:
             seen.add((h, t, n))
-            items.append(Item(h, t, n, enabled, est[0] if enabled else 0,
-                              0 if enabled else est[0], est[1], est[2], tuple(shared)))
+            item = Item(h, t, n, enabled, 0, 0, None, "", tuple(shared))
+            items.append(item)
+            if callable(est):
+                deferred.append((item, est))
+            else:
+                _fill(item, est)
 
     for hname, h in table.items():
         # a --project view with only .mcp.json has no .claude dir, but its servers are live
@@ -253,7 +271,8 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                     shared = [s for s in v.sharers if s != hname]
                     for name in live_names(v.live, type_):
                         add(hname, type_, name, True,
-                            file_estimate(type_, name, resolve_item(v.live, name)), shared)
+                            lambda t=type_, n=name, b=v.live: file_estimate(t, n, resolve_item(b, n)),
+                            shared)
             elif type_ in h.flags:
                 for name in flag_names(h, type_):
                     add(hname, type_, name, True, mcp_estimate(hname, None) if type_ == "mcp"
@@ -264,13 +283,12 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                     add(hname, type_, name, True, mcp_estimate(hname, counts.get(name)))
 
     listed: list[str] = []                # canonical `name@marketplace` ids, for the parked rows
-    claude = table.get("claude")
-    if plugins and claude and claude.home.is_dir() and "plugin" in claude.types:
-        for p in list_plugins(warn):
+    if plugin_job is not None:
+        for p in plugin_job.result():
             listed.append(p["id"])
             root = p.get("installPath")
             add("claude", "plugin", p["id"], p.get("enabled", True) is not False,
-                plugin_estimate(Path(root)) if isinstance(root, str)
+                (lambda r=root: plugin_estimate(Path(r))) if isinstance(root, str)
                 else (0, None, "no installPath"))
 
     for e in state.get("disabled", {}).values():
@@ -285,10 +303,14 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                 n = full_plugin_id(n, listed) or n    # ambiguous: keep it as parked
         else:
             parked = e.get("parked_at")
-            est = file_estimate(t, n, Path(parked) if isinstance(parked, str) and parked else None)
+            est = lambda t=t, n=n, p=parked: file_estimate(
+                t, n, Path(p) if isinstance(p, str) and p else None)
         shared = e.get("shared_with")
         add(h, t, n, False, est,
             [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
+    with pool:
+        for (item, _), est in zip(deferred, pool.map(lambda d: d[1](), deferred)):
+            _fill(item, est)
     # a project dir symlinked out of the project (to ~/.claude/skills) is user scope
     outside = {(n, t) for n, h in table.items() if h.project is not None
                for t, subs in h.dirs.items()
