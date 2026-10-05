@@ -263,11 +263,12 @@ class KeysTest(ScreenCase):
         out, win = self.run_keys(["/", "g", "a", "\t", "\n"])
         self.assertEqual(self.names(out), [("gamma", False)])
         typed = win.frames[3]                                 # after `/`, `g`, `a`
-        self.assertIn("/ ga█", typed[2])
+        self.assertIn("ga█", typed[2])
+        self.assertIn(theme.UNICODE.search, typed[2])    # the search icon marks the bar
         self.assertIn("gamma", "\n".join(typed))
         self.assertNotIn("alpha", "\n".join(typed[3:-2]))
         # idle, the filter line is a placeholder, not an input
-        self.assertIn("/ filter", win.frames[0][2])
+        self.assertIn("Type to search", win.frames[0][2])
         self.assertNotIn("█", win.frames[0][2])
 
     def test_command_keys_only_act_with_no_filter(self) -> None:
@@ -276,20 +277,39 @@ class KeysTest(ScreenCase):
         self.assertIn("sort: cost", win.screen[2])
         # ... after `/` it is a letter, and so is every letter after an implicit start
         _, win = self.run_keys(["/", "s", "\x1b"])
-        self.assertIn("/ s█", win.screen[2])
+        self.assertIn(" s█", win.screen[2])
         self.assertIn("sort: name", win.screen[2])
         _, win = self.run_keys(["x", "s", "\x1b"])
-        self.assertIn("/ xs█", win.screen[2])
+        self.assertIn(" xs█", win.screen[2])
         # Space types while filtering (it separates AND terms) instead of toggling
         out, _ = self.run_keys(["/", "l", " ", "\n"])
         self.assertEqual(out, [])
         # Backspace emptying the filter returns to command mode
         _, win = self.run_keys(["/", "x", "\x7f", "s", "\x1b"])
         self.assertIn("sort: cost", win.screen[2])
-        self.assertIn("/ filter", win.screen[2])
+        self.assertIn("Type to search", win.screen[2])
         # Ctrl-U clears a filter outright
         _, win = self.run_keys(["/", "z", "z", "\x15", "\x1b"])
         self.assertIn("alpha", win.text())
+
+    def test_search_is_fuzzy_when_nothing_matches_and_also_reads_the_path(self) -> None:
+        # `alp` is plain text in `alpha`; `apa` is only a letters-in-order match
+        out, win = self.run_keys(["/", "a", "p", "a", "\t", "\n"])
+        self.assertEqual([r.name for r in out], ["alpha"])
+        self.assertIn("fuzzy match", win.frames[-2][2])
+        # a path-only term (`skills-disabled` is beta's parked path) finds beta
+        out, _ = self.run_keys(["/", *"skills-disabled", "\t", "\n"], rows=demo_rows())
+        self.assertEqual([r.name for r in out], ["beta"])
+        # a plain hit is never labelled fuzzy
+        _, win = self.run_keys(["/", "a", "l", "\x1b"])
+        self.assertNotIn("fuzzy match", win.screen[2])
+
+    def test_emoji_search_icon_only_where_it_renders(self) -> None:
+        self.assertTrue(theme.emoji_ok({"TERM": "xterm-256color"}, "darwin"))
+        self.assertFalse(theme.emoji_ok({"TERM": "linux"}, "linux"))
+        self.assertFalse(theme.emoji_ok({}, "win32"))
+        self.assertTrue(theme.emoji_ok({"WT_SESSION": "x"}, "win32"))
+        self.assertEqual(theme.ASCII.search, "/")
 
     def test_tabs_switch_with_arrows_and_digits(self) -> None:
         C = picker.curses
@@ -346,7 +366,7 @@ class KeysTest(ScreenCase):
         self.assertIn("toggle every visible row", overlay)
         self.assertIn("╭", overlay)
         self.assertNotIn("toggle every visible row", win.text())
-        self.assertIn("/ filter", win.screen[2])             # the closing key was not typed
+        self.assertIn("Type to search", win.screen[2])             # the closing key was not typed
         self.assertIn("p", [k for k, _ in picker.help_lines(theme.UNICODE)])
 
     def test_long_list_scrolls_with_the_cursor_and_its_heading(self) -> None:
@@ -364,7 +384,7 @@ class KeysTest(ScreenCase):
     def test_space_on_an_empty_list_does_not_start_a_filter(self) -> None:
         out, win = self.run_keys(["2", "t", " ", "s", "\n"])      # codex tab + Skills: empty
         self.assertEqual(out, [])
-        self.assertIn("/ filter", win.screen[2])
+        self.assertIn("Type to search", win.screen[2])
         self.assertIn("sort: cost", win.screen[2])                # `s` still a command
 
     def test_the_active_tab_always_fits(self) -> None:

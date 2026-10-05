@@ -117,7 +117,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 | command | what it does |
 |---|---|
-| `ui` (alias `pick`) | interactive picker — harness tabs, type groups, cost bars, filter, sort, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope; see [Interactive picker](#interactive-picker) |
+| `ui` (alias `pick`) | interactive picker — harness tabs, type groups, cost bars, search, sort, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope; see [Interactive picker](#interactive-picker) |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
@@ -217,7 +217,7 @@ agent-toggle             # same, on a terminal; elsewhere prints help and exits 
 ```
  agent-toggle  v0.2.0                                 5 resources · ~6.3k tok live · 1 staged (+300 tok)
  All 5 │ claude 4 │ codex 2
- / filter                                                                        type: All  sort: name
+ 🔍 Type to search (name, path, fuzzy)                                           type: All  sort: name
  Skills 3 ─────────────────────────────────────────────────────────────│ beta
   ●   alpha                             claude      1.2k █▎            │
 › ● + beta                              claude     (300) ▎             │ harness    claude
@@ -228,7 +228,7 @@ agent-toggle             # same, on a terminal; elsewhere prints help and exits 
   ●   delta                             codex         10 ▏             │ cost       0 now; ~300 tok if restored
                                                                        │ since      2026-09-19 10:00:00
  5 of 5 shown · 2/5
- Space toggle  Enter apply  Esc cancel  ? help  / filter  ←→ harness  t type  s sort  p profile  a all
+ Space toggle  Enter apply  Esc cancel  ? help  / search  ←→ harness  t type  s sort  p profile  a all
 ```
 
 What is on screen:
@@ -244,7 +244,12 @@ What is on screen:
   `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
 - **Detail pane** at 100 columns or wider: harness, type, state, staged, path, cost, since,
   mechanism, and what it is shared with.
-- **Key-chip footer** and a `?` help overlay.
+- **Search bar** (🔍; plain `/` on terminals that cannot draw emoji: the Linux console, the legacy
+  Windows console, non-UTF-8 locales) under the tabs, always visible.
+- **Per-harness colors** on the harness column, matching `ai-accounts list` (claude orange on
+  256-color terminals, codex cyan, agy blue, grok yellow, vibe green, copilot red, opencode magenta).
+- **Key-chip footer** and a `?` help overlay. A spinner shows on stderr while the list loads
+  (only on a TTY; off with `NO_COLOR`). The mouse wheel scrolls (xterm alternate-scroll mode).
 
 | key | action |
 |---|---|
@@ -252,7 +257,7 @@ What is on screen:
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
-| `/` | start a filter; any other non-command letter starts one too (terms are ANDed, case-insensitive) |
+| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `←` `→` | switch harness tab (also while typing a filter); `0` = All, `1`-`9` = that tab, `h` = next tab |
 | `t` | cycle the type filter |

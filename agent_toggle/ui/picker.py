@@ -16,9 +16,11 @@ chips. All styling goes through ``theme`` roles, so monochrome stays usable.
 from __future__ import annotations
 
 import curses
+import sys
 from pathlib import Path
 
 from .. import __version__
+from ..spinner import spinner
 from ..i18n import t
 from . import theme
 from .model import (
@@ -33,6 +35,8 @@ from .model import (
     profile_listing,
     short_path,
     type_label,
+    strict,
+    subsequence,
     visible,
 )
 
@@ -59,6 +63,7 @@ class View:
         self.type_ = type_ if type_ in self.types else "all"
         self.sort = sort if sort in SORTS else "name"
         self.query, self.typing, self.note = "", False, ""
+        self.fuzzy = False                 # the shown rows matched by letters in order, not text
         self.cur = self.top = 0
         self.page = 1
         self.top_cost = max((r.tokens or r.would_save for r in rows), default=0)
@@ -70,8 +75,11 @@ class View:
 
     def shown(self) -> list[Row]:
         """The visible rows in screen order (grouped by type)."""
-        return [r for _, grp in grouped(visible(self.rows, self.query, self.harness,
-                                                self.type_, self.sort)) for r in grp]
+        found = visible(self.rows, self.query, self.harness, self.type_, self.sort)
+        terms = self.query.lower().split()
+        # fuzzy results are all-or-nothing: if the first row is no plain match, none is
+        self.fuzzy = bool(found and terms and not strict(found[0], terms))
+        return [r for _, grp in grouped(found) for r in grp]
 
     def tab(self, step: int = 0, to: int | None = None) -> None:
         i = self.tabs.index(self.harness)
@@ -103,10 +111,14 @@ def summary(v: View, g: theme.Glyphs) -> str:
     return _sep(g).join(parts)
 
 
-def highlight(name: str, query: str, role: str) -> list[theme.Segment]:
-    """`name` with the query terms' matches in the accent role."""
+def highlight(name: str, query: str, role: str, fuzzy: bool = False) -> list[theme.Segment]:
+    """`name` with the query terms' matches in the accent role (fuzzy: the letters found)."""
     low, hit = name.lower(), [False] * len(name)
     for term in query.lower().split():
+        if fuzzy:
+            for i in subsequence(term, low) or ():
+                hit[i] = True
+            continue
         start = low.find(term)
         while start >= 0:
             hit[start:start + len(term)] = [True] * len(term)
@@ -130,7 +142,7 @@ def row_segments(r: Row, width: int, v: View, g: theme.Glyphs, is_cur: bool,
             (("+" if r.staged else "-") if r.changed else " ", "pending"), (" ", "text")]
     tail: list[theme.Segment] = []
     if v.harness == "all" and width >= 60:
-        tail.append((" " + pad(theme.truncate(r.harness, 8), 8), "harness"))
+        tail.append((" " + pad(theme.truncate(r.harness, 8), 8), theme.harness_role(r.harness)))
     cell = fmt_tokens(r.tokens) if r.enabled else f"({fmt_tokens(r.would_save)})"
     tail.append((cell.rjust(8), "text" if r.enabled else "muted"))
     if width >= 56:
@@ -144,7 +156,7 @@ def row_segments(r: Row, width: int, v: View, g: theme.Glyphs, is_cur: bool,
         tail, room = [], width - 6
     name = theme.truncate(r.name, room, g.ellipsis)
     role = "pending" if r.changed else "text" if r.staged else "muted"
-    body = [*highlight(name, v.query, role), (" " * (room - theme.cell_width(name)), "text"), *tail]
+    body = [*highlight(name, v.query, role, v.fuzzy), (" " * (room - theme.cell_width(name)), "text"), *tail]
     if is_cur:
         body = [(s, "cursor") for s, _ in body]
     return head + body
@@ -167,7 +179,7 @@ def detail_lines(r: Row, width: int, g: theme.Glyphs) -> list[list[theme.Segment
             out.append([(pad(label if n == 0 else "", lab), "muted"), (text[n:n + val], role)])
 
     state = t("picker.state.live", "live") if r.enabled else t("picker.state.parked", "parked")
-    field(t("picker.d.harness", "harness"), r.harness, "harness")
+    field(t("picker.d.harness", "harness"), r.harness, theme.harness_role(r.harness))
     field(t("picker.d.type", "type"), r.type, "type")
     field(t("picker.d.state", "state"),
           f"{g.live if r.enabled else g.parked} {state}", "live" if r.enabled else "parked")
@@ -201,7 +213,7 @@ def chips(v: View, g: theme.Glyphs) -> list[tuple[str, str]]:
                 ("^U", t("picker.chip.clear", "clear filter")), (ud, t("picker.chip.move", "move"))]
     return [("Space", t("picker.chip.toggle", "toggle")), ("Enter", t("picker.chip.apply", "apply")),
             ("Esc", t("picker.chip.cancel", "cancel")), ("?", t("picker.chip.help", "help")),
-            ("/", t("picker.chip.filter", "filter")), (lr, t("picker.chip.harness", "harness")),
+            ("/", t("picker.chip.filter", "search")), (lr, t("picker.chip.harness", "harness")),
             ("t", t("picker.chip.type", "type")), ("s", t("picker.chip.sort", "sort")),
             ("p", t("picker.chip.profile", "profile")), ("a", t("picker.chip.all", "all"))]
 
@@ -224,10 +236,14 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
     put(1, theme.tab_bar(labels[first:], active - first, w, g))
 
     if v.filtering:
-        left = [(" / ", "accent"), (v.query, "text"),
+        left = [(f" {g.search} ", "accent"), (v.query, "text"),
                 ((g.full if g.unicode else "_") if v.typing else "", "accent")]
+        if v.fuzzy:
+            left.append((f"  {'≈' if g.unicode else '~'} " + t("picker.search.fuzzy", "fuzzy match"),
+                         "warning"))
     else:
-        left = [(" / ", "muted"), (t("picker.filter.placeholder", "filter"), "muted")]
+        left = [(f" {g.search} ", "accent"),
+                (t("picker.search.idle", "Type to search (name, path, fuzzy)"), "muted")]
     end = put(2, left)
     right = (f"{t('picker.filter.type', 'type:')} {type_label(v.type_)}  "
              f"{t('picker.filter.sort', 'sort:')} {sort_label(v.sort)} ")
@@ -291,7 +307,7 @@ def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
         ("Space  Tab", t("picker.help.toggle", "toggle the row (live <-> parked), next row")),
         ("Enter", t("picker.help.apply", "apply staged changes (--dry-run: plan only)")),
         ("Esc  Ctrl-C", t("picker.help.cancel", "cancel; nothing is changed")),
-        ("/", t("picker.help.filter", "type a filter; any other letter starts one too")),
+        ("/", t("picker.help.filter", "search name / harness / path (fuzzy); any other letter starts one too")),
         ("Bksp  Ctrl-U", t("picker.help.edit", "edit / clear the filter")),
         (f"{lr}  0-9  h", t("picker.help.harness", "harness tab (0 = All)")),
         ("t", t("picker.help.type", "cycle the type filter")),
@@ -466,12 +482,20 @@ def pick(state: dict, harnesses: dict, plugins: bool = True, color: bool = False
     """`plugins=False` skips the `claude plugin list` call (a dry run never shells out);
     `harness` (ui --harness) is shown even when it is switched off in settings."""
     notes: list[str] = []
-    rows = collect(state, harnesses, notes.append, plugins)
+    with spinner(t("picker.loading", "Loading resources…")):
+        rows = collect(state, harnesses, notes.append, plugins)
     if not rows:
         print("nothing to show")
         return None
+    wheel = sys.stdout.isatty()
     try:
+        if wheel:                       # xterm "alternate scroll": the wheel sends Up/Down here
+            sys.stdout.write("\x1b[?1007h")
+            sys.stdout.flush()
         return curses.wrapper(loop, rows, color, project, dry_run, None, harness)
     finally:
+        if wheel:
+            sys.stdout.write("\x1b[?1007l")
+            sys.stdout.flush()
         for n in notes:                 # after curses is torn down, where they are readable
             print(f"WARNING  {n}")

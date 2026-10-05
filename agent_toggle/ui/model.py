@@ -125,12 +125,37 @@ def short_path(path: str) -> str:
     return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
 
 
+def _hay(r: Row) -> str:
+    return f"{r.label} {r.path}".lower()
+
+
+def strict(r: Row, terms: list[str]) -> bool:
+    """Every term is a substring of the row's label or path."""
+    hay = _hay(r)
+    return all(t in hay for t in terms)
+
+
+def subsequence(term: str, text: str) -> list[int] | None:
+    """Positions of `term`'s letters in `text`, in order (greedy), or None."""
+    at, out = 0, []
+    for ch in term:
+        at = text.find(ch, at) + 1
+        if not at:
+            return None
+        out.append(at - 1)
+    return out
+
+
 def match(rows: list[Row], query: str) -> list[Row]:
-    """Case-insensitive AND over whitespace-separated terms."""
+    """Case-insensitive AND over whitespace-separated terms, matched against the label
+    (harness/type/name) and the path. When nothing matches that way, fall back to fuzzy:
+    each term's letters in order inside the label (`ctxmd` finds `context-md`)."""
     terms = query.lower().split()
     if not terms:
         return rows
-    return [r for r in rows if all(t in r.label.lower() for t in terms)]
+    hits = [r for r in rows if strict(r, terms)]
+    return hits or [r for r in rows
+                    if all(subsequence(t, r.label.lower()) is not None for t in terms)]
 
 
 def visible(rows: list[Row], query: str = "", harness: str = "all", type_: str = "all",

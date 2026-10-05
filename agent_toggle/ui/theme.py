@@ -17,6 +17,7 @@ are testable with no terminal. Wide (CJK) characters count as two cells.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 import unicodedata
@@ -24,14 +25,27 @@ from dataclasses import dataclass
 
 Segment = tuple[str, str]
 
+#: Per-harness accent, from `ai-accounts list` (claude = orange, 256-colour only). The value is
+#: (curses colour name, 256-colour index or None); unlisted harnesses use the plain "harness" role.
+HARNESS_COLOURS = {
+    "claude": ("YELLOW", 208), "codex": ("CYAN", None), "agy": ("BLUE", None),
+    "grok": ("YELLOW", None), "vibe": ("GREEN", None), "copilot": ("RED", None),
+    "opencode": ("MAGENTA", None),
+}
 #: Every role a segment may carry. "text" is the unstyled default; "on",
 #: "off" and "changed" are aliases of live / parked / pending.
 ROLES = (
     "text", "title", "harness", "type", "live", "parked", "pending", "choice",
     "warning", "error", "accent", "muted", "cursor",
     "chip_key", "chip_label", "tab_active", "tab_inactive",
+    *(f"h_{n}" for n in HARNESS_COLOURS),
 )
 ALIASES = {"on": "live", "off": "parked", "changed": "pending", "dim": "muted"}
+
+
+def harness_role(name: str) -> str:
+    """The palette role colouring harness *name* (``harness`` when it has no colour of its own)."""
+    return f"h_{name}" if name in HARNESS_COLOURS else "harness"
 
 
 # -- glyphs -----------------------------------------------------------------
@@ -51,9 +65,10 @@ class Glyphs:
     br: str
     ellipsis: str
     unicode: bool
+    search: str = "/"         # the search-bar icon: an emoji only where it renders reliably
 
 
-UNICODE = Glyphs("●", "○", "›", tuple("▏▎▍▌▋▊▉"), "█", "─", "│", "╭", "╮", "╰", "╯", "…", True)
+UNICODE = Glyphs("●", "○", "›", tuple("▏▎▍▌▋▊▉"), "█", "─", "│", "╭", "╮", "╰", "╯", "…", True, "🔍")
 ASCII = Glyphs("*", "o", ">", ("#",) * 7, "#", "-", "|", "+", "+", "+", "+", "...", False)
 
 _PROBE = "".join(UNICODE.bar) + UNICODE.full + "●○›─│╭╮╰╯…"
@@ -73,8 +88,21 @@ def supports_unicode(stream=None, env=None) -> bool:
     return True
 
 
+def emoji_ok(env=None, platform=None) -> bool:
+    """False where emoji are drawn as boxes: the Linux VT console, and a Windows console
+    that is not Windows Terminal / VS Code (the legacy conhost)."""
+    env = os.environ if env is None else env
+    if env.get("TERM") == "linux":
+        return False
+    if (sys.platform if platform is None else platform) == "win32":
+        return bool(env.get("WT_SESSION") or env.get("TERM_PROGRAM") == "vscode")
+    return True
+
+
 def get_glyphs(stream=None, env=None) -> Glyphs:
-    return UNICODE if supports_unicode(stream, env) else ASCII
+    if not supports_unicode(stream, env):
+        return ASCII
+    return UNICODE if emoji_ok(env) else dataclasses.replace(UNICODE, search="/")
 
 
 _ASCII_PUNCT = str.maketrans({"—": "-", "·": "-", "…": "..."})
@@ -150,12 +178,14 @@ _COLOUR = {
     "tab_active": (None, ("BOLD", "REVERSE")),
     "tab_inactive": (None, ("DIM",)),
 }
+_COLOUR.update({f"h_{n}": (c, ("BOLD",)) for n, (c, _) in HARNESS_COLOURS.items()})
 _MONO = {
     "text": (), "title": ("BOLD",), "harness": ("BOLD",), "type": (), "live": ("BOLD",),
     "parked": ("DIM",), "pending": ("BOLD",), "choice": (), "warning": ("BOLD",),
     "error": ("BOLD", "REVERSE"), "accent": ("BOLD",), "muted": ("DIM",),
     "cursor": ("REVERSE",), "chip_key": ("BOLD",), "chip_label": ("DIM",),
     "tab_active": ("BOLD", "REVERSE"), "tab_inactive": ("DIM",),
+    **{f"h_{n}": ("BOLD",) for n in HARNESS_COLOURS},
 }
 
 
@@ -206,9 +236,13 @@ def init_curses_colors(enabled: bool, curses_mod=None) -> Palette:
         for role, (colour, names) in _COLOUR.items():
             attr = _attrs(curses, names)
             if colour:
+                rich = role.startswith("h_") and HARNESS_COLOURS[role[2:]][1]
+                if rich and getattr(curses, "COLORS", 0) >= 256:           # claude's orange; else its base colour
+                    colour = rich
                 if colour not in pairs:
                     pairs[colour] = len(pairs) + 1
-                    curses.init_pair(pairs[colour], getattr(curses, "COLOR_" + colour), bg)
+                    curses.init_pair(pairs[colour], colour if rich and colour == rich
+                                     else getattr(curses, "COLOR_" + colour), bg)
                 attr |= curses.color_pair(pairs[colour])
             attrs[role] = attr
         return Palette(attrs, False)
@@ -223,6 +257,8 @@ _SGR = {
     "pending": "35", "choice": "36", "warning": "1;33", "error": "1;31", "accent": "1;34",
     "muted": "2", "cursor": "1;7", "chip_key": "1;36", "chip_label": "2",
     "tab_active": "1;7", "tab_inactive": "2",
+    "h_claude": "1;38;5;208", "h_codex": "1;36", "h_agy": "1;34", "h_grok": "1;33",
+    "h_vibe": "1;32", "h_copilot": "1;31", "h_opencode": "1;35",
 }
 
 
