@@ -32,6 +32,7 @@ CATALOG: dict[str, str] = {
     # detail pane
     "picker.state.live": "啟用",
     "picker.state.parked": "停用",
+    "picker.d.description": "說明",
     "picker.d.harness": "harness",
     "picker.d.type": "類型",
     "picker.d.state": "狀態",

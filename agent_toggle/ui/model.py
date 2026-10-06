@@ -17,17 +17,19 @@ SORTS = ("name", "cost")
 
 class Row:
     __slots__ = ("harness", "type", "name", "enabled", "staged", "tokens", "would_save",
-                 "shared", "path", "since", "mechanism", "basis")
+                 "shared", "path", "since", "mechanism", "basis", "description")
 
     def __init__(self, harness: str, type_: str, name: str, enabled: bool,
                  tokens: int = 0, would_save: int = 0, shared: tuple[str, ...] = (),
-                 path: str = "", since: str = "", mechanism: str = "", basis: str = ""):
+                 path: str = "", since: str = "", mechanism: str = "", basis: str = "",
+                 description: str = ""):
         self.harness, self.type, self.name = harness, type_, name
         self.enabled = enabled
         self.staged = enabled          # what the user has ticked so far
         self.tokens, self.would_save, self.shared = tokens, would_save, shared
         # detail-pane facts; "" = unknown (a plugin has no path, a live row no `since`)
         self.path, self.since, self.mechanism, self.basis = path, since, mechanism, basis
+        self.description = description
 
     @property
     def changed(self) -> bool:
@@ -68,7 +70,8 @@ def collect(state: dict, harnesses: dict, warn=lambda m: None,
         else:
             path = e.get("parked_at") or e.get("backup") or ""
         rows.append(Row(i.harness, i.type, i.name, i.enabled, i.tokens, i.would_save,
-                        i.shared_with, str(path), str(e.get("at") or ""), str(mech), i.basis))
+                        i.shared_with, str(path), str(e.get("at") or ""), str(mech), i.basis,
+                        i.description))
     rows.sort(key=lambda r: (r.harness, r.type, r.name))
     return rows
 

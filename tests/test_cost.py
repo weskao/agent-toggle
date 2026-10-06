@@ -26,14 +26,15 @@ class EstimatorTest(CliCase):
 
     def test_skill_counts_name_and_description_not_the_body(self) -> None:
         tokens, chars, basis = self.est(
-            "skill", "skills/s/SKILL.md", FM.format(n="abcd", d="x" * 96, body="B" * 50000))
+            "skill", "skills/s/SKILL.md", FM.format(n="abcd", d="x" * 96, body="B" * 50000))[:3]
         self.assertEqual((tokens, chars), (25, 100))
         self.assertIn("name+description 100 chars", basis)
 
     def test_folded_description_and_missing_frontmatter(self) -> None:
         folded = "---\nname: f\ndescription: >\n  one two\n  three\n---\n"
         self.assertEqual(self.est("skill", "skills/f/SKILL.md", folded)[1], len("f") + len("one two three"))
-        tokens, chars, basis = self.est("skill", "skills/g/SKILL.md", "# no frontmatter", name="gname")
+        tokens, chars, basis = self.est(
+            "skill", "skills/g/SKILL.md", "# no frontmatter", name="gname")[:3]
         self.assertEqual(chars, len("gname"))
         self.assertIn("no frontmatter", basis)
 

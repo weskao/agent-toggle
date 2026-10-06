@@ -107,6 +107,28 @@ class PickerTest(SandboxCase):
         # name (3) + description (396) = 399 chars -> 100 tokens
         self.assertEqual(rows["big"].tokens, 100)
 
+    def test_collect_carries_the_frontmatter_description(self) -> None:
+        self.write("skills/solo/SKILL.md",
+                   "---\nname: solo\ndescription: park a skill without deleting it\n---\nbody\n")
+        self.write("commands/go.md", "---\ndescription: run the go helper\n---\n")
+        self.write("agents/helper.md", "---\nname: helper\ndescription: >\n  one two\n  three\n---\n")
+        self.write("skills/bare/SKILL.md", "# no frontmatter\n")
+        self.write("rules/note.md", "---\ndescription: always on note\n---\nbody\n")
+        park = self.tmp / "parked-skill"
+        park.mkdir()
+        (park / "SKILL.md").write_text(
+            "---\ndescription: parked copy of the skill\n---\n", encoding="utf-8")
+        state = {"disabled": {"claude:skill:parked-skill": {
+            "harness": "claude", "type": "skill", "name": "parked-skill",
+            "parked_at": str(park)}}}
+        rows = {r.name: r for r in model.collect(state, build(self.tmp))}
+        self.assertEqual(rows["solo"].description, "park a skill without deleting it")
+        self.assertEqual(rows["go"].description, "run the go helper")
+        self.assertEqual(rows["helper"].description, "one two three")
+        self.assertEqual(rows["bare"].description, "")
+        self.assertEqual(rows["note"].description, "always on note")
+        self.assertEqual(rows["parked-skill"].description, "parked copy of the skill")
+
     def test_visible_filters_and_sorts(self) -> None:
         rows = [model.Row("claude", "skill", "a", True, 5),
                 model.Row("codex", "skill", "b", True, 50, shared=("opencode",)),
@@ -423,6 +445,33 @@ class LayoutTest(ScreenCase):
     def test_status_line_says_ctrl_c_leaves_and_auto_saves(self) -> None:
         _, win = self.run_keys(["\x1b"])
         self.assertIn("Ctrl+C to leave · auto-save", win.screen[-2])
+
+    def test_detail_pane_shows_the_description(self) -> None:
+        text = "park a skill without deleting it"
+        rows = [model.Row("claude", "skill", "solo", True, description=text)]
+        _, win = self.run_keys(["\x1b"], rows=rows, size=(24, 120))
+        pane = "\n".join(line[72:] for line in win.screen)
+        self.assertIn("description", pane)
+        self.assertIn(text, pane)
+        bare = [model.Row("claude", "mcp", "srv", True)]
+        _, win = self.run_keys(["\x1b"], rows=bare, size=(24, 120))
+        self.assertNotIn("description", "\n".join(line[72:] for line in win.screen))
+
+    def test_detail_pane_wraps_the_description_on_words(self) -> None:
+        r = model.Row("claude", "skill", "solo", True, description="alpha beta gamma delta")
+        lines = picker.detail_lines(r, 23, theme.ASCII)
+        body = ["".join(s for s, role in line if role == "text").strip() for line in lines]
+        self.assertIn("alpha beta", body)
+        self.assertIn("gamma delta", body)
+
+    def test_detail_pane_description_is_translated(self) -> None:
+        self.addCleanup(i18n.set_language, i18n.LANGUAGE)
+        i18n.set_language("zh-TW")
+        rows = [model.Row("claude", "skill", "solo", True, description="park a skill")]
+        _, win = self.run_keys(["\x1b"], rows=rows, size=(24, 120))
+        pane = "\n".join(line[72:] for line in win.screen)
+        self.assertIn("說明", pane)
+        self.assertIn("park a skill", pane)
 
     def test_detail_pane_shows_at_wide_widths_only(self) -> None:
         down = picker.curses.KEY_DOWN

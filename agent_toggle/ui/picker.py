@@ -95,6 +95,39 @@ def pad(text: str, cells: int) -> str:
     return text + " " * max(0, cells - theme.cell_width(text))
 
 
+def wrap_cells(text: str, width: int) -> list[str]:
+    """Wrap `text` on spaces into lines of at most `width` terminal cells.
+
+    A word wider than `width` is cut. Path fields still slice by character
+    because a path is one token."""
+    width = max(1, width)
+    lines: list[str] = []
+    cur = ""
+    for word in text.split():
+        if not cur:
+            cur = word
+        elif theme.cell_width(f"{cur} {word}") <= width:
+            cur = f"{cur} {word}"
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    out: list[str] = []
+    for line in lines or [""]:
+        while theme.cell_width(line) > width:
+            cut = theme.truncate(line, width)
+            if not cut or cut == line:        # a single cell wider than `width`
+                out.append(line)
+                line = ""
+                break
+            out.append(cut)
+            line = line[len(cut):]
+        if line:
+            out.append(line)
+    return out or [""]
+
+
 def _sep(g: theme.Glyphs) -> str:
     return " · " if g.unicode else " | "
 
@@ -170,13 +203,20 @@ def heading(type_: str, count: int, width: int, g: theme.Glyphs) -> list[theme.S
 
 def detail_lines(r: Row, width: int, g: theme.Glyphs) -> list[list[theme.Segment]]:
     """The detail pane for the cursor row: one segment list per screen line."""
-    lab = 11
+    lab = 12                                 # "description" is 11 cells; leave a gap
     val = max(1, width - lab)
     out = [[(theme.truncate(r.name, width, g.ellipsis), "title")], []]
 
     def field(label: str, text: str, role: str = "text") -> None:
         for n in range(0, max(1, len(text)), val):          # a long path wraps
             out.append([(pad(label if n == 0 else "", lab), "muted"), (text[n:n + val], role)])
+
+    if r.description:                        # frontmatter prose, not a path
+        chunks = wrap_cells(r.description, val)
+        label = t("picker.d.description", "description")
+        for n, chunk in enumerate(chunks):
+            out.append([(pad(label if n == 0 else "", lab), "muted"), (chunk, "text")])
+        out.append([])
 
     state = t("picker.state.live", "live") if r.enabled else t("picker.state.parked", "parked")
     field(t("picker.d.harness", "harness"), r.harness, theme.harness_role(r.harness))

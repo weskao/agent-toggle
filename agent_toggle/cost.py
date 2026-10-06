@@ -70,6 +70,7 @@ class Item:
     chars: int | None
     basis: str
     shared_with: tuple[str, ...] = ()
+    description: str = ""             # frontmatter description, when the file has one
 
 
 def tokens_of(chars: int) -> int:
@@ -102,24 +103,32 @@ def parse_frontmatter(head: str) -> dict[str, str]:
 
 
 def file_estimate(type_: str, name: str, path: Path | None) -> Estimate:
-    """skill / agent / command / rule from one file (a skill dir -> its SKILL.md)."""
+    """skill / agent / command / rule from one file (a skill dir -> its SKILL.md).
+
+    Returns `(tokens, chars, basis, description)`. Other estimate helpers stay
+    3-tuples; `_fill` only reads the description when a 4th element is present.
+    """
     if path is None:
-        return 0, None, "file not found"
+        return 0, None, "file not found", ""
     if type_ == "skill" and path.is_dir():
         path = path / "SKILL.md"
     try:
         if type_ == "rule":
-            chars = len(read_head(path, RULE_CAP))
-            return tokens_of(chars), chars, f"whole file {chars} chars"
+            head = read_head(path, RULE_CAP)
+            chars = len(head)
+            return (tokens_of(chars), chars, f"whole file {chars} chars",
+                    parse_frontmatter(head).get("description", ""))
         fm = parse_frontmatter(read_head(path, HEAD_CAP))
     except OSError as e:
-        return 0, None, f"unreadable: {e.strerror or e}"
+        return 0, None, f"unreadable: {e.strerror or e}", ""
     vals = {f: fm.get(f, "") for f in FIELDS[type_]}
     if not vals.get("name"):
         vals["name"] = name
     chars = sum(map(len, vals.values()))
     parts = "+".join(f for f, v in vals.items() if v)
-    return tokens_of(chars), chars, f"{parts} {chars} chars" + ("" if fm else " (no frontmatter)")
+    return (tokens_of(chars), chars,
+            f"{parts} {chars} chars" + ("" if fm else " (no frontmatter)"),
+            fm.get("description", ""))
 
 
 def mcp_estimate(harness: str, tools: int | None) -> Estimate:
@@ -222,6 +231,8 @@ def plugin_estimate(root: Path) -> Estimate:
 def _fill(item: Item, est: Estimate) -> None:
     item.tokens, item.would_save = (est[0], 0) if item.enabled else (0, est[0])
     item.chars, item.basis = est[1], est[2]
+    if len(est) > 3:                   # file rows carry the frontmatter description
+        item.description = est[3]
 
 
 def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: None,

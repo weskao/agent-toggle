@@ -2,6 +2,7 @@
 
 ### 🚀 Features
 
+- **ui:** Show a skill, agent, command, or rule's frontmatter description in the picker detail pane
 - **config:** `config --json` includes the package version
 
 ## [0.5.2] - 2026-10-06

@@ -242,7 +242,8 @@ What is on screen:
 - **Cost column**: estimated startup tokens (chars / 4, about +-25 %) with a colored bar. A parked
   row shows `(N)` in brackets, what restoring it would load. Plugins appear as rows too (via
   `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
-- **Detail pane** at 100 columns or wider: harness, type, state, staged, path, cost, since,
+- **Detail pane** at 100 columns or wider: the file's frontmatter `description` (skills,
+  agents, commands, rules), then harness, type, state, staged, path, cost, since,
   mechanism, and what it is shared with.
 - **Search bar** (🔍; plain `/` on terminals that cannot draw emoji: the Linux console, the legacy
   Windows console, non-UTF-8 locales) under the tabs, always visible.
