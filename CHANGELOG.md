@@ -1,3 +1,22 @@
+## [0.5.0] - 2026-10-06
+
+### 🚀 Features
+
+- **doctor:** Offer y/n fixes for actionable problems
+- **install:** Offer doctor fixes after install-shims
+
+### 📚 Documentation
+
+- **doctor:** Document y/n fixes and what they cover
+
+### 🧪 Testing
+
+- **config:** Cover doctor y/n fixes in config menu
+
+### ⚙️ Miscellaneous Tasks
+
+- Install every pyproject extra in CI tests
+- Track pip extras (telegram-kit, windows-curses) with Dependabot
 ## [0.4.0] - 2026-10-05
 
 ### 🚀 Features
