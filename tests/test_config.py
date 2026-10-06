@@ -13,7 +13,7 @@ from unittest import mock
 
 from test_cli_surface import CliCase
 
-from agent_toggle import config, settings
+from agent_toggle import __version__, config, settings
 from agent_toggle.ui import config_menu
 
 
@@ -130,10 +130,18 @@ class ConfigTest(CliCase):
         self.assertEqual(rc, 0)
         names = [r["name"] for r in env["results"] if r["type"] == "setting"]
         self.assertEqual(names, [k for k in settings.DEFAULTS if k != config.CHAT_KEY])
-        sources = {r["name"]: r["source"] for r in env["results"][2:]}
+        sources = {r["name"]: r["source"] for r in env["results"] if r["type"] == "setting"}
         # tests/base.py sets AGENT_TOGGLE_UPDATE_CHECK=0 for the whole run
         self.assertEqual(sources.pop("update_check"), "env")
         self.assertEqual(set(sources.values()), {"default"})
+
+    def test_json_includes_the_package_version(self) -> None:
+        rc, env = self.run_json("config")
+        self.assertEqual(rc, 0)
+        row = next(r for r in env["results"] if r["name"] == "version")
+        self.assertEqual((row["type"], row["action"], row["status"], row["detail"]),
+                         ("info", "show", "ok", __version__))
+        self.assertEqual(row["value"], __version__)
 
     def test_test_message_needs_both_values_and_reports_delivery(self) -> None:
         self.assertEqual(self.run_cli("config", "test")[0], 2)

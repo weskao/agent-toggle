@@ -13,7 +13,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from . import settings
+from . import __version__, settings
 from .output import CliError, Result, die
 
 SERVICE = "agent-toggle"
@@ -80,6 +80,7 @@ def show(tk, store, out: Result) -> None:
             text = ("on" if value else "off") if isinstance(value, bool) else str(value)
             out.row(None, "setting", key, "show", "ok", text, value=value,
                     source=settings.source(key))
+    out.row(None, "info", "version", "show", "ok", __version__, value=__version__)
 
 
 def need(tk, store) -> tuple[str, str]:

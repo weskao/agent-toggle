@@ -307,7 +307,7 @@ class SpellingTest(CliCase):
         # v0.3.0-v0.5.0 shipped with __version__ still at 0.2.0; ahead is fine (bumped, unreleased)
         changelog = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
         top = next(line for line in changelog.read_text(encoding="utf-8").splitlines()
-                   if line.startswith("## ["))
+                   if line.startswith("## [") and "Unreleased" not in line)
         released = top[4:top.index("]")]
         as_tuple = lambda v: tuple(int(p) for p in v.split("."))  # noqa: E731
         self.assertGreaterEqual(as_tuple(__version__), as_tuple(released), top)

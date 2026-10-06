@@ -127,7 +127,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
-| `config` | settings menu (curses, else a numbered list); `config --json` lists every setting; see [Settings & config menu](#settings--config-menu) |
+| `config` | settings menu (curses, else a numbered list); `config --json` lists every setting and the package version; see [Settings & config menu](#settings--config-menu) |
 | `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
 | `doctor` | check each harness layout and `state.json` against disk; exit `1` only on an `error` row; on a terminal, asks y/n per fix it can run itself |
@@ -305,7 +305,7 @@ The chrome (title, tabs, footer, help, detail labels) is translated when `langua
 
 ```sh
 agent-toggle config           # or: agent-toggle --config
-agent-toggle config --json    # every setting with its value and source; the token is masked
+agent-toggle config --json    # every setting with its value and source, plus the package version; the token is masked
 ```
 
 `config` opens the settings menu: curses on a terminal, a numbered list otherwise. Each change

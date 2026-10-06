@@ -306,6 +306,10 @@ class NumberedTest(MenuCase):
         rc = cm.numbered(self.ctx(telegram), io.StringIO(text), out)
         return rc, out.getvalue()
 
+    def test_title_shows_the_package_version(self) -> None:
+        _, out = self.run_numbered("q\n")
+        self.assertIn(f"v{__version__}", out)
+
     def test_digits_toggle_and_cycle_then_eof_quits(self) -> None:
         rc, out = self.run_numbered(f"1\n{number('Color')}\n")
         self.assertEqual(rc, 0)

@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### 🚀 Features
+
+- **config:** `config --json` includes the package version
+
 ## [0.5.2] - 2026-10-06
 
 ### 🐛 Bug Fixes
