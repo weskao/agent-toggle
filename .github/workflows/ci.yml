@@ -36,7 +36,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
-      - run: pip install -e .
+      # Installs every extra declared in pyproject.toml's
+      # [project.optional-dependencies] (currently windows, telegram), so a
+      # new extra is picked up here automatically — no edit needed. A marker
+      # that doesn't match the current OS (e.g. windows-curses) just no-ops.
+      - name: Install package with all extras
+        shell: python
+        run: |
+          import re, subprocess, pathlib
+          text = pathlib.Path("pyproject.toml").read_text()
+          m = re.search(r"\[project\.optional-dependencies\]\n(.*?)\n\[", text, re.S)
+          extras = re.findall(r"^(\w+)\s*=", m.group(1), re.M) if m else []
+          spec = f".[{','.join(extras)}]" if extras else "."
+          subprocess.check_call(["pip", "install", "-e", spec])
       - run: python -m unittest discover -s tests -v
 
   lint:
