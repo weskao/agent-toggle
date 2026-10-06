@@ -22,7 +22,7 @@ Usage:
     agent_toggle.py enable --all --project <dir> | profile save|apply|diff ... --project <dir>
     agent_toggle.py list [<type>] [--project D] # what is currently disabled
     agent_toggle.py status                     # health check
-    agent_toggle.py doctor [--harness H]       # read-only drift + state check; exit 1 on problems
+    agent_toggle.py doctor [--harness H]       # drift + state check (y/n fixes on a TTY); exit 1 on problems
     agent_toggle.py migrate                    # import old ~/.claude-toggle state
     agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
     agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
@@ -611,7 +611,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
     pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
     sub.add_parser("doctor", parents=[common],
-                   help="read-only check of harness layouts and state against disk")
+                   help="check harness layouts and state against disk; offers y/n fixes")
     cf = sub.add_parser("config", parents=[common],
                         help="Telegram settings for the CI failure alerts (needs the telegram extra)")
     cf.add_argument("action", nargs="?", choices=("test", "sync-ci"),
@@ -706,7 +706,9 @@ def _main(argv: list[str], color: str) -> int:
         elif cmd == "profile":
             profiles.cmd_profile(args, out)
         elif cmd == "doctor":
-            doctor.cmd_doctor(args.harness, out)
+            fixes = doctor.cmd_doctor(args.harness, out)
+            if fixes and not out.json_mode and sys.stdin.isatty() and sys.stdout.isatty():
+                doctor.offer_fixes(fixes, out)
         elif cmd == "config":
             config.cmd_config(args, out)
         elif cmd == "undo":

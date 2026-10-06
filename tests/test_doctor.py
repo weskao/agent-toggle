@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -11,7 +12,8 @@ from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
 
-from agent_toggle import fs, store
+from agent_toggle import doctor, fs, store
+from agent_toggle.output import Result
 
 HAS_TOMLLIB = fs._tomllib() is not None
 
@@ -344,6 +346,89 @@ class ReadOnlyTest(DoctorCase):
         self.assertEqual(snapshot(self.tmp), before)
         self.assertEqual(self.cli_calls, [])
         self.assertFalse(fs.lock_file().exists())
+
+
+class FixTest(DoctorCase):
+    """offer_fixes: each fix doctor can run itself is asked y/n; yes runs it, no changes nothing."""
+
+    def fixes(self, answer: bool = True) -> tuple[list[str], Result]:
+        out, asked = Result("doctor", json_mode=True), []
+        fixes = doctor.cmd_doctor(None, out)
+        doctor.offer_fixes(fixes, out, lambda q: asked.append(q) or answer)
+        return asked, out
+
+    def test_no_answers_change_nothing(self) -> None:
+        fs.private_dir(fs.state_dir())
+        fs.state_dir().chmod(0o755)
+        self.write("skills-disabled/solo/SKILL.md")
+        before = snapshot(self.tmp)
+        asked, _ = self.fixes(answer=False)
+        self.assertEqual(len(asked), 2, asked)
+        self.assertEqual(snapshot(self.tmp), before)
+
+    @unittest.skipIf(os.name == "nt", "no POSIX modes")
+    def test_loose_modes_are_chmodded(self) -> None:
+        self.run_cli("disable", "skill", "demo-skill")
+        fs.state_dir().chmod(0o755)
+        fs.state_file().chmod(0o644)
+        asked, out = self.fixes()
+        self.assertEqual(sorted(q.split()[1] for q in asked), ["600", "700"])
+        self.assertFalse(fs.too_open(fs.state_dir()) or fs.too_open(fs.state_file(), 0o077))
+        self.assertEqual(out.exit_code(), 0)
+        self.assertEqual([r for r in out.rows if r["status"] == "warn"], [])
+
+    def test_stale_flag_entry_is_enabled(self) -> None:
+        self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")
+        self.oc.write_text(self.oc.read_text(encoding="utf-8").replace("false", "true"),
+                           encoding="utf-8")
+        asked, out = self.fixes()
+        self.assertIn("agent-toggle enable mcp example-mcp --harness opencode", asked[0])
+        self.assertEqual(out.exit_code(), 0)
+        self.assertEqual(self.state(), {})
+        self.assertEqual(self.doctor()[0], 0)
+
+    def test_missing_origin_dir_is_recreated_and_restored(self) -> None:
+        self.run_cli("disable", "skill", "demo-skill")
+        shutil.rmtree(self.home / "skills")
+        self.fixes()
+        self.assertTrue((self.home / "skills" / "demo-skill").is_dir())
+        self.assertEqual(self.state(), {})
+
+    def test_orphans_identical_deleted_parked_only_restored_differs_left(self) -> None:
+        for n, text in (("same", "a"), ("drift", "old")):
+            self.write(f"skills-disabled/{n}/SKILL.md", text)
+            self.write(f"skills/{n}/SKILL.md", "a" if n == "same" else "new")
+        self.write("skills-disabled/solo/SKILL.md", "solo")
+        asked, _ = self.fixes()
+        self.assertEqual(len(asked), 2, asked)               # differs needs a human
+        self.assertFalse((self.home / "skills-disabled/same").exists())
+        self.assertEqual((self.home / "skills/solo/SKILL.md").read_text(encoding="utf-8"), "solo")
+        self.assertTrue((self.home / "skills-disabled/drift").exists())
+
+    def test_backup_deleted_only_when_its_server_is_live_again(self) -> None:
+        self.claude_json({"mcpServers": {"back-mcp": {"command": "x"}}})
+        fs.private_dir(fs.backup_dir())
+        live, gone = (fs.backup_dir() / f"claude__{n}.json" for n in ("back-mcp", "gone-mcp"))
+        for b in (live, gone):
+            b.write_text("{}", encoding="utf-8")
+        asked, out = self.fixes()
+        self.assertEqual(len([q for q in asked if q.startswith("Delete")]), 1, asked)
+        self.assertEqual(out.exit_code(), 0)        # its chmod 600 fix, asked after, is a no-op
+        self.assertFalse(live.exists())
+        self.assertTrue(gone.exists())
+
+    def test_interrupted_op_is_settled(self) -> None:
+        self.run_cli("disable", "skill", "demo-skill")
+        raw = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        entry = raw["disabled"].pop("claude:skill:demo-skill")
+        raw["pending"] = {"claude:skill:demo-skill": {"action": "disable", "entry": entry}}
+        fs.state_file().write_text(json.dumps(raw), encoding="utf-8")
+        asked, out = self.fixes()
+        self.assertEqual(len(asked), 1, asked)
+        raw = json.loads(fs.state_file().read_text(encoding="utf-8"))
+        self.assertEqual((raw.get("pending") or {}, list(raw["disabled"])),
+                         ({}, ["claude:skill:demo-skill"]))
+        self.assertEqual(out.exit_code(), 0)
 
 
 class CompanionTest(DoctorCase):

@@ -26,8 +26,9 @@ CATALOG: dict[str, str] = {
     "help.cost.summary": "每個項目的預估啟動 token 數，由大到小",
     "help.cost.desc": "估算每個項目啟動時載入多少 token（字元數/4，±25%），"
                       "以及暫存項目已省下多少。",
-    "help.doctor.summary": "唯讀檢查 harness 目錄結構與狀態",
-    "help.doctor.desc": "比對狀態檔與磁碟；有問題時結束碼為 1。不做任何變更。",
+    "help.doctor.summary": "檢查 harness 目錄結構與狀態",
+    "help.doctor.desc": "比對狀態檔與磁碟；有問題時結束碼為 1。在終端機上，可自動修復的問題"
+                        "（chmod、過期項目、孤立檔案、中斷的操作）會逐一詢問 y/n；否則不做任何變更。",
     "help.config.summary": "設定與 Telegram CI 通知",
     "help.config.desc": "不帶動作時開啟設定；`test` 送出一則 Telegram 訊息，"
                         "`sync-ci` 設定 GitHub repo secrets。",

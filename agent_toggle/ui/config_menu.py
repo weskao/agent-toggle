@@ -46,6 +46,10 @@ def _shims(ctx: Ctx, res: Result) -> None:
     cmd_install_shims(argparse.Namespace(dry_run=False, harness=None), res)
 
 
+def _doctor(ctx: Ctx, res: Result) -> None:
+    ctx.fixes = doctor.cmd_doctor(None, res)    # offered y/n once its report is shown
+
+
 def _harness_row(name: str) -> Row:
     return Row("bool", lambda: name, key=f"harness.{name}", harness=name,
                help=lambda: t("config.help_harness",
@@ -88,9 +92,9 @@ ROWS: tuple[Row, ...] = (
                        "A number such as -100123 or an @channel. - then Enter clears.")),
     Row("heading", lambda: t("config.group_tools", "Tools")),
     Row("action", lambda: t("config.doctor", "Health check (doctor)"),
-        run=lambda ctx, res: doctor.cmd_doctor(None, res),
+        run=_doctor,
         help=lambda: t("config.help_doctor",
-                       "Read-only check of harness layouts and state against disk.")),
+                       "Check harness layouts and state against disk; offers y/n fixes.")),
     Row("action", lambda: t("config.shims", "Install shims"), run=_shims,
         help=lambda: t("config.help_shims",
                        "Write the agent-toggle skill into every installed harness "
@@ -119,6 +123,7 @@ class Ctx:
 
     def __init__(self, tk=None, store=None, color: str = "auto") -> None:
         self.tk, self.store, self.color_mode = tk, store, color
+        self.fixes: list[doctor.Fix] = []           # the last doctor run's, not yet offered
         self.detected = {n: h.home for n, h in harnesses.harnesses().items() if h.home.is_dir()}
         self.recolor = False
         self.refresh_token()
@@ -223,11 +228,22 @@ def guarded(fn: Callable[..., str], *args) -> Segment:
 
 def run_action(ctx: Ctx, row: Row) -> list[Segment]:
     """Run a Tools row with a FRESH Result; its human output becomes the overlay text."""
+    return capture(lambda res: row.run(ctx, res))
+
+
+def offer_fixes(ctx: Ctx, ask: Callable[[str], bool]) -> list[Segment]:
+    """The y/n fixes the doctor row left in `ctx`, asked and run; their output."""
+    fixes, ctx.fixes = ctx.fixes, []
+    return capture(lambda res: doctor.offer_fixes(fixes, res, ask)) if fixes else []
+
+
+def capture(fn: Callable[[Result], None]) -> list[Segment]:
+    """Run `fn` with a FRESH Result; its human output becomes the overlay text."""
     res = Result("config", json_mode=False, color="never")
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         try:
-            row.run(ctx, res)
+            fn(res)
         except CliError as e:
             res.error(e.msg)
         except KeyboardInterrupt:
@@ -293,6 +309,12 @@ def _read(stdin) -> str | None:
     return line.rstrip("\r\n") if line else None
 
 
+def _ask_line(question: str, stdin, stdout) -> bool:
+    stdout.write(theme.encodable(f"{question} {t('config.yes_no', '(y/n)')} ", stdout))
+    stdout.flush()
+    return (_read(stdin) or "").strip().lower() in ("y", "yes")
+
+
 def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
     """Typed-choice surface: a number toggles / cycles / edits / runs that row."""
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
@@ -329,6 +351,8 @@ def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
         if choice.isascii() and choice.isdigit() and 1 <= int(choice) <= len(ITEMS):
             for seg in _numbered_pick(ctx, ITEMS[int(choice) - 1], stdin, stdout):
                 say([("  ", "text"), seg])
+            for seg in offer_fixes(ctx, lambda q: _ask_line(q, stdin, stdout)):
+                say([("  ", "text"), seg])
         else:
             say([(t("config.bad_number", "Enter one of the setting numbers shown above."),
                   "error")])
@@ -353,11 +377,8 @@ def _numbered_pick(ctx: Ctx, row: Row, stdin, stdout) -> list[Segment]:
         stdout.flush()
         text = (_read(stdin) or "").strip()
         return [guarded(commit, ctx, row, text)] if text else []
-    if row.confirm:
-        stdout.write(theme.encodable(f"{row.confirm()} {t('config.yes_no', '(y/n)')} ", stdout))
-        stdout.flush()
-        if (_read(stdin) or "").strip().lower() not in ("y", "yes"):
-            return [(t("config.cancelled", "cancelled"), "muted")]
+    if row.confirm and not _ask_line(row.confirm(), stdin, stdout):
+        return [(t("config.cancelled", "cancelled"), "muted")]
     return run_action(ctx, row)
 
 
@@ -534,6 +555,8 @@ class Menu:
             return t("config.cancelled", "cancelled"), "muted"
         self.draw((t("config.running", "running..."), "muted"))
         self.pager(row.label(), run_action(self.ctx, row))
+        if fixed := offer_fixes(self.ctx, self.ask):
+            self.pager(row.label(), fixed)
         return "", "text"
 
     def run(self) -> int:

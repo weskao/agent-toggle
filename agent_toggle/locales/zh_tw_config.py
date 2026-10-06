@@ -32,7 +32,7 @@ CATALOG: dict[str, str] = {
     "config.help_chat_id": "例如 -100123 這類數字或 @頻道。輸入 - 再按 Enter 清除。",
     "config.help_color": "auto：只在終端機上顯示色彩。--color 與 NO_COLOR 仍優先。",
     "config.help_default_harness": "未指定 --harness 時，指令所作用的工具。",
-    "config.help_doctor": "唯讀檢查各工具的目錄配置與狀態是否與磁碟一致。",
+    "config.help_doctor": "檢查各工具的目錄配置與狀態是否與磁碟一致；可修復的問題會詢問 y/n。",
     "config.help_harness": "開：agent-toggle 管理 %s。關：略過它。",
     "config.help_language": "所有訊息使用的語言。",
     "config.help_picker_harness": "挑選器開啟時的工具篩選。",

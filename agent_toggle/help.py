@@ -114,9 +114,11 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             examples=["cost", "cost --type mcp", "cost --harness codex --json"]),
         "doctor": Cmd(
             "doctor",
-            t("help.doctor.summary", "read-only check of harness layouts and state"),
+            t("help.doctor.summary", "check harness layouts and state"),
             t("help.doctor.desc", "Compare the state file against disk; exit 1 on problems. "
-                                  "Changes nothing."),
+                                  "On a terminal, offers y/n for each fix it can run itself "
+                                  "(chmod, stale entries, orphans, interrupted ops); "
+                                  "otherwise changes nothing."),
             examples=["doctor", "doctor --harness claude"]),
         "config": Cmd(
             "config [test|sync-ci] [--repo OWNER/REPO] [--dry-run]",

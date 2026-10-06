@@ -1,19 +1,24 @@
-"""doctor: a read-only health check (DESIGN s6 "Harness drift").
+"""doctor: a health check (DESIGN s6 "Harness drift").
 
 Compares each installed harness's live layout with its table row, then
-cross-checks state.json against disk. It takes no lock, never writes state, log,
-backups or modes, and never shells out (no claude CLI). Every problem row names
-the command that fixes it; nothing is deleted for you.
+cross-checks state.json against disk. The check takes no lock, never writes state,
+log, backups or modes, and never shells out (no claude CLI). Every problem row names
+the command that fixes it. A row whose fix needs no judgment also yields a `Fix`;
+`offer_fixes` asks y/n for each (on a terminal only) and runs it under the lock.
 """
 from __future__ import annotations
 
+import contextlib
 import filecmp
 import json
 import os
+import shutil
 from pathlib import Path
+from typing import Callable, NamedTuple
 
-from . import fs, store
+from . import fs, ops, store
 from .backends.flag_json import jsonc_loads
+from .backends.mcp_json import claude_mcp_config
 from .harnesses import Harness, harnesses
 from .mechanisms import _refusal, dir_view, settle
 from .output import CliError, Result
@@ -25,10 +30,65 @@ TAG = {"ok": "v", "absent": "-", "note": "i", "unverified": "?", "warn": "!", "e
 NEED = {"move": ("parked_at", "origin"), "remove_backup": ("backup",)}
 
 
-def _row(out: Result, harness, type_, name, status: str, detail: str, **extra) -> None:
-    out.row(harness, type_, name, "doctor", status, detail, show=False, **extra)
+class Fix(NamedTuple):
+    """A fix doctor can run itself: the row it clears, the y/n question, the action
+    (raises on failure)."""
+    row: dict
+    question: str
+    run: Callable[[Result], None]
+
+
+def _row(out: Result, harness, type_, name, status: str, detail: str, **extra) -> dict:
+    row = out.row(harness, type_, name, "doctor", status, detail, show=False, **extra)
     what = " ".join(x for x in (harness, type_, name) if x)
     out.say(f"  {TAG[status]} {what}: {detail}", warn=status == "warn", style=STYLE[status])
+    return row
+
+
+def _locked(fn: Callable[[], object]) -> Callable[[Result], None]:
+    """`fn` under the run lock, so a file fix never races a live disable/enable."""
+    def run(out: Result) -> None:
+        with fs.lock():
+            fn()
+    return run
+
+
+def _enable(hname: str, type_: str, name: str, project: str | None,
+            mkdir: Path | None = None) -> Callable[[Result], None]:
+    """The fix `agent-toggle enable ...` would apply (after recreating `mkdir`)."""
+    def run(out: Result) -> None:
+        if mkdir:
+            mkdir.mkdir(parents=True, exist_ok=True)
+        if ops.apply_plan([ops.Op(hname, type_, "enable", name, project)], out,
+                          batch=store.BATCH):
+            raise CliError("enable failed (see above)")
+    return run
+
+
+def _settle(key: str) -> Callable[[Result], None]:
+    """Finish or roll back a killed run's op now, as the next change would."""
+    def run(out: Result) -> None:
+        with fs.lock():
+            state = load_state()
+            verdict = settle(state, key, out)[0]
+            store.save_state(state)
+        if verdict == "stuck":
+            raise CliError("still stuck (see above)")
+    return run
+
+
+def _remove(p: Path) -> None:
+    if p.is_dir() and not p.is_symlink():
+        shutil.rmtree(p)
+    else:
+        p.unlink()
+
+
+def _move_back(p: Path, live: Path) -> None:
+    if live.exists() or live.is_symlink():          # appeared since the check: never clobber
+        raise FileExistsError(f"{live} exists now")
+    live.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(p), str(live))
 
 
 def _read_json(file: Path) -> tuple[object, str, str]:
@@ -157,7 +217,7 @@ def missing_parked(key: str, e: dict) -> str | None:
             f"or remove the entry from {fs.state_file()}")
 
 
-def _check_entry(out: Result, key: str, e: dict, table: dict) -> None:
+def _check_entry(out: Result, key: str, e: dict, table: dict, fixes: list[Fix]) -> None:
     sf = fs.state_file()
     try:
         hname, digest, type_, name = store.parse_key(key)
@@ -186,18 +246,22 @@ def _check_entry(out: Result, key: str, e: dict, table: dict) -> None:
     if mech == "move":
         if gone := missing_parked(key, e):
             _row(out, *ident, "error", gone)
-        elif not Path(e["origin"]).parent.is_dir():
-            _row(out, *ident, "error", f"origin dir gone: {Path(e['origin']).parent}; "
-                 f"fix: recreate it, then `{enable}`")
+        elif not (parent := Path(e["origin"]).parent).is_dir():
+            row = _row(out, *ident, "error", f"origin dir gone: {parent}; "
+                       f"fix: recreate it, then `{enable}`")
+            fixes.append(Fix(row, f"Recreate {parent} and run `{enable}`?",
+                             _enable(hname, type_, name, project, mkdir=parent)))
     elif mech == "remove_backup" and not Path(e["backup"]).is_file():
         _row(out, *ident, "error", f"backup missing: {e['backup']}; the saved config is lost -- "
              f"re-add the server by hand, then remove the entry from {sf}")
     elif flag:
         value = _json_at(out, *ident, Path(flag["file"]), flag["pointer"], "")
         if isinstance(value, bool) and value == flag["was"]:
-            _row(out, *ident, "error", f"{'.'.join(flag['pointer'])} is {str(value).lower()} in "
-                 f"{flag['file']} but the item is recorded as disabled (changed outside this "
-                 f"tool); fix: `{enable}` clears the entry")
+            row = _row(out, *ident, "error", f"{'.'.join(flag['pointer'])} is "
+                       f"{str(value).lower()} in {flag['file']} but the item is recorded as "
+                       f"disabled (changed outside this tool); fix: `{enable}` clears the entry")
+            fixes.append(Fix(row, f"Run `{enable}` to clear the stale entry?",
+                             _enable(hname, type_, name, project)))
 
 
 def _untracked(root: Path, tracked: set[str]) -> list[Path]:
@@ -229,12 +293,16 @@ def _same(a: Path, b: Path) -> bool:
     return a.is_file() and b.is_file() and filecmp.cmp(a, b, shallow=False)
 
 
-def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel: Path) -> None:
+def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel: Path,
+                fixes: list[Fix]) -> None:
     """One untracked parked item; the fix depends on whether a live copy exists and matches."""
     head = f"{p} is parked but has no state entry (parked outside this tool); fix: "
+    ask = None
     if live.exists() or live.is_symlink():
         if _same(p, live):
             kind, fix = "identical", "the live copy is identical; delete the parked copy"
+            ask = (f"Delete the parked copy {p} (the live one is identical)?",
+                   _locked(lambda: _remove(p)))
         else:
             kind, fix = "differs", (f"a different live copy exists at {live}; compare, keep "
                                     f"the one you want live, delete the parked copy")
@@ -243,10 +311,35 @@ def _orphan_row(out: Result, harness: str, type_: str, p: Path, live: Path, rel:
         kind, fix = "parked-only", (f"to keep it disabled, move it back to {live}, then "
                                     f"`agent-toggle disable {type_} {name}` to record it; "
                                     f"to restore it, just move it back")
-    _row(out, harness, type_, p.name, "warn", head + fix, orphan=kind)
+        ask = f"Restore it: move {p} back to {live}?", _locked(lambda: _move_back(p, live))
+    row = _row(out, harness, type_, p.name, "warn", head + fix, orphan=kind)
+    if ask:
+        fixes.append(Fix(row, *ask))
 
 
-def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> None:
+def _server_live(table: dict, stem: str) -> bool:
+    """True if backup `<harness>__<name>` names a server its harness config holds again
+    (a project backup, `<sha8>__...`, or a name with `/` never matches: no fix)."""
+    hname, _, name = stem.partition("__")
+    h = table.get(hname)
+    if not (h and h.mcp and name):
+        return False
+    if h.mcp.backend == "claude-json":
+        try:
+            return claude_mcp_config(name) is not None
+        except LookupError:                     # local scope in several projects: live
+            return True
+    try:
+        text = h.mcp.file.read_text(encoding="utf-8").removeprefix("\ufeff")
+        data = fs.toml_parse(text) if h.mcp.backend == "toml" else json.loads(text)
+    except (OSError, ValueError):
+        return False
+    servers = _walk(data, h.mcp.key_path)[1]
+    return isinstance(servers, dict) and name in servers
+
+
+def _check_orphans(out: Result, state: dict, table: dict, only: str | None,
+                   fixes: list[Fix]) -> None:
     entries = state["disabled"].values()
     pending = [p["entry"] for p in state.get("pending", {}).values()
                if isinstance(p, dict) and isinstance(p.get("entry"), dict)]
@@ -265,7 +358,7 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
                 seen.add(parked)
                 for p in _untracked(parked, tracked):
                     _orphan_row(out, h.name, type_, p, view.live / p.relative_to(parked),
-                                p.relative_to(parked))
+                                p.relative_to(parked), fixes)
     if only:
         return
     digests = set()
@@ -294,8 +387,11 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None) -> N
     bdir = fs.backup_dir()
     for b in sorted(bdir.glob("*.json")) if bdir.is_dir() else ():
         if b.name not in used:    # enable keeps the backup, so this is a note, not a fault
-            _row(out, None, None, b.name, "note", f"{b} has no state entry (kept after enable); "
-                 f"delete it yourself once the server is confirmed restored")
+            row = _row(out, None, None, b.name, "note", f"{b} has no state entry (kept after "
+                       f"enable); delete it yourself once the server is confirmed restored")
+            if _server_live(table, b.stem):
+                fixes.append(Fix(row, f"Delete {b}? (server {b.stem.partition('__')[2]} is "
+                                      f"configured again)", _locked(b.unlink)))
 
 
 def _recorded_companions(e) -> list[tuple[str, str]]:
@@ -351,16 +447,26 @@ def _check_companions(out: Result, state: dict, only: str | None) -> None:
                          f"below {top} mirrors the one under that home), or delete it")
 
 
-def _check_modes(out: Result) -> None:
+def _check_modes(out: Result, fixes: list[Fix]) -> None:
     for p in (fs.state_file(), *fs.backup_dir().glob("*.json")):
         if fs.too_open(p, 0o077):
-            _row(out, None, None, p.name, "warn", f"{p} is looser than 0600; fix: chmod 600 {p}")
-    if fs.too_open(fs.state_dir()):
-        _row(out, None, None, None, "warn", f"{fs.state_dir()} is group/world readable; "
-             f"fix: chmod 700 {fs.state_dir()}")
+            row = _row(out, None, None, p.name, "warn", f"{p} is looser than 0600; "
+                       f"fix: chmod 600 {p}")
+            fixes.append(Fix(row, f"chmod 600 {p}?", lambda out, p=p: _chmod(p, 0o600)))
+    if fs.too_open(sd := fs.state_dir()):
+        row = _row(out, None, None, None, "warn", f"{sd} is group/world readable; "
+                   f"fix: chmod 700 {sd}")
+        fixes.append(Fix(row, f"chmod 700 {sd}?", lambda out: os.chmod(sd, 0o700)))
 
 
-def cmd_doctor(harness: str | None, out: Result) -> None:
+def _chmod(p: Path, mode: int) -> None:
+    with contextlib.suppress(FileNotFoundError):    # an earlier yes deleted it
+        os.chmod(p, mode)
+
+
+def cmd_doctor(harness: str | None, out: Result) -> list[Fix]:
+    """Report; returns the fixes it can run itself (see `offer_fixes`)."""
+    fixes: list[Fix] = []
     table = harnesses()
     installed = [h for n, h in table.items() if (not harness or n == harness) and h.home.is_dir()]
     if harness and not installed:
@@ -376,7 +482,7 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
             if harness and not (isinstance(e, dict) and harness in (e.get("harness"),
                                                                     *(e.get("shared_with") or ()))):
                 continue
-            _check_entry(out, key, e, table)
+            _check_entry(out, key, e, table, fixes)
         live = bool(state.get("pending")) and fs.lock_held()
         if live:
             _row(out, None, None, None, "note", "another agent-toggle run is in progress (it "
@@ -386,11 +492,43 @@ def cmd_doctor(harness: str | None, out: Result) -> None:
                                 and p["entry"].get("harness") == harness):
                 continue
             verdict, msg = settle(state, key, dry_run=True)
-            _row(out, None, None, key, "error" if verdict == "stuck" else "warn", msg,
-                 pending=verdict)
-        _check_orphans(out, state, table, harness)
+            row = _row(out, None, None, key, "error" if verdict == "stuck" else "warn", msg,
+                       pending=verdict)
+            if verdict != "stuck":
+                fixes.append(Fix(row, f"Settle the interrupted op {key} now ({verdict})?",
+                                 _settle(key)))
+        _check_orphans(out, state, table, harness, fixes)
         _check_companions(out, state, harness)
     if not harness:
-        _check_modes(out)
+        _check_modes(out, fixes)
     errors = sum(r["status"] == "error" for r in out.rows)
-    out.say(f"\ndoctor: {errors} problem(s), {len(out.warnings)} warning(s)")
+    out.say(f"\ndoctor: {errors} problem(s), {len(out.warnings)} warning(s)"
+            + (f"; {len(fixes)} fixable here (asked y/n on a terminal)" if fixes else ""))
+    return fixes
+
+
+def ask_yes(question: str) -> bool:
+    """y/n on the terminal; EOF is no."""
+    try:
+        return input(f"{question} (y/n) ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def offer_fixes(fixes: list[Fix], out: Result, ask: Callable[[str], bool] = ask_yes) -> None:
+    """Ask y/n per fix and run each yes. A fixed row turns `fixed` (no longer counts
+    for the exit code); a failed one adds an `error` row."""
+    done = 0
+    for f in fixes:
+        if not ask(f.question):
+            continue
+        try:
+            f.run(out)
+        except Exception as e:  # noqa: BLE001 - one failed fix must not stop the rest
+            _row(out, None, None, None, "error", f"fix failed ({f.question}): "
+                 f"{getattr(e, 'msg', None) or f'{type(e).__name__}: {e}'}")
+            continue
+        f.row["status"] = "fixed"
+        out.say(f"  {TAG['ok']} fixed", style=STYLE["ok"])
+        done += 1
+    out.say(f"\ndoctor: fixed {done} of {len(fixes)}" + ("; re-run doctor to confirm" if done else ""))
