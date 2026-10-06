@@ -33,7 +33,8 @@ CATALOG: dict[str, str] = {
     "help.config.desc": "不帶動作時開啟設定；`test` 送出一則 Telegram 訊息，"
                         "`sync-ci` 設定 GitHub repo secrets。",
     "help.install_shims.summary": "把 skill shim 寫入每個已安裝的 harness",
-    "help.install_shims.desc": "安裝 agent-toggle skill，讓各 harness 的 agent 能呼叫此工具。",
+    "help.install_shims.desc": "安裝 agent-toggle skill，讓各 harness 的 agent 能呼叫此工具。"
+                             "在終端機上，接著逐一詢問 y/n 修復 doctor 能自動修復的問題。",
     "help.migrate.summary": "匯入舊版 ~/.claude-toggle 的狀態",
     "help.migrate.desc": "一次性匯入舊版 claude-toggle 工具的狀態。",
     "help.arg.names": "一或多個項目名稱",

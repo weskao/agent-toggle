@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from base import CAN_SYMLINK, SandboxCase
@@ -237,6 +238,23 @@ class InstallShimsCase(SandboxCase):
     def test_template_in_package_dir(self) -> None:
         self.assertTrue((Path(cli.__file__).parent / "shims" / "claude.md.tmpl").is_file())
         self.assertFalse((REPO / "shims").exists())
+
+    @unittest.skipIf(os.name == "nt", "no POSIX modes")
+    def test_offers_doctor_fixes_on_a_terminal_only(self) -> None:
+        from agent_toggle import fs
+        fs.private_dir(fs.state_dir())
+        fs.state_dir().chmod(0o755)
+        self.run_cli()                                   # --json: never asks
+        self.assertTrue(fs.too_open(fs.state_dir()))
+        asked, buf = [], io.StringIO()
+        with unittest.mock.patch.object(cli, "_interactive", return_value=True), \
+                unittest.mock.patch("builtins.input", lambda q: asked.append(q) or "y"), \
+                contextlib.redirect_stdout(buf):
+            self.assertEqual(cli.main(["install-shims"]), 0)
+        self.assertEqual(len(asked), 1, asked)
+        self.assertIn("chmod 700", asked[0])
+        self.assertIn("group/world readable", buf.getvalue())     # the problem, shown first
+        self.assertFalse(fs.too_open(fs.state_dir()))
 
     @unittest.skipIf(os.name == "nt", "install.sh is a POSIX wrapper; Windows uses the console script")
     def test_install_sh_wrapper(self) -> None:

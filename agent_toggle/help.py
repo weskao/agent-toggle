@@ -135,7 +135,9 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             "install-shims [--dry-run]",
             t("help.install_shims.summary", "write the skill shim into every installed harness"),
             t("help.install_shims.desc", "Install the agent-toggle skill so each harness's "
-                                         "agent can call this tool."),
+                                         "agent can call this tool. "
+                                         "On a terminal, then offers y/n for each "
+                                         "problem doctor can fix."),
             options=[_dry_run()],
             examples=["install-shims --dry-run", "install-shims --harness codex"]),
         "migrate": Cmd(

@@ -121,7 +121,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
-| `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan) |
+| `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
@@ -650,6 +650,9 @@ parked copy), `differs` (a different live copy exists: compare, keep one), or
 `parked-only` (move it back, then `disable` it so the state records it).
 
 ### Fixing
+
+`install-shims` (and so `./install.sh`) runs the same check silently after
+writing the shims and asks only about these fixable problems, each shown first.
 
 On a terminal (stdin and stdout both a TTY, no `--json`) doctor then asks
 `(y/n)` for each problem it can fix without a judgment call, and runs each yes

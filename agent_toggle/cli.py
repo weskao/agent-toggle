@@ -495,6 +495,11 @@ COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enabl
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
+def _interactive(out: Result) -> bool:
+    """A y/n prompt can be answered: a terminal on both ends and no --json."""
+    return not out.json_mode and sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def _command_index(argv: list[str]) -> int:
     """Index of the command word: the first argument after any leading global flags."""
     i = 0
@@ -703,11 +708,13 @@ def _main(argv: list[str], color: str) -> int:
             cmd_migrate(out)
         elif cmd == "install-shims":
             cmd_install_shims(args, out)
+            if not args.dry_run and _interactive(out):
+                doctor.offer_quietly(out, args.harness)
         elif cmd == "profile":
             profiles.cmd_profile(args, out)
         elif cmd == "doctor":
             fixes = doctor.cmd_doctor(args.harness, out)
-            if fixes and not out.json_mode and sys.stdin.isatty() and sys.stdout.isatty():
+            if fixes and _interactive(out):
                 doctor.offer_fixes(fixes, out)
         elif cmd == "config":
             config.cmd_config(args, out)

@@ -507,6 +507,14 @@ def cmd_doctor(harness: str | None, out: Result) -> list[Fix]:
     return fixes
 
 
+def offer_quietly(out: Result, harness: str | None = None) -> None:
+    """The check without its report; only the problems it can fix, each asked y/n
+    (install-shims on a terminal). Unfixable ones are left to `doctor`."""
+    if fixes := cmd_doctor(harness, Result("doctor", json_mode=True)):
+        out.say(f"\ndoctor found {len(fixes)} problem(s) it can fix:")
+        offer_fixes(fixes, out, show_row=True)
+
+
 def ask_yes(question: str) -> bool:
     """y/n on the terminal; EOF is no."""
     try:
@@ -515,11 +523,15 @@ def ask_yes(question: str) -> bool:
         return False
 
 
-def offer_fixes(fixes: list[Fix], out: Result, ask: Callable[[str], bool] = ask_yes) -> None:
+def offer_fixes(fixes: list[Fix], out: Result, ask: Callable[[str], bool] = ask_yes,
+                show_row: bool = False) -> None:
     """Ask y/n per fix and run each yes. A fixed row turns `fixed` (no longer counts
-    for the exit code); a failed one adds an `error` row."""
+    for the exit code); a failed one adds an `error` row. `show_row` prints the
+    problem first, for callers that did not show the report."""
     done = 0
     for f in fixes:
+        if show_row:
+            out.say(f"  {TAG[f.row['status']]} {f.row['detail']}", style=STYLE[f.row["status"]])
         if not ask(f.question):
             continue
         try:
