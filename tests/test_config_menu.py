@@ -18,7 +18,7 @@ from base import SandboxCase
 from test_cli_surface import CliCase
 from test_config import FakeKit, FakeStore
 
-from agent_toggle import config, doctor, i18n, settings, undo
+from agent_toggle import __version__, config, doctor, i18n, settings, undo
 from agent_toggle.output import Result
 from agent_toggle.ui import config_menu as cm
 
@@ -104,7 +104,7 @@ class CursesMenuTest(MenuCase):
         win, rc = self.menu(["q"])
         self.assertEqual(rc, 0)
         text = win.text()
-        for want in ("agent-toggle config", "v0.2.0", "saves as you go", "General", "Harnesses",
+        for want in ("agent-toggle config", f"v{__version__}", "saves as you go", "General", "Harnesses",
                      "Picker", "Notifications", "Tools", "Check for updates", "Sync CI secrets",
                      "› Check for updates", "╭", "╰", "↑↓ move", "R reset all", "q quit",
                      "found ~/.claude", "not on this machine"):
