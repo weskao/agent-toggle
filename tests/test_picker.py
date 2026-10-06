@@ -420,6 +420,10 @@ class LayoutTest(ScreenCase):
         self.assertIn("5 resources · ~6.3k tok live", win.frames[0][0])
         self.assertIn("1 staged (-1.2k tok)", win.screen[0])
 
+    def test_status_line_says_ctrl_c_leaves_and_auto_saves(self) -> None:
+        _, win = self.run_keys(["\x1b"])
+        self.assertIn("Ctrl+C to leave · auto-save", win.screen[-2])
+
     def test_detail_pane_shows_at_wide_widths_only(self) -> None:
         down = picker.curses.KEY_DOWN
         _, win = self.run_keys([down, "\x1b"], size=(24, 120))
@@ -510,6 +514,7 @@ class LayoutTest(ScreenCase):
         _, win = self.run_keys(["\x1b"], size=(24, 100))
         self.assertIn("技能", win.text())
         self.assertIn("全部", win.screen[1])
+        self.assertIn("Ctrl+C 離開 · 自動儲存", win.screen[-2])
 
 
 class SettingsTest(ScreenCase):

@@ -27,6 +27,7 @@ CATALOG: dict[str, str] = {
     "picker.empty": "沒有符合的項目 -- Ctrl-U 清除篩選，Left/Right 換 harness，t 換類型",
     "picker.status.shown": "顯示 %s / %s",
     "picker.status.dry_run": "試跑：Enter 只顯示計畫",
+    "picker.status.leave": "Ctrl+C 離開 · 自動儲存",
     "picker.badge.shared": "+共用",
     # detail pane
     "picker.state.live": "啟用",

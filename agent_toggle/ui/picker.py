@@ -295,6 +295,7 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
             status += f"{_sep(g)}{v.cur + 1}/{len(shown)}"
         if dry_run:
             status += _sep(g) + t("picker.status.dry_run", "dry run: Enter only shows the plan")
+        status += _sep(g) + t("picker.status.leave", "Ctrl+C to leave · auto-save")
         put(h - 2, [(" " + status, "muted")])
     put(h - 1, [(" ", "text"), *theme.key_chips(chips(v, g), w - 2, g)])
     win.refresh()
