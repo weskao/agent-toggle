@@ -130,7 +130,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `config` | settings menu (curses, else a numbered list); `config --json` lists every setting; see [Settings & config menu](#settings--config-menu) |
 | `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
-| `doctor` | read-only check of each harness layout and of `state.json` against disk; exit `1` only on an `error` row |
+| `doctor` | check each harness layout and `state.json` against disk; exit `1` only on an `error` row; on a terminal, asks y/n per fix it can run itself |
 | `migrate` | import an older `~/.claude-toggle/` state |
 
 Every command also works with a leading `--` (`agent-toggle --status`, `--help`, `--config`); this README uses the plain form.
@@ -317,7 +317,7 @@ is saved the moment you make it. On a numbered list, end of input, `q` or an emp
 | Harnesses | one On/Off per harness, with `found ~/.x` or `not on this machine` |
 | Picker | default sort, harness filter, type filter |
 | Notifications | Telegram bot token (masked), Telegram chat ID |
-| Tools | Health check (`doctor`), Install shims, Undo last change (asks y/n), Send test message, Sync CI secrets (asks y/n); their output shows in an overlay |
+| Tools | Health check (`doctor`; then asks y/n per fix it can run), Install shims, Undo last change (asks y/n), Send test message, Sync CI secrets (asks y/n); their output shows in an overlay |
 
 Keys: `↑` `↓` move (wraps, skips headings), `←` `→` cycle a value, `Enter` / `Space` change or run
 the row, `r` reset the row, `R` reset everything (asks y/n), `q` / `Esc` / `Ctrl-C` quit. In an
@@ -624,7 +624,7 @@ agent-toggle enable --all --project .
 agent-toggle doctor [--harness H] [--json]
 ```
 
-Read-only: no lock, no state write-back, no `claude` CLI call. For each
+The check is read-only: no lock, no state write-back, no `claude` CLI call. For each
 installed harness it compares the live layout with the table row (expected
 dirs and config keys), then cross-checks `state.json` against disk (parked
 item present, origin dir present, backup present, project dir present, entry
@@ -648,6 +648,28 @@ A harness item parked with no state entry also carries `orphan`, and its fix
 follows from it: `identical` (the live copy has the same content: delete the
 parked copy), `differs` (a different live copy exists: compare, keep one), or
 `parked-only` (move it back, then `disable` it so the state records it).
+
+### Fixing
+
+On a terminal (stdin and stdout both a TTY, no `--json`) doctor then asks
+`(y/n)` for each problem it can fix without a judgment call, and runs each yes
+under the run lock; anything else keeps its `fix:` hint for you. A fixed row's
+status becomes `fixed` and no longer counts toward the exit code; a failed fix
+adds an `error` row. Piped, `--json`, or run by an agent through a shim, doctor
+stays read-only.
+
+| problem | fix it offers |
+|---|---|
+| loose mode on the state dir, `state.json` or a backup | `chmod 700` / `chmod 600` |
+| backup with no state entry, server configured again in its harness | delete the backup (not offered while the server is missing, nor for project backups) |
+| flag re-enabled outside the tool | `enable` the item, which clears the stale entry |
+| origin dir gone | recreate it, then `enable` the item |
+| op a killed run left in flight (`pending: done` / `undone`) | settle it now, as the next change would |
+| orphan parked item, `identical` | delete the parked copy |
+| orphan parked item, `parked-only` | move it back (restores it) |
+
+Not offered: `differs` orphans, missing parked items or backups, a gone project
+dir, tamper refusals, `pending: stuck`, companion conflicts, unparseable configs.
 
 ## Assumed formats
 
