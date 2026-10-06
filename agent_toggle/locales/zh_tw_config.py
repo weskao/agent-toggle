@@ -75,6 +75,7 @@ CATALOG: dict[str, str] = {
     "config.save_failed": "無法儲存：%s",
     "config.saved": "已儲存",
     "config.saves": "變更即時儲存",
+    "config.status.leave": "Ctrl+C 離開 · 自動儲存",
     "config.send_test": "傳送測試訊息",
     "config.shims": "安裝 shim",
     "config.sync_ci": "同步 CI 密鑰",

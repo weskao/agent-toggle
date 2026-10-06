@@ -338,6 +338,7 @@ def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
             say([(f"  {n:>2}. {label}{' ' * (lw - cell_width(label))}  ", "text"),
                  *value_segments(ctx, row, g)])
         say([])
+        say([(t("config.status.leave", "Ctrl+C to leave · auto-save"), "muted")])
         stdout.write(theme.encodable(t("config.prompt", "Pick a setting to change (1-%s, q to quit): ",
                                   len(ITEMS)), stdout))
         stdout.flush()
@@ -422,7 +423,10 @@ def screen(ctx: Ctx, cur: int, top: int, h: int, w: int, g: theme.Glyphs,
     more = len(ROWS) - top - body
     lines.append(_rule(g.bl, g.br, w, g, t("config.more", "%s more", more) if more > 0 else ""))
     text, role = msg if msg[0] else (ROWS[cur].help(), "muted")
-    lines.append(theme._fit([(" " + text, role)], w))
+    sep = " · " if g.unicode else " | "
+    lines.append(theme._fit(
+        [(" " + text, role),
+         (sep + t("config.status.leave", "Ctrl+C to leave · auto-save"), "muted")], w))
     arrows = ("↑↓", "←→/Space", "⏎") if g.unicode else ("Up/Down", "Left/Right/Space", "Enter")
     lines.append(theme.key_chips([
         (arrows[0], t("config.key_move", "move")), (arrows[1], t("config.key_change", "change")),

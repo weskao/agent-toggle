@@ -107,7 +107,7 @@ class CursesMenuTest(MenuCase):
         for want in ("agent-toggle config", f"v{__version__}", "saves as you go", "General", "Harnesses",
                      "Picker", "Notifications", "Tools", "Check for updates", "Sync CI secrets",
                      "› Check for updates", "╭", "╰", "↑↓ move", "R reset all", "q quit",
-                     "found ~/.claude", "not on this machine"):
+                     "found ~/.claude", "not on this machine", "Ctrl+C to leave · auto-save"):
             self.assertIn(want, text)
         # the help line shows the selected row's help
         self.assertIn("look for a newer agent-toggle", text)
@@ -171,7 +171,8 @@ class CursesMenuTest(MenuCase):
         self.assertEqual(i18n.LANGUAGE, "zh-TW")
         self.assertEqual(self.file()["language"], "zh-TW")
         last = win.text()
-        for want in ("繁體中文", "一般", "檢查更新", "變更即時儲存", "離開"):
+        for want in ("繁體中文", "一般", "檢查更新", "變更即時儲存", "離開",
+                     "Ctrl+C 離開 · 自動儲存"):
             self.assertIn(want, last)
         self.assertNotIn("Check for updates", last)
 
@@ -314,6 +315,7 @@ class NumberedTest(MenuCase):
         rc, out = self.run_numbered(f"1\n{number('Color')}\n")
         self.assertEqual(rc, 0)
         self.assertIn(f"Pick a setting to change (1-{len(cm.ITEMS)}, q to quit): ", out)
+        self.assertIn("Ctrl+C to leave · auto-save", out)
         self.assertIn(" 1. Check for updates", out)
         self.assertIs(settings.get("update_check"), False)
         self.assertEqual(settings.get("color"), "always")
