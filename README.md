@@ -309,8 +309,9 @@ agent-toggle config           # or: agent-toggle --config
 agent-toggle config --json    # every setting with its value and source, plus the package version; the token is masked
 ```
 
-`config` opens the settings menu: curses on a terminal, a numbered list otherwise. Each change
-is saved the moment you make it. On a numbered list, end of input, `q` or an empty line exits `0`
+`config` opens the settings menu: curses on a terminal, a numbered list otherwise. The title
+shows the package version. Each change is saved the moment you make it. On a numbered list,
+end of input, `q` or an empty line exits `0`
 (safe in CI; note it reads piped digits, so an open stdin pipe waits).
 
 | group | rows |

@@ -326,7 +326,7 @@ def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
     while True:
         ctx.refresh()
         lw = label_width(40)
-        say([(t("config.title", "agent-toggle config"), "title"), (f"  v{__version__}", "muted")])
+        say([(f"{t('config.title', 'agent-toggle config')}  v{__version__}", "title")])
         n = 0
         for row in ROWS:
             if row.kind == "heading":
@@ -338,8 +338,8 @@ def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
             say([(f"  {n:>2}. {label}{' ' * (lw - cell_width(label))}  ", "text"),
                  *value_segments(ctx, row, g)])
         say([])
-        say([(t("config.status.leave", "Ctrl+C to leave · auto-save"), "muted")])
-        stdout.write(theme.encodable(t("config.prompt", "Pick a setting to change (1-%s, q to quit): ",
+        say([(t("config.status.leave", "q/Ctrl+C to leave · auto-save"), "muted")])
+        stdout.write(theme.encodable(t("config.prompt", "Pick a setting to change (1-%s): ",
                                   len(ITEMS)), stdout))
         stdout.flush()
         choice = _read(stdin)
@@ -412,8 +412,8 @@ def screen(ctx: Ctx, cur: int, top: int, h: int, w: int, g: theme.Glyphs,
            msg: Segment = ("", "text"), editing: str | None = None) -> list[list[Segment]]:
     """The whole menu as one segment list per screen line (pure: no curses)."""
     body = max(1, h - 5)
-    lines = [theme.title_bar(t("config.title", "agent-toggle config"),
-                             f"{t('config.saves', 'saves as you go')}  v{__version__}", w, g),
+    lines = [theme.title_bar(f"{t('config.title', 'agent-toggle config')}  v{__version__}",
+                             t("config.saves", "saves as you go"), w, g),
              _rule(g.tl, g.tr, w, g, t("config.more", "%s more", top) if top else "")]
     lw = label_width(max(8, (w - 2) // 2 - 4))
     for i in range(top, min(len(ROWS), top + body)):
@@ -423,15 +423,13 @@ def screen(ctx: Ctx, cur: int, top: int, h: int, w: int, g: theme.Glyphs,
     more = len(ROWS) - top - body
     lines.append(_rule(g.bl, g.br, w, g, t("config.more", "%s more", more) if more > 0 else ""))
     text, role = msg if msg[0] else (ROWS[cur].help(), "muted")
-    sep = " · " if g.unicode else " | "
-    lines.append(theme._fit(
-        [(" " + text, role),
-         (sep + t("config.status.leave", "Ctrl+C to leave · auto-save"), "muted")], w))
+    lines.append(theme._fit([(" " + text, role)], w))
     arrows = ("↑↓", "←→/Space", "⏎") if g.unicode else ("Up/Down", "Left/Right/Space", "Enter")
     lines.append(theme.key_chips([
         (arrows[0], t("config.key_move", "move")), (arrows[1], t("config.key_change", "change")),
         (arrows[2], t("config.key_run", "change/run")), ("r", t("config.key_reset", "reset")),
-        ("R", t("config.key_reset_all", "reset all")), ("q", t("config.key_quit", "quit"))], w - 1, g))
+        ("R", t("config.key_reset_all", "reset all")),
+        ("q/Ctrl+C", t("config.key_quit", "to leave · auto-save"))], w - 1, g))
     return lines
 
 

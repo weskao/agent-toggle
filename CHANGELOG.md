@@ -4,6 +4,7 @@
 
 - **ui:** Show a skill, agent, command, or rule's frontmatter description in the picker detail pane
 - **config:** `config --json` includes the package version
+- **config:** The settings menu title shows the package version (`agent-toggle config  vX.Y.Z`)
 
 ## [0.5.2] - 2026-10-06
 
