@@ -303,6 +303,15 @@ class SpellingTest(CliCase):
         self.assertIn(__version__, self.run_cli("version")[1])
         self.assertIn("USAGE", self.run_cli("help")[1])
 
+    def test_version_not_behind_latest_changelog_entry(self) -> None:
+        # v0.3.0-v0.5.0 shipped with __version__ still at 0.2.0; ahead is fine (bumped, unreleased)
+        changelog = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+        top = next(line for line in changelog.read_text(encoding="utf-8").splitlines()
+                   if line.startswith("## ["))
+        released = top[4:top.index("]")]
+        as_tuple = lambda v: tuple(int(p) for p in v.split("."))  # noqa: E731
+        self.assertGreaterEqual(as_tuple(__version__), as_tuple(released), top)
+
     def test_per_command_help_in_both_spellings(self) -> None:
         # help X == --help X == X --help, and each with --X for X: one output, exit 0
         for cmd in cli.COMMANDS:
