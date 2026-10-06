@@ -1,3 +1,12 @@
+## [0.5.1] - 2026-10-06
+
+### 🧪 Testing
+
+- **release:** Fail when __version__ lags changelog
+
+### ⚙️ Miscellaneous Tasks
+
+- **release:** Bump __version__ to 0.5.1
 ## [0.5.0] - 2026-10-06
 
 ### 🚀 Features
