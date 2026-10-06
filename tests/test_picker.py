@@ -231,8 +231,11 @@ class ScreenCase(SandboxCase):
 
 
 class KeysTest(ScreenCase):
-    def test_space_and_tab_toggle_and_advance(self) -> None:
-        out, win = self.run_keys([" ", "\t", "\n"])
+    def test_space_stays_on_the_row_and_tab_advances(self) -> None:
+        out, _ = self.run_keys([" ", " ", " ", "\n"])             # 3 presses, all on alpha
+        self.assertEqual(self.names(out), [("alpha", False)])
+        self.rows = demo_rows()
+        out, win = self.run_keys(["\t", " ", "\n"])               # Tab: alpha, then beta
         self.assertEqual(self.names(out), [("alpha", False), ("beta", True)])
         # the staged rows carry a - / + marker and their glyph flips
         line = win.screen[win.find("alpha")]
@@ -240,7 +243,7 @@ class KeysTest(ScreenCase):
         self.assertIn("● + beta", win.screen[win.find("beta")])
 
     def test_toggling_twice_unstages(self) -> None:
-        out, _ = self.run_keys([" ", "\x10", " ", "\n"])          # Ctrl-P back up
+        out, _ = self.run_keys(["\t", "\x10", " ", "\n"])         # Tab down, Ctrl-P back up
         self.assertEqual(out, [])
 
     def test_enter_applies_and_esc_or_ctrl_c_cancel(self) -> None:

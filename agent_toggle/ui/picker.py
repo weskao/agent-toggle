@@ -304,7 +304,8 @@ def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
     ud, lr = ("↑↓", "←→") if g.unicode else ("Up/Down", "Left/Right")
     return [
         (f"{ud} PgUp/Dn Home/End", t("picker.help.move", "move (Ctrl-P / Ctrl-N too)")),
-        ("Space  Tab", t("picker.help.toggle", "toggle the row (live <-> parked), next row")),
+        ("Space", t("picker.help.toggle", "toggle the row (live <-> parked), stay on it")),
+        ("Tab", t("picker.help.toggle_next", "toggle the row, then move to the next")),
         ("Enter", t("picker.help.apply", "apply staged changes (--dry-run: plan only)")),
         ("Esc  Ctrl-C", t("picker.help.cancel", "cancel; nothing is changed")),
         ("/", t("picker.help.filter", "search name / harness / path (fuzzy); any other letter starts one too")),
@@ -428,7 +429,8 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
         if key == "\t" or key == " " and not v.filtering:
             if shown:                                     # an empty list: Space is a no-op
                 shown[v.cur].staged = not shown[v.cur].staged
-            v.cur += 1
+            if key == "\t":                               # Space stays on the row, Tab moves on
+                v.cur += 1
         elif key in (curses.KEY_UP, "\x10"):
             v.cur -= 1
         elif key in (curses.KEY_DOWN, "\x0e"):

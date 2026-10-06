@@ -253,7 +253,8 @@ What is on screen:
 
 | key | action |
 |---|---|
-| `Space` / `Tab` | toggle the highlighted row (live / parked) and advance (while filtering, `Space` types a space) |
+| `Space` | toggle the highlighted row (live / parked) and stay on it (while filtering, `Space` types a space) |
+| `Tab` | toggle the highlighted row and advance to the next |
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
