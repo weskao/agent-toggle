@@ -1,3 +1,8 @@
+## [0.5.2] - 2026-10-06
+
+### 🐛 Bug Fixes
+
+- **ui:** Keep cursor on the row after Space
 ## [0.5.1] - 2026-10-06
 
 ### 🧪 Testing
