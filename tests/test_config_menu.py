@@ -257,6 +257,16 @@ class CursesMenuTest(MenuCase):
             self.menu([*to("Health"), curses.KEY_RIGHT, "q"])
         m.assert_not_called()
 
+    def test_doctor_fixes_are_asked_after_its_pager(self) -> None:
+        ran = []
+        fix = doctor.Fix({"status": "warn"}, "Fix the thing?", ran.append)
+        with mock.patch.object(doctor, "cmd_doctor", return_value=[fix]):
+            self.menu([*to("Health"), "\n", "x", "n", "q"])
+            self.assertEqual(ran, [])
+            win, _ = self.menu([*to("Health"), "\n", "x", "y", "x", "q"])
+        self.assertEqual(len(ran), 1)
+        self.assertIn("fixed 1 of 1", win.text(-2))
+
     def test_undo_and_sync_ask_first(self) -> None:
         with mock.patch.object(undo, "cmd_undo") as m:
             self.menu([*to("Undo"), "\n", "n", "q"])
@@ -361,6 +371,17 @@ class NumberedTest(MenuCase):
                                side_effect=lambda h, out: out.say("all good")):
             _, out = self.run_numbered(f"{number('Health')}\n")
         self.assertIn("all good", out)
+
+    def test_doctor_fixes_ask_y_n(self) -> None:
+        ran = []
+        fix = doctor.Fix({"status": "warn"}, "Fix the thing?", ran.append)
+        with mock.patch.object(doctor, "cmd_doctor", return_value=[fix]):
+            _, out = self.run_numbered(f"{number('Health')}\nn\n")
+            self.assertEqual(ran, [])
+            _, out = self.run_numbered(f"{number('Health')}\ny\n")
+        self.assertEqual(len(ran), 1)
+        self.assertIn("Fix the thing? (y/n)", out)
+        self.assertIn("fixed 1 of 1", out)
 
 
 class CliConfigMenuTest(CliCase):
