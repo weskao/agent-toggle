@@ -1,3 +1,8 @@
+## [0.6.1] - 2026-10-08
+
+### 🐛 Bug Fixes
+
+- Improve Windows compatibility and path safety
 ## [0.6.0] - 2026-10-08
 
 ### 🚀 Features
