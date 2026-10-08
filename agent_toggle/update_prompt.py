@@ -87,8 +87,8 @@ def _lines(found: update_check.UpdateAvailable, selected: int, color: bool,
         label += " " * (width - theme.cell_width(name))
         lines.append("  " + theme.ansi("cursor" if on else "text", label, color)
                      + "  " + theme.ansi("muted", detail, color))
-    keys = (t("update.keys", "↑↓ select · ⏎ confirm · q skip") if g.unicode
-            else t("update.keys_ascii", "up/down select, enter confirm, q skip"))
+    keys = (t("update.keys", "↑↓ select · ⏎ confirm · q/Ctrl+C skip") if g.unicode
+            else t("update.keys_ascii", "up/down select, enter confirm, q/Ctrl+C skip"))
     lines += ["  " + t("update.notes", "Release notes: %s", RELEASE_NOTES % _clean(found.latest).removeprefix("v")),
               "  " + theme.ansi("muted", keys, color)]
     return lines
@@ -137,7 +137,7 @@ def _posix_keys(fd: int) -> Iterator[str]:
 
 def _typed_keys(stream, out) -> Iterator[str]:
     """The numbered fallback: one typed line per answer ('' = the highlighted row)."""
-    out.write(t("update.choose", "Choose 1-3 (Enter = 1, q = skip): "))
+    out.write(t("update.choose", "Choose 1-3 (Enter = 1, q/Ctrl+C = skip): "))
     out.flush()
     line = stream.readline()
     if not line:

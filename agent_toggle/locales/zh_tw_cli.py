@@ -72,9 +72,9 @@ CATALOG: dict[str, str] = {
     "help.options": "選項",
     # update prompt
     "update.available": "agent-toggle %s 已推出（目前版本 %s）",
-    "update.keys": "↑↓ 選擇 · ⏎ 確認 · q 略過",
-    "update.keys_ascii": "上/下 選擇，Enter 確認，q 略過",
-    "update.choose": "請選擇 1-3（Enter = 1，q = 略過）：",
+    "update.keys": "↑↓ 選擇 · ⏎ 確認 · q/Ctrl+C 略過",
+    "update.keys_ascii": "上/下 選擇，Enter 確認，q/Ctrl+C 略過",
+    "update.choose": "請選擇 1-3（Enter = 1，q/Ctrl+C = 略過）：",
     "update.now": "立即更新",
     "update.skip": "略過",
     "update.skip_detail": "下次執行再問",
