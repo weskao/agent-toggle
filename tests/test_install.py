@@ -87,7 +87,7 @@ class InstallShimsCase(SandboxCase):
         self.assertTrue(shim(oc).is_file())
         shutil.rmtree(oc / "skills")
         (oc / "opencode.json").write_text(
-            json.dumps({"skills": ["/no/such/parent/skills"]}), encoding="utf-8")
+            json.dumps({"skills": [str(self.tmp / "no" / "such" / "parent" / "skills")]}), encoding="utf-8")
         self.assertEqual(self.run_cli("--harness", "opencode")[0], 0)
         self.assertTrue(shim(oc).is_file())
 

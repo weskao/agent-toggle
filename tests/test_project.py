@@ -602,7 +602,7 @@ class ProjectMcpTest(ProjectCase):
     def test_an_old_whole_file_backup_still_restores_exactly(self) -> None:
         from agent_toggle.backends import mcp_json
         original = json.dumps({"mcpServers": self.SERVERS}, indent=4) + "\n"
-        self.mcpfile.write_text(original, encoding="utf-8")
+        self.mcpfile.write_bytes(original.encode())      # bytes: write_text would make CRLF on Windows
         self.p("disable", "mcp", "example-mcp")
         bp = Path(self.state()[self.mkey]["backup"])
         # what the pre-G15 disable wrote: the file re-dumped, and both whole texts
@@ -611,9 +611,9 @@ class ProjectMcpTest(ProjectCase):
         old = json.dumps({"project_json": {"entry": self.SERVERS["example-mcp"],
                                            "before": original, "after": old_after}})
         bp.write_text(old, encoding="utf-8")
-        self.mcpfile.write_text(old_after, encoding="utf-8")
+        self.mcpfile.write_bytes(old_after.encode())
         self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
-        self.assertEqual(self.mcpfile.read_text(encoding="utf-8"), original)
+        self.assertEqual(self.mcpfile.read_bytes().decode(), original)
         self.assertEqual(bp.read_text(encoding="utf-8"), old)      # never rewritten
         # file changed meanwhile: the old merge path, as before
         self.p("disable", "mcp", "example-mcp")

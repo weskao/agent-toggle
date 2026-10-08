@@ -363,7 +363,7 @@ class FixTest(DoctorCase):
         self.write("skills-disabled/solo/SKILL.md")
         before = snapshot(self.tmp)
         asked, _ = self.fixes(answer=False)
-        self.assertEqual(len(asked), 2, asked)
+        self.assertEqual(len(asked), 1 if os.name == "nt" else 2, asked)   # no loose-mode fix on Windows
         self.assertEqual(snapshot(self.tmp), before)
 
     @unittest.skipIf(os.name == "nt", "no POSIX modes")

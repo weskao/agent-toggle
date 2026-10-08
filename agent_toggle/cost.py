@@ -314,8 +314,9 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                 n = full_plugin_id(n, listed) or n    # ambiguous: keep it as parked
         else:
             parked = e.get("parked_at")
-            est = lambda t=t, n=n, p=parked: file_estimate(
-                t, n, Path(p) if isinstance(p, str) and p else None)
+
+            def est(t=t, n=n, p=parked):
+                return file_estimate(t, n, Path(p) if isinstance(p, str) and p else None)
         shared = e.get("shared_with")
         add(h, t, n, False, est,
             [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())

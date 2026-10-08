@@ -10,8 +10,10 @@ import contextlib
 import errno
 import json
 import os
+import shlex
 import shutil
 import stat
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -131,6 +133,7 @@ class FlagCrashTest(CrashCase):
         self.assertEqual(self.file.read_bytes(), self.before)
         self.assertEqual(self.raw_state(), {"version": 3, "disabled": {}})
 
+    @unittest.skipIf(os.name == "nt", "lock liveness is POSIX-only (fs._holder_alive)")
     def test_status_does_not_call_a_live_runs_op_interrupted(self) -> None:
         with self.killed("agent_toggle.mechanisms.set_flag", side_effect=self.write_then_die):
             self.run_cli("disable", *self.ARGS)
@@ -252,7 +255,7 @@ class MoveCrashTest(CrashCase):
         rc, env = self.run_json("doctor")
         stuck = [r for r in env["results"] if r.get("pending") == "stuck"]
         self.assertEqual(len(stuck), 1, env)
-        self.assertIn(f"rm -rf {self.pskill.resolve()}", stuck[0]["detail"])
+        self.assertIn(f"rm -rf {shlex.quote(str(self.pskill.resolve()))}", stuck[0]["detail"])
         self.p("disable", "agent", "demo-agent")                 # an unrelated change
         self.assertIn(self.key, self.pending())                  # never resolved by deleting
         self.assertEqual(file_bytes(self.pskill), self.files)

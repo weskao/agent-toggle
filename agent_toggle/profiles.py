@@ -39,6 +39,10 @@ def _stored_path(name: str) -> Path:
     validate_name(name)
     if ":" in name or name.split(".")[0].upper() in WIN_RESERVED or name.endswith("."):
         die(f"invalid profile name {name!r}", 2)
+    try:
+        name.encode("utf-8")                    # a lone surrogate is a legal NTFS file name
+    except UnicodeEncodeError:
+        die(f"invalid profile name {name!r}", 2)
     return fs.profiles_dir() / f"{name}.json"
 
 

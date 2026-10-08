@@ -89,7 +89,7 @@ class ImportTest(unittest.TestCase):
 
 class GlyphTest(unittest.TestCase):
     def test_unicode_when_the_stream_can_encode_it(self):
-        self.assertIs(theme.get_glyphs(Enc("utf-8"), {"TERM": "xterm"}), UNICODE)
+        self.assertIs(theme.get_glyphs(Enc("utf-8"), {"TERM": "xterm", "WT_SESSION": "1"}), UNICODE)
 
     def test_ascii_when_the_encoding_cannot(self):
         self.assertIs(theme.get_glyphs(Enc("cp1252"), {"TERM": "xterm"}), ASCII)

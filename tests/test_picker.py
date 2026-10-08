@@ -529,7 +529,8 @@ class LayoutTest(ScreenCase):
         self.assertTrue(win.attrs[y, 2] & C.A_BOLD)                  # live glyph: bold
         self.assertTrue(win.attrs[y, 6] & C.A_REVERSE)               # cursor bar
         beta = win.find("beta")
-        self.assertTrue(win.attrs[beta, 2] & C.A_DIM)                # parked glyph: dim
+        if C.A_DIM:                                                  # PDCurses defines it as 0
+            self.assertTrue(win.attrs[beta, 2] & C.A_DIM)            # parked glyph: dim
 
     def test_color_draw_uses_pairs_and_no_colors_falls_back(self) -> None:
         C = picker.curses

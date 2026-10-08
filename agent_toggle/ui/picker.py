@@ -20,8 +20,8 @@ import sys
 from pathlib import Path
 
 from .. import __version__
-from ..spinner import spinner
 from ..i18n import t
+from ..spinner import spinner
 from . import theme
 from .model import (
     SORTS,
@@ -34,9 +34,9 @@ from .model import (
     profile_command,
     profile_listing,
     short_path,
-    type_label,
     strict,
     subsequence,
+    type_label,
     visible,
 )
 

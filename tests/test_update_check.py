@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -233,7 +234,8 @@ class SecurityTest(UpdateCheckCase):
         self.check()
         self.assertFalse(self.cache.is_symlink())
         self.assertEqual(target.read_text(encoding="utf-8"), "keep")
-        self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":                      # Windows has no POSIX modes
+            self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
 
     def test_fetch_reads_at_most_a_megabyte(self):
         seen: list = []

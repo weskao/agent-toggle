@@ -124,8 +124,11 @@ def fmt_tokens(n: int) -> str:
 
 def short_path(path: str) -> str:
     """`path` with the home dir spelled `~`."""
-    home = str(fs.home())
-    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+    try:
+        rel = Path(path).relative_to(fs.home())
+    except ValueError:
+        return path
+    return "~/" + rel.as_posix() if rel.parts else "~"
 
 
 def _hay(r: Row) -> str:

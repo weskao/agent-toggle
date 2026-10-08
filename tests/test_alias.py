@@ -176,14 +176,15 @@ class OpencodeTableTest(AliasBase):
 
     def test_skill_dirs_default_and_additive_and_survive_bad_json(self) -> None:
         claude, agents = str(self.tmp / ".claude/skills"), str(self.tmp / ".agents/skills")
+        absdir = str(self.tmp / "abs" / "dir")
         default = ("skills", "skill", claude, agents)      # T1: OpenCode 2.0.22 scans all four
         self.assertEqual(self.dirs(), default)
         self.write_cfg("{ not json")
         self.assertEqual(self.dirs(), default)
         self.write_cfg(json.dumps({"skills": {"paths": [
-            "~/.codex/skills", "rel", "~other/x", 7, "~/.codex/skills", "/abs/dir"]}}))
+            "~/.codex/skills", "rel", "~other/x", 7, "~/.codex/skills", absdir]}}))
         # redirects first (install-shims target), own dirs stay scanned, relative skipped
-        self.assertEqual(self.dirs(), (str(self.tmp / ".codex/skills"), "/abs/dir", *default))
+        self.assertEqual(self.dirs(), (str(self.tmp / ".codex/skills"), absdir, *default))
         (self.oc / "opencode.json").write_bytes(b"\xff\xfe{")      # not UTF-8: still no crash
         self.assertEqual(self.dirs(), default)
         shutil.rmtree(self.oc)                  # not installed: no other harness's dirs
