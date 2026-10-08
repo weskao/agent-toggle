@@ -255,7 +255,7 @@ class UpdateCheckTest(CliCase):
         for part in ("✨ " + HINT, "› 1) Update now", "uv tool upgrade agent-toggle",
                      "ask again next run", "3) Skip until next version",
                      "Release notes: https://github.com/weskao/agent-toggle/releases/tag/v99.0.0",
-                     "↑↓ select · ⏎ confirm · q skip"):
+                     "↑↓ select · ⏎ confirm · q/Ctrl+C skip"):
             self.assertIn(part, text)
 
 
