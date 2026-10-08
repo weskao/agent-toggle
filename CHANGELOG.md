@@ -1,3 +1,25 @@
+## [0.6.0] - 2026-10-08
+
+### 🚀 Features
+
+- **config:** Include package version in --json
+- **ui:** Show ctrl+c leave on status line
+- **config:** Show ctrl+c leave on footer
+- **ui:** Show frontmatter description in pane
+- **config:** Unify leave hint and title version
+
+### 🐛 Bug Fixes
+
+- **update:** Show ctrl+c skip shortcut
+- **picker:** Separate leave hint from status
+
+### 🧪 Testing
+
+- **update:** Update panel shortcut expectation
+
+### ⚙️ Miscellaneous Tasks
+
+- **release:** Bump version to 0.6.0
 ## [Unreleased]
 
 ### 🚀 Features
