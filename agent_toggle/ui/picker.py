@@ -290,7 +290,7 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
     if end + theme.cell_width(right) + 2 <= w:
         put(2, [(right, "muted")], w - theme.cell_width(right))
 
-    body = max(0, h - BODY_TOP - 2)                  # 0 on a tiny window: status + keys only
+    body = max(0, h - BODY_TOP - 3)                  # 0 on a tiny window: footer only
     v.page = max(1, body)                            # draw owns the page size and scroll
     dw = min(48, w * 2 // 5) if w >= DETAIL_MIN else 0
     lw = w - dw - (1 if dw else 0)
@@ -328,15 +328,15 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
                 lw)
 
     if v.note:                                       # last profile result, until the next key
-        put(h - 2, [(" " + v.note, "error" if v.note.startswith("error") else "accent")])
+        put(h - 3, [(" " + v.note, "error" if v.note.startswith("error") else "accent")])
     else:
         status = t("picker.status.shown", "%s of %s shown", len(shown), len(v.rows))
         if shown:
             status += f"{_sep(g)}{v.cur + 1}/{len(shown)}"
         if dry_run:
             status += _sep(g) + t("picker.status.dry_run", "dry run: Enter only shows the plan")
-        status += _sep(g) + t("picker.status.leave", "Ctrl+C to leave · auto-save")
-        put(h - 2, [(" " + status, "muted")])
+        put(h - 3, [(" " + status, "muted")])
+    put(h - 2, [(" " + t("picker.status.leave", "Ctrl+C to leave · auto-save"), "muted")])
     put(h - 1, [(" ", "text"), *theme.key_chips(chips(v, g), w - 2, g)])
     win.refresh()
 

@@ -400,7 +400,7 @@ class KeysTest(ScreenCase):
         C = picker.curses
         _, win = self.run_keys([C.KEY_NPAGE, "\x1b"], rows=rows, size=(12, 80))
         cursor = next(line for line in win.screen if line.startswith("›"))
-        self.assertIn("s07", cursor)                         # 7-line body: one page down
+        self.assertIn("s06", cursor)                         # 6-line body: one page down
         self.assertNotIn("s00", win.text())
         out, win = self.run_keys([C.KEY_END, " ", "\n"], rows=rows, size=(12, 80))
         self.assertEqual([r.name for r in out], ["last"])
@@ -423,7 +423,7 @@ class KeysTest(ScreenCase):
     def test_a_tiny_window_keeps_status_and_keys(self) -> None:
         out, win = self.run_keys([" ", "\n"], size=(5, 40))
         self.assertEqual([r.name for r in out], ["alpha"])
-        self.assertIn("of 5 shown", win.frames[0][-2])
+        self.assertIn("of 5 shown", win.frames[0][-3])
         self.assertIn("Space toggle", win.frames[0][-1])
 
     def test_resize_redraws_at_the_new_size(self) -> None:
@@ -444,7 +444,8 @@ class LayoutTest(ScreenCase):
 
     def test_status_line_says_ctrl_c_leaves_and_auto_saves(self) -> None:
         _, win = self.run_keys(["\x1b"])
-        self.assertIn("Ctrl+C to leave · auto-save", win.screen[-2])
+        self.assertEqual(win.screen[-3].strip(), "5 of 5 shown · 1/5")
+        self.assertEqual(win.screen[-2].strip(), "Ctrl+C to leave · auto-save")
 
     def test_detail_pane_shows_the_description(self) -> None:
         text = "park a skill without deleting it"
@@ -504,7 +505,7 @@ class LayoutTest(ScreenCase):
     def test_empty_result_says_how_to_get_back(self) -> None:
         _, win = self.run_keys(["/", "q", "q", "\x1b"])
         self.assertIn("nothing matches", win.text())
-        self.assertIn("0 of 5 shown", win.screen[-2])
+        self.assertIn("0 of 5 shown", win.screen[-3])
         # with the detail pane, the message is cut at the list's edge, not drawn under the pane
         _, win = self.run_keys(["/", "q", "q", "\x1b"], size=(24, 120))
         line = win.screen[3]
@@ -519,7 +520,7 @@ class LayoutTest(ScreenCase):
 
     def test_dry_run_is_announced(self) -> None:
         _, win = self.run_keys(["\x1b"], dry_run=True)
-        self.assertIn("dry run", win.screen[-2])
+        self.assertIn("dry run", win.screen[-3])
 
     def test_mono_draw_uses_attributes_only(self) -> None:
         _, win = self.run_keys(["\x1b"], size=(24, 90))
@@ -709,7 +710,7 @@ class ProfileKeyTest(SandboxCase):
         everything = "\n".join(win.text(i) for i in range(len(win.frames)))
         self.assertIn("profile> work", everything)
         self.assertIn("1) work", everything)
-        self.assertIn("profile work: 1 staged", win.screen[-2])
+        self.assertIn("profile work: 1 staged", win.screen[-3])
         # Esc at the prompt stages nothing (even a full valid name) and the picker carries on
         self.rows[0].staged = True
         self.assertEqual(picker.loop(FakeWin(["p", *"work", "\x1b", "\n"], size=(12, 70)),
