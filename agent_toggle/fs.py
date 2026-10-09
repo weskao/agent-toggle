@@ -416,6 +416,9 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
     if target.exists() or target.is_symlink():
         raise FileExistsError(f"{target} already exists -- refusing to overwrite")
 
+    if src.is_symlink() and link_text(src, dest_dir) != os.readlink(src):
+        _copy_move(src, target)         # a rename keeps the relative text, now dangling
+        return target
     try:
         os.rename(src, target)                      # same filesystem: one atomic step
     except OSError as e:
@@ -423,6 +426,17 @@ def safe_move(src: Path, dest_dir: Path) -> Path:
             raise
         _copy_move(src, target)
     return target
+
+
+def link_text(src: Path, dest_dir: Path) -> str:
+    """The symlink `src`'s text as seen from `dest_dir`: a relative link keeps its target,
+    not its text, since parks sit at another depth (skills/ vs parked/user/<h>/skills/)."""
+    link = os.readlink(src)
+    if os.path.isabs(link):
+        return link
+    # the kernel resolves a relative link from the link's physical dir
+    target = os.path.normpath(os.path.join(os.path.realpath(src.parent), link))
+    return os.path.relpath(target, os.path.realpath(dest_dir))
 
 
 def move_leftovers(src: Path, target: Path) -> tuple[Path, Path]:
@@ -477,7 +491,7 @@ def _copy_move(src: Path, target: Path) -> None:
     remove_leftover(tmp)                 # a killed earlier attempt's half copy
     try:
         if src.is_symlink():
-            os.symlink(os.readlink(src), tmp)
+            os.symlink(link_text(src, target.parent), tmp)
         elif src.is_dir():
             shutil.copytree(src, tmp, symlinks=True)
         else:

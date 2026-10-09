@@ -38,6 +38,21 @@ class SafeMoveTest(SandboxCase):
         # existing parked copy untouched
         self.assertEqual((self.home / "skills-disabled/a/SKILL.md").read_text(encoding="utf-8"), "old")
 
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
+    def test_relative_link_keeps_its_target_across_depths(self) -> None:
+        real = self.write(".repos/r/demo/SKILL.md", "hi").parent
+        link = self.home / "skills" / "demo"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to("../.repos/r/demo")
+        parked = fs.safe_move(link, fs.user_park("claude", "skills"))
+        self.assertEqual(parked.resolve(), real.resolve())        # not dangling while parked
+        back = fs.safe_move(parked, self.home / "skills")
+        self.assertEqual(os.readlink(back), "../.repos/r/demo")   # the round trip is exact
+        absolute = self.home / "skills" / "abs"
+        absolute.symlink_to(real)
+        self.assertEqual(os.readlink(fs.safe_move(absolute, fs.user_park("claude", "skills"))),
+                         str(real))                               # absolute: untouched
+
 
 POSIX = os.name != "nt"
 

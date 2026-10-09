@@ -360,6 +360,31 @@ def migrate_parks(state: dict, table: dict | None = None) -> list[str]:
         lines.append(f"moved {len(moved)} item(s) {old} -> {v.parked}"
                      + (f", repointed {repointed} state entry(ies)" if repointed else "")
                      + ("" if _exists(old) else f", removed {old}"))
+    return lines + repair_parked_links(table)
+
+
+def repair_parked_links(table: dict) -> list[str]:
+    """0.7.0's migrate moved relative symlinks with their text unchanged, so they dangle
+    from the deeper park dir; re-aim each one whose text still resolves from its live dir."""
+    lines, seen = [], set()
+    for hn, h in table.items():
+        for type_, subs in h.dirs.items():
+            for sub in subs:
+                v = dir_view(table, hn, type_, h.home, sub)
+                if v.parked in seen or not v.parked.is_dir() or v.parked.is_symlink():
+                    continue
+                seen.add(v.parked)
+                for p in sorted(v.parked.iterdir()):
+                    if not p.is_symlink() or p.exists() or os.path.isabs(link := os.readlink(p)):
+                        continue
+                    target = os.path.normpath(os.path.join(os.path.realpath(v.live), link))
+                    if not os.path.exists(target):
+                        continue                 # dangles from its live dir too: not ours
+                    tmp = fs.move_leftovers(p, p)[0]
+                    fs.remove_leftover(tmp)
+                    os.symlink(os.path.relpath(target, os.path.realpath(v.parked)), tmp)
+                    fs.replace(tmp, p)           # atomic: the link is never missing
+                    lines.append(f"re-aimed dangling link {p} -> {target}")
     return lines
 
 

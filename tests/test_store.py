@@ -152,6 +152,20 @@ class MigrateParksTest(CliCase):
         self.assertEqual(store.load_state()["disabled"]["claude:skill:demo-skill"]["parked_at"],
                          str(self.user_parked("skills", "demo-skill")))
 
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
+    def test_a_link_left_dangling_by_0_7_0_is_re_aimed(self) -> None:
+        real = self.write(".repos/r/linked/SKILL.md", "hi").parent
+        link = self.user_parked("skills", "linked")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to("../.repos/r/linked")                       # 0.7.0 kept the text
+        gone = self.user_parked("skills", "gone")
+        gone.symlink_to("../.repos/nowhere")                        # dangles from skills/ too
+        self.run_json("migrate")
+        self.assertEqual(link.resolve(), real.resolve())
+        self.assertEqual(os.readlink(gone), "../.repos/nowhere")    # left alone
+        rc, env = self.run_json("migrate")
+        self.assertNotIn("re-aimed", env["results"][0]["detail"])   # idempotent
+
 
 class LogSchemaTest(SandboxCase):
     FIELDS = {"ts", "harness", "type", "name", "action", "result", "batch",
