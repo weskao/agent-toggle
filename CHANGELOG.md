@@ -1,3 +1,16 @@
+## [0.7.0] - 2026-10-09
+
+### 🚀 Features
+
+- **park:** [**breaking**] Park user-scope items centrally under ~/.agent-toggle/parked/user
+
+### 🐛 Bug Fixes
+
+- **install-shims:** Write only each harness's own park dirs to .gitignore
+
+### 📚 Documentation
+
+- **changelog:** Drop hand-written Unreleased block (git-cliff regenerates it at release)
 ## [0.6.2] - 2026-10-08
 
 ### ⚙️ Miscellaneous Tasks
