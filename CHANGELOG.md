@@ -1,3 +1,12 @@
+## [0.7.1] - 2026-10-09
+
+### 🐛 Bug Fixes
+
+- **park:** Keep relative symlinks pointing at their target when parked
+
+### 🧪 Testing
+
+- Normalize windows symlink assertions
 ## [0.7.0] - 2026-10-09
 
 ### 🚀 Features
