@@ -1,3 +1,13 @@
+## [0.7.3] - 2026-10-09
+
+### 🐛 Bug Fixes
+
+- **ui:** Cut long description in detail pane
+- **backends:** Find claude.exe off PATH on Windows
+
+### ⚙️ Miscellaneous Tasks
+
+- Smoke-test the built wheel on three OSes
 ## [0.7.2] - 2026-10-09
 
 ### ⚙️ Miscellaneous Tasks
