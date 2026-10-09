@@ -68,7 +68,8 @@ def check_entry(entry: dict, table: dict, key: str | None = None) -> str | None:
     a filesystem root, $HOME or an ancestor of it, and (given the state key)
     must hash to the key's project digest. Project dirs are `.<home name>`
     (`.claude`, `.opencode`); a project entry's origin must sit in one of them and
-    its parked_at under fs.parked_dir()/<sha8> (symlinked parents refused)."""
+    its parked_at under fs.parked_dir()/<sha8>; a user entry's parked_at under one of
+    its declared dirs' fs.user_park() (symlinked parents refused in both)."""
     if not isinstance(entry, dict):
         return "entry is not an object"
     hname = entry.get("harness")
@@ -114,12 +115,14 @@ def check_entry(entry: dict, table: dict, key: str | None = None) -> str | None:
     else:
         declared = [h.home / sub for subs in h.dirs.values() for sub in subs]
         origin_ok = bool(origin) and fs.contained(Path(origin), h.home, *declared)
-        # user scope parks only in the `*-disabled` siblings; parked_dir() is project-only
-        parks = [d.with_name(d.name + "-disabled") for d in declared]
+        # user scope parks only under parked_dir()/user/<harness>, never in a harness home
+        parks = [fs.user_park(h.name, sub) for subs in h.dirs.values() for sub in subs]
     if origin and not origin_ok:
         return f"origin outside the {h.name} {'project' if project else 'home'}: {origin}"
     if parked and not fs.contained(Path(parked), *parks):
-        return f"parked_at outside {' / '.join(map(str, parks))}: {parked}"
+        legacy = project is None and fs.contained(Path(parked), *map(fs.legacy_park, declared))
+        return (f"parked_at outside {' / '.join(map(str, parks))}: {parked}"
+                + ("; it is in a legacy park dir, run: agent-toggle migrate" if legacy else ""))
     ffile = fields.get("flag")
     if ffile and not ((fs.contained(Path(ffile), base) and fs.contained(Path(ffile), project))
                       if project is not None else
@@ -280,7 +283,7 @@ def migrate(state: dict) -> int:
                 fs.tighten(dst)
             new["backup"] = str(dst)
             new["backend"] = "claude-json"
-        elif entry.get("parked_at"):
+        elif entry.get("parked_at"):     # a legacy `<live>-disabled/` path; migrate_parks moves it
             new.setdefault("origin", entry["parked_at"]
                            .replace("-disabled/", "/", 1))
         new["mechanism"] = mechanism_of(new) or "flag"

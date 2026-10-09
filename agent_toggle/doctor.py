@@ -20,7 +20,7 @@ from . import fs, ops, store
 from .backends.flag_json import jsonc_loads
 from .backends.mcp_json import claude_mcp_config
 from .harnesses import Harness, harnesses
-from .mechanisms import _refusal, dir_view, settle
+from .mechanisms import _refusal, dir_view, legacy_parks, settle
 from .output import CliError, Result
 from .store import load_state
 
@@ -152,11 +152,12 @@ def _check_layout(out: Result, h: Harness, table: dict) -> None:
     start = len(out.rows)
     for type_, subs in h.dirs.items():
         views = [dir_view(table, h.name, type_, h.home, s) for s in subs]
+        # a legacy sibling park dir still counts: cmd_doctor reports it
         cands = [p for s, v in zip(subs, views) for c in (h.home / s, v.live)
-                 for p in (c, c.with_name(c.name + "-disabled"))]
+                 for p in (c, fs.legacy_park(c))] + [v.parked for v in views]
         if not any(p.exists() or p.is_symlink() for p in cands):
             _row(out, h.name, type_, None, "absent",
-                 f"no {' / '.join(subs)} dir (or *-disabled park dir) under {h.home}")
+                 f"no {' / '.join(subs)} dir under {h.home} (and nothing parked)")
         if others := sorted({x for v in views for x in v.sharers} - {h.name}):
             _row(out, h.name, type_, None, "note", f"dir shared with {', '.join(others)} "
                  f"(disable here also affects them)")
@@ -369,7 +370,7 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None,
             pass
     root = fs.parked_dir()
     for d in sorted(root.iterdir()) if root.is_dir() else ():
-        if d.name.startswith("."):
+        if d.name.startswith(".") or d == fs.parked_dir() / "user":   # user scope: see above
             continue
         if d.name not in digests:
             if d.is_dir() and not d.is_symlink() and not any(
@@ -473,6 +474,9 @@ def cmd_doctor(harness: str | None, out: Result) -> list[Fix]:
         _row(out, harness, None, None, "note", f"not installed ({table[harness].home} does not exist)")
     for h in installed:
         _check_layout(out, h, table)
+    for old, v, type_ in legacy_parks(table, harness):     # once per dir, shared or not
+        _row(out, v.owner, type_, None, "warn", f"{old} is a legacy park dir (items now park "
+             f"under {v.parked}); fix: run: agent-toggle migrate")
     try:
         state = load_state(write_back=False, check_entries=False)    # bad entries get rows
     except CliError as e:

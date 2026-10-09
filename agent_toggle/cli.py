@@ -23,9 +23,10 @@ Usage:
     agent_toggle.py list [<type>] [--project D] # what is currently disabled
     agent_toggle.py status                     # health check
     agent_toggle.py doctor [--harness H]       # drift + state check (y/n fixes on a TTY); exit 1 on problems
-    agent_toggle.py migrate                    # import old ~/.claude-toggle state
+    agent_toggle.py migrate                    # import old state, move legacy park dirs
     agent_toggle.py profile save|apply|diff|list [name|file] [--out F] [--dry-run]
-    agent_toggle.py install-shims [--dry-run]  # write the skill shim into each harness
+    agent_toggle.py install-shims [--dry-run] [--gitignore | --no-gitignore]
+                                               # skill shim per harness; stale .gitignore lines
     agent_toggle.py config [--json]            # settings menu (curses, else numbered list)
     agent_toggle.py config test|sync-ci        # Telegram test message / GitHub CI secrets
     agent_toggle.py help [command]             # styled help (also --help, <command> --help)
@@ -63,9 +64,15 @@ from . import (
 )
 from . import help as helptext
 from .backends.plugin_cli import claude_bin
-from .fs import gitignored
 from .harnesses import TYPES, harness_of, harnesses, project_view
-from .mechanisms import dir_view, settle, sync_marker_note, validate_name
+from .mechanisms import (
+    dir_view,
+    legacy_parks,
+    migrate_parks,
+    settle,
+    sync_marker_note,
+    validate_name,
+)
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
 from .ui import theme as ui_theme
@@ -157,10 +164,16 @@ def cmd_status(state: dict, out: Result, only: str | None = None,
         out.say(f"legacy  {legacy_state_dir} present -- "
                 + ("already imported; safe to delete once verified" if done
                    else "run `migrate` to import it"))
+    table = harnesses()
+    old_parks = [str(old) for old, _, _ in legacy_parks(table, only)]
+    for old in old_parks:
+        out.say(f"WARNING {old} is a legacy park dir -- run: agent-toggle migrate", warn=True)
     out.row(None, None, None, "status", "ok", "", show=False,
             state_file=str(fs.state_file()), log_file=str(fs.log_file()),
-            disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy)
-    table = harnesses()
+            disabled=len(state["disabled"]), claude_cli=claude, legacy=legacy,
+            legacy_parks=old_parks)
+    # every user park dir sits under parked_dir(): one check, not one per dir
+    ign = fs.park_unignored() is None
     for hname, h in table.items():
         if (only and hname != only) or hname in hidden:
             continue
@@ -185,7 +198,6 @@ def cmd_status(state: dict, out: Result, only: str | None = None,
             items: list[Path] = []
             untracked: list[Path] = []
             twins: list[str] = []
-            ign = True
             shared: set[str] = set()
             for sub in h.dirs[t]:
                 view = dir_view(table, hname, t, home, sub)
@@ -204,8 +216,6 @@ def cmd_status(state: dict, out: Result, only: str | None = None,
                     found = [p for p in parked.rglob("*") if p.is_file()]
                 found = [p for p in found if not p.name.startswith(".")]   # .DS_Store, as doctor
                 items += found
-                ign = ign and gitignored(
-                    parked, home if view.owner == hname else table[view.owner].home)
                 u, tw = parked_drift(found, parked, home / sub, tracked)
                 untracked += u
                 twins += tw
@@ -345,15 +355,21 @@ def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
 
 
 def cmd_migrate(out: Result) -> None:
+    """Import ~/.claude-toggle state, then move legacy `<live>-disabled` park dirs into
+    the central park dir (a killed run is repaired by the next one: see migrate_parks)."""
     buf = io.StringIO()             # store.migrate prints; fold it into the result
     with fs.lock():
         state = load_state()
         with contextlib.redirect_stdout(buf):
             store.migrate(state)
+        parks = migrate_parks(state)
         save_state(state)
-    lines = buf.getvalue().splitlines()
-    out.say(buf.getvalue().rstrip("\n"))
-    out.row(None, None, None, "migrate", "ok", "; ".join(lines), show=False)
+    lines = buf.getvalue().splitlines() + (
+        parks or ["park dirs: nothing to migrate (no legacy <dir>-disabled/ dirs left)"])
+    out.say("\n".join(lines))
+    refused = [ln for ln in parks if ln.startswith("refused:")]
+    out.row(None, None, None, "migrate", "error" if refused else "ok", "; ".join(lines),
+            show=False)
 
 
 SHIMS = Path(__file__).with_name("shims")
@@ -405,13 +421,15 @@ def _reads_as(p: Path, text: str) -> bool:
 
 def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     """Write <home>/skills/agent-toggle/SKILL.md into every installed harness that
-    supports skills; keep park dirs out of an existing harness-home .gitignore.
-    A file there that is not our shim (no SHIM_MARKER) is refused, never overwritten.
-    A harness switched off in settings is skipped unless named with --harness."""
+    supports skills, then offer to drop stale legacy park-dir lines from a harness-home
+    .gitignore (_stale_ignore_lines). A file there that is not our shim (no
+    SHIM_MARKER) is refused, never overwritten. A harness switched off in settings is
+    skipped unless named with --harness."""
     table = harnesses()
     on = set(settings.enabled_harnesses())
     verb = "would install" if args.dry_run else "installed"
     installed = found = 0
+    homes = []
     for hname, h in table.items():
         home = h.home
         if args.harness and hname != args.harness:
@@ -427,6 +445,7 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
                     show=False, home=str(home))
             out.say(f"  skipped {hname} (off in settings)")
             continue
+        homes.append(h)
         # dirs[0] is OpenCode's first skills.paths redirect when set; if its parent dir
         # is missing, fall back to the first in-home dir instead of creating a tree.
         subs = h.dirs["skill"]
@@ -470,24 +489,60 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
             out.say(f"    note: {hname} also loads {', '.join(map(str, others))} (a different "
                     f"shim); which one wins is unchecked")
         installed += 1
-        # A tracked park dir turns every disable into deletion noise in
-        # `git status`; only touch a .gitignore that already exists.
-        ignore = home / ".gitignore"
-        if ignore.is_file():
-            # only this harness's own park dirs; skills.paths redirects live elsewhere
-            park = sorted({f"{sub}-disabled" for subs in h.dirs.values() for sub in subs
-                           if not Path(sub).is_absolute()})
-            body = ignore.read_text(encoding="utf-8")
-            missing = [f"{d}/" for d in park if f"{d}/" not in body.splitlines()]
-            if missing and not args.dry_run:
-                with ignore.open("a", encoding="utf-8") as fh:
-                    fh.write(("" if body.endswith("\n") or not body else "\n")
-                             + "".join(f"{m}\n" for m in missing))
-            if missing:
-                out.say(f"  gitignore  {ignore}: {' '.join(missing)}")
+    for h in homes if not args.no_gitignore else ():
+        _stale_ignore_lines(h, args, out)
     if not found:
         die("no harness found", 4)
     out.say(f"{installed} harness(es) {'planned' if args.dry_run else 'installed'}")
+
+
+def _stale_ignore_lines(h, args: argparse.Namespace, out: Result) -> None:
+    """Older versions of install-shims appended `<sub>-disabled/` to a harness-home .gitignore.
+    Parks are central now, so offer to drop exactly those lines (never add any): only in
+    a git work tree, and only once `migrate` has emptied the legacy dir a line covers."""
+    ignore = h.home / ".gitignore"
+    if not ignore.is_file() or fs.git_toplevel(h.home) is None:
+        return
+    # older versions wrote EVERY harness's park names into each home, so match them all
+    legacy = {fs.legacy_park(Path(sub)).as_posix() + "/": fs.legacy_park(h.home / sub)
+              for t in harnesses().values() for subs in t.dirs.values() for sub in subs
+              if not Path(sub).is_absolute()}
+    try:
+        lines = ignore.read_bytes().decode("utf-8").splitlines(keepends=True)
+    except (OSError, UnicodeDecodeError) as e:
+        out.say(f"  gitignore  {ignore}: unreadable ({e}); stale park-dir lines not checked")
+        return
+
+    def report(status: str, lines_: list[str], what: str) -> None:
+        msg = f"{ignore}: {what}"
+        out.say(f"  gitignore  {msg}")
+        out.row(h.name, None, None, "install-shims", status, msg, show=False,
+                gitignore=str(ignore), stale=lines_)
+
+    stale = list(dict.fromkeys(ln.rstrip("\r\n") for ln in lines if ln.rstrip("\r\n") in legacy))
+    if busy := [s for s in stale if legacy[s].exists() or legacy[s].is_symlink()]:
+        report("skipped", busy, f"{' '.join(busy)} still cover(s) a legacy park dir -- "
+                                f"run `agent-toggle migrate` first, then re-run install-shims")
+    if not (stale := [s for s in stale if s not in busy]):
+        return
+    shown = " ".join(stale)
+    if ignore.is_symlink():          # an atomic replace would turn the link into a file
+        return report("skipped", stale, f"stale {shown} (a symlink: remove them by hand)")
+    if args.dry_run:
+        return report("planned", stale, f"would remove stale {shown}")
+    if not args.gitignore and not (args.prompt and _interactive(out)):
+        return report("skipped", stale, f"stale {shown} (re-run with --gitignore to remove)")
+    if not args.gitignore:
+        try:
+            yes = input(f"remove stale park-dir lines from {ignore}? [y/N] ").strip().lower()
+        except EOFError:
+            yes = ""
+        if yes not in ("y", "yes"):
+            return report("skipped", stale, f"kept stale {shown}")
+    # every other line, ending included, is kept byte for byte
+    keep = "".join(ln for ln in lines if ln.rstrip("\r\n") not in stale)
+    fs.atomic_write(ignore, keep, mode=ignore.stat().st_mode & 0o777, newline="")
+    report("ok", stale, f"removed stale {shown}")
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
@@ -604,10 +659,18 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--type", choices=TYPES, help="only this resource type")
     cp.add_argument("--project", metavar="dir",
                     help="price this project's <dir>/.claude and <dir>/.mcp.json, not user scope")
-    sub.add_parser("migrate", parents=[common], help="import an older ~/.claude-toggle state")
+    sub.add_parser("migrate", parents=[common],
+                   help="import ~/.claude-toggle state; move legacy park dirs")
     sp = sub.add_parser("install-shims", parents=[common],
                         help="write the skill shim into every installed harness")
     sp.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
+    gi = sp.add_mutually_exclusive_group()
+    gi.add_argument("--gitignore", action="store_true",
+                    help="remove stale legacy park-dir lines from harness .gitignore files "
+                         "without asking")
+    gi.add_argument("--no-gitignore", action="store_true",
+                    help="skip the stale park-dir line check")
+    sp.set_defaults(prompt=True)        # the config menu passes False: no y/n under curses
     pp = sub.add_parser("profile", parents=[common],
                         help="save / apply / diff / list named sets of live items")
     pp.add_argument("action", help="save | apply | diff | list")

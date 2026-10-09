@@ -149,18 +149,94 @@ class InstallShimsCase(SandboxCase):
         self.assertEqual(rc, 4)
         self.assertFalse(env["ok"])
 
-    def test_park_dirs_appended_once_from_table(self) -> None:
+    # `prompts-disabled/` is codex's but older versions wrote every harness's names into
+    # each home, so it is stale here too; `commands-disabled/x` is not an exact match and
+    # stays; CRLF endings survive
+    STALE = b"# mine\r\nskills-disabled/\nkeep\r\nagents-disabled/\ncommands-disabled/x\nprompts-disabled/"
+    CLEAN = b"# mine\r\nkeep\r\ncommands-disabled/x\n"
+
+    def stale_ignore(self) -> Path:
+        self.git_init()
         ignore = self.tmp / ".claude" / ".gitignore"
-        ignore.write_text("skills-disabled/\nkeep", encoding="utf-8")          # one present, no trailing newline
-        self.run_cli()
-        self.run_cli()
-        lines = ignore.read_text(encoding="utf-8").splitlines()
-        for d in ("skills-disabled/", "agents-disabled/", "commands-disabled/"):
-            self.assertEqual(lines.count(d), 1, d)
-        self.assertIn("keep", lines)
-        for d in ("prompts-disabled/", "command-disabled/"):            # codex / opencode only
-            self.assertNotIn(d, lines)
+        ignore.write_bytes(self.STALE)
+        return ignore
+
+    @staticmethod
+    def ignore_rows(env: dict) -> list[dict]:
+        return [r for r in env["results"] if "gitignore" in r]
+
+    def test_stale_lines_are_only_reported_when_not_interactive(self) -> None:
+        ignore = self.stale_ignore()
+        rc, env = self.run_cli()
+        self.assertEqual(rc, 0)
+        self.assertEqual(ignore.read_bytes(), self.STALE)
+        (row,) = self.ignore_rows(env)
+        self.assertEqual((row["harness"], row["status"], row["stale"]),
+                         ("claude", "skipped", ["skills-disabled/", "agents-disabled/", "prompts-disabled/"]))
+        self.assertIn("re-run with --gitignore to remove", row["detail"])
+
+    def test_gitignore_flag_removes_exactly_the_stale_lines_and_never_appends(self) -> None:
+        ignore = self.stale_ignore()
+        rc, env = self.run_cli("--gitignore")
+        self.assertEqual(rc, 0)
+        self.assertEqual(ignore.read_bytes(), self.CLEAN)      # every other byte kept
+        self.assertEqual(self.ignore_rows(env)[0]["status"], "ok")
+        rc, env = self.run_cli("--gitignore")                  # idempotent: nothing left
+        self.assertEqual((rc, self.ignore_rows(env)), (0, []))
+        self.assertEqual(ignore.read_bytes(), self.CLEAN)
         self.assertFalse((self.tmp / ".codex" / ".gitignore").exists())   # never created
+
+    def test_dry_run_reports_and_writes_nothing(self) -> None:
+        ignore = self.stale_ignore()
+        rc, env = self.run_cli("--dry-run", "--gitignore")
+        self.assertEqual(rc, 0)
+        self.assertEqual(ignore.read_bytes(), self.STALE)
+        (row,) = self.ignore_rows(env)
+        self.assertEqual(row["status"], "planned")
+        self.assertIn("would remove", row["detail"])
+
+    def test_no_gitignore_skips_the_check_and_the_flags_exclude_each_other(self) -> None:
+        ignore = self.stale_ignore()
+        rc, env = self.run_cli("--no-gitignore")
+        self.assertEqual((rc, self.ignore_rows(env)), (0, []))
+        self.assertEqual(ignore.read_bytes(), self.STALE)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["install-shims", "--gitignore", "--no-gitignore"]), 2)
+
+    def test_a_line_whose_legacy_dir_still_exists_waits_for_migrate(self) -> None:
+        ignore = self.stale_ignore()
+        (self.tmp / ".claude" / "skills-disabled" / "old").mkdir(parents=True)
+        rc, env = self.run_cli("--gitignore")
+        self.assertEqual(rc, 0)
+        self.assertEqual(ignore.read_bytes(),
+                         b"# mine\r\nskills-disabled/\nkeep\r\ncommands-disabled/x\n")
+        wait, done = self.ignore_rows(env)
+        self.assertEqual((wait["stale"], wait["status"]), (["skills-disabled/"], "skipped"))
+        self.assertIn("agent-toggle migrate", wait["detail"])
+        self.assertEqual(done["stale"], ["agents-disabled/", "prompts-disabled/"])
+
+    def test_outside_a_work_tree_the_file_is_left_alone(self) -> None:
+        ignore = self.tmp / ".claude" / ".gitignore"
+        ignore.write_bytes(self.STALE)
+        rc, env = self.run_cli("--gitignore")
+        self.assertEqual((rc, self.ignore_rows(env)), (0, []))
+        self.assertEqual(ignore.read_bytes(), self.STALE)
+
+    def test_interactive_asks_per_harness(self) -> None:
+        for answer, want in (("n", self.STALE), ("y", self.CLEAN)):
+            ignore = self.stale_ignore()
+            asked: list[str] = []
+
+            def fake_input(prompt: str, answer=answer, asked=asked) -> str:
+                asked.append(prompt)        # doctor's own y/n afterwards: always no
+                return answer if prompt.startswith("remove stale") else "n"
+            with unittest.mock.patch.object(cli, "_interactive", return_value=True), \
+                    unittest.mock.patch("builtins.input", fake_input), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["install-shims"]), 0)
+            self.assertEqual(ignore.read_bytes(), want, answer)
+            self.assertEqual([p for p in asked if p.startswith("remove stale")],
+                             [f"remove stale park-dir lines from {ignore}? [y/N] "])
 
     def test_foreign_file_is_refused_others_proceed(self) -> None:
         mine = shim(self.tmp / ".claude")

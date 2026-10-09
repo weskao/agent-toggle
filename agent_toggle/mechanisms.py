@@ -30,7 +30,7 @@ from .backends.mcp_json import (
 from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
 from .backends.plugin_cli import claude_bin, full_plugin_id, list_plugins, run_cli
 from .companions import move, park_companions, restore_companions
-from .fs import gitignored, prune_empty
+from .fs import prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses, project_view
 from .output import CliError, Result, die
 from .store import (
@@ -282,7 +282,7 @@ class DirView(NamedTuple):
     """One candidate dir as the harness that physically owns it sees it."""
     owner: str            # harness whose state entry / park dir this item belongs to
     live: Path            # the dir, spelled by the owner (never a symlink if avoidable)
-    parked: Path          # sibling `<live>-disabled`
+    parked: Path          # fs.user_park(owner, <owner's sub>), outside every harness home
     sharers: list[str]    # every harness whose dir resolves to the same real path
 
 
@@ -292,20 +292,98 @@ def dir_view(table: dict, harness: str, type_: str, home: Path, sub: str) -> Dir
     (else the first non-symlink spelling, else the first in table order)."""
     mine = home / sub
     real = mine.resolve()
-    found = [(harness, mine)]
+    found = [(harness, mine, sub)]
     for hn, h in table.items():
         for s in h.dirs.get(type_, ()):
             d = (home if hn == harness else h.home) / s
             if (hn, d) != (harness, mine) and d.resolve() == real:
-                found.append((hn, d))
+                found.append((hn, d, s))
     order = list(table)                 # table order, so the owner never depends on who asks
     found.sort(key=lambda f: order.index(f[0]) if f[0] in order else len(order))
-    plain = [(hn, d) for hn, d in found if not d.is_symlink()]
-    owner, live = next(((hn, d) for hn, d in plain
-                        if hn in table and real.is_relative_to(table[hn].home.resolve())),
-                       plain[0] if plain else found[0])
-    return DirView(owner, live, live.parent / f"{live.name}-disabled",
-                   sorted({hn for hn, _ in found}))
+    plain = [f for f in found if not f[1].is_symlink()]
+    owner, live, osub = next((f for f in plain
+                              if f[0] in table and real.is_relative_to(table[f[0]].home.resolve())),
+                             plain[0] if plain else found[0])
+    return DirView(owner, live, fs.user_park(owner, osub), sorted({f[0] for f in found}))
+
+
+def legacy_parks(table: dict, only: str | None = None) -> list[tuple[Path, DirView, str]]:
+    """(legacy `<live>-disabled` dir, its view, type) for every legacy sibling park dir
+    still on disk, once per dir; `only` keeps one harness's (status / doctor hints)."""
+    seen, found = set(), []
+    for hn, h in table.items():
+        if only and hn != only:
+            continue
+        for type_, subs in h.dirs.items():
+            for sub in subs:
+                v = dir_view(table, hn, type_, h.home, sub)
+                old = fs.legacy_park(v.live)
+                if old not in seen and (old.exists() or old.is_symlink()):
+                    seen.add(old)
+                    found.append((old, v, type_))
+    return found
+
+
+def migrate_parks(state: dict, table: dict | None = None) -> list[str]:
+    """Move every legacy sibling park dir `<live>-disabled` into its fs.user_park dir and
+    repoint the state entries (disabled and pending) at the moved items. Each child moves
+    with fs.safe_move; one that already exists at the destination is refused and left in
+    place. Idempotent; a re-run also repoints entries a killed run left behind. Returns
+    the report lines ([] = nothing to migrate)."""
+    table = table or harnesses()
+    lines: list[str] = []
+    entries = [*state["disabled"].values(),
+               *(p["entry"] for p in state.get("pending", {}).values()
+                 if isinstance(p, dict) and isinstance(p.get("entry"), dict))]
+    for old, v, type_ in legacy_parks(table):
+        moved: list[Path] = []
+        if old.is_symlink() or not old.is_dir():
+            lines.append(f"refused: {old} is a symlink or not a directory -- left in place; "
+                         f"fix: move its items into {v.parked} by hand")
+            continue
+        if not fs.contained(v.parked / "x", fs.parked_dir()):
+            lines.append(f"refused: {fs.parked_dir()} is reached through a symlink -- "
+                         f"{old} left in place")
+            continue
+        fs.private_dir(fs.parked_dir())
+        _merge_park(old, v.parked, type_ == "skill", moved, lines)
+        repointed = 0
+        for e in entries:
+            p = e.get("parked_at") if isinstance(e, dict) else None
+            if isinstance(p, str) and Path(p).is_relative_to(old):
+                new = v.parked / Path(p).relative_to(old)
+                if not _exists(Path(p)) and _exists(new):
+                    e["parked_at"] = str(new)
+                    repointed += 1
+        with contextlib.suppress(OSError):
+            old.rmdir()                  # refuses a non-empty dir: a refused item keeps it
+        lines.append(f"moved {len(moved)} item(s) {old} -> {v.parked}"
+                     + (f", repointed {repointed} state entry(ies)" if repointed else "")
+                     + ("" if _exists(old) else f", removed {old}"))
+    return lines
+
+
+def _merge_park(src: Path, dest: Path, skill: bool, moved: list[Path], lines: list[str]) -> None:
+    """Move each child of `src` into `dest`. A group dir (commands/orch/) that already
+    exists there is merged into; a skill dir is one item, so two copies never mix. Any
+    other clash is refused and left in `src`."""
+    for child in sorted(src.iterdir()):
+        fs.refresh_lock()
+        target = dest / child.name
+        if _exists(target):
+            if not skill and child.is_dir() and not child.is_symlink() \
+                    and target.is_dir() and not target.is_symlink():
+                _merge_park(child, target, skill, moved, lines)
+                with contextlib.suppress(OSError):
+                    child.rmdir()
+            else:
+                lines.append(f"refused: {target} already exists -- left {child} in place; "
+                             f"fix: keep one of the two, then re-run migrate")
+            continue
+        try:
+            moved.append(fs.safe_move(child, dest))
+        except OSError as e:
+            lines.append(f"refused: {child}: {e} -- left in place")
 
 
 def sync_marker_note(out: Result, v: DirView) -> str | None:
@@ -447,10 +525,7 @@ def settle(state: dict, key: str, out: Result | None = None, *,
     elif landed:
         state["disabled"].pop(key, None)
         if mech == "move":
-            stop = fs.parked_dir() if entry.get("project") else next(
-                (d for d in parked.parents if d.name.endswith("-disabled")), None)
-            if stop is not None:
-                prune_empty(parked.parent, stop)
+            prune_empty(parked.parent, fs.parked_dir())    # check_entry: parked_at is under it
             # companions the killed run had not moved back yet
             restore_companions({"companions": [c for c in entry.get("companions", [])
                                                if _exists(Path(c["to"]))]}, out)
@@ -591,6 +666,7 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
     `table` = {"claude": harnesses.project_view(dir)} runs in project scope: items
     park under fs.parked_dir()/<sha8>/<sub>-disabled, NEVER inside the project, keys
     are `claude@<sha8>:...`, and no user-scope dir is ever a view (no dir_view aliasing).
+    User scope parks under fs.user_park() (parked/user/<owner>/<sub>), never in a home.
     """
     out = out or Result()
     table = table or harnesses()
@@ -618,16 +694,14 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
         views = [dir_view(table, harness, type_, home, sub) for sub in table[harness].dirs[type_]]
 
     if action == "disable" and names and not proj:
+        # one warning per run, and only where the fix applies: the central park dir sits
+        # inside a git work tree (a tracked $HOME), else `git status` cannot be dirtied
+        if out.first(("ignore",)) and (top := fs.park_unignored()):
+            park = fs.parked_dir()
+            out.warn(f"{park} is NOT gitignored -- disabling will dirty `git status`. "
+                     f"fix: echo '{park.resolve().relative_to(top).as_posix()}/' "
+                     f">> {top}/.gitignore")
         for v in views:
-            ohome = home if v.owner == harness else table[v.owner].home
-            # one warning per real park dir, and only where the fix applies: the dir sits
-            # inside a git work tree (else `git status` cannot be dirtied, nothing to fix)
-            top = fs.git_toplevel(ohome)
-            if top and v.parked.resolve().is_relative_to(top) \
-                    and out.first(("ignore", v.parked.resolve())) \
-                    and not gitignored(v.parked, top):
-                out.warn(f"{v.parked} is NOT gitignored -- disabling will dirty `git status`. "
-                         f"fix: echo '{v.parked.name}/' >> {top}/.gitignore")
             if msg := sync_marker_note(out, v):
                 out.warn(msg)
 
@@ -645,10 +719,10 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             # Preserve nesting: commands/orch/batch.md parks as orch/batch.md,
             # so two different <group>/mcp.md cannot collide at the park root.
             rel = src.relative_to(v.live)
-            if proj and not fs.contained(v.parked / rel, fs.parked_dir()):
+            if not fs.contained(v.parked / rel, fs.parked_dir()):
                 fails += fail(name, f"{fs.parked_dir()} is reached through a symlink -- refusing")
                 continue
-            if proj and not dry_run:
+            if not dry_run:
                 fs.private_dir(fs.parked_dir())
             new = {
                 "mechanism": "move", "harness": v.owner, "type": type_, "name": name,

@@ -98,7 +98,7 @@ class EnvelopeTest(CliCase):
 
     def test_warnings_travel_in_the_envelope(self) -> None:
         self.write("skills/demo-skill/SKILL.md")      # park dir is not gitignored here
-        self.git_init()
+        self.git_init(self.tmp)                       # a tracked $HOME holds the park dir
         _, env = self.run_json("disable", "skill", "demo-skill")
         self.assertTrue(any("NOT gitignored" in w for w in env["warnings"]))
 

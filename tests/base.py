@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agent_toggle import fs
 from agent_toggle.backends import plugin_cli
 
 
@@ -81,6 +82,19 @@ class SandboxCase(unittest.TestCase):
     def git_init(self, path: Path | None = None) -> None:
         """Make `path` (default: the claude home) a git work tree, as a dotfiles repo is."""
         subprocess.run(["git", "init", "-q", str(path or self.home)], check=True)
+
+    def user_parked(self, sub: str, *rest: str, owner: str = "claude") -> Path:
+        """Where a user-scope item of `<owner home>/<sub>` parks (fs.user_park)."""
+        return fs.user_park(owner, sub).joinpath(*rest)
+
+    def write_parked(self, rel: str, text: str = "x", owner: str = "claude") -> Path:
+        """write() into the user park dir: `skills/a/SKILL.md` -> user_parked("skills", ...)."""
+        sub, _, rest = rel.partition("/")
+        p = self.user_parked(sub, rest, owner=owner)
+        fs.private_dir(fs.parked_dir())          # 0700, as a real disable makes it
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
 
     def write(self, rel: str, text: str = "x") -> Path:
         p = self.home / rel

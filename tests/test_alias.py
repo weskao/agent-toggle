@@ -27,7 +27,7 @@ class AliasBase(CliCase):
         shutil.copytree(FIXTURE, self.tmp, dirs_exist_ok=True)
         self.oc = self.tmp / ".config" / "opencode"
         self.shared = self.tmp / ".claude" / "skills" / ITEM
-        self.parked = self.tmp / ".claude" / "skills-disabled" / ITEM
+        self.parked = self.user_parked("skills", ITEM)
 
     def state(self) -> dict:
         return json.loads((self.tmp / ".agent-toggle" / "state.json").read_text(encoding="utf-8"))["disabled"]
@@ -39,7 +39,9 @@ class AliasBase(CliCase):
     def check_parked_once(self) -> None:
         self.assertFalse(self.shared.exists())
         self.assertTrue((self.parked / "SKILL.md").is_file())
-        self.assertFalse((self.oc / "skills-disabled").exists())     # no second park dir
+        self.assertFalse(self.user_parked("skills", owner="opencode").exists())  # no second park
+        self.assertEqual([p for h in (self.oc, self.tmp / ".claude") for p in h.iterdir()
+                          if p.name.endswith("-disabled")], [])         # nothing in a home
         entry = self.state()[f"claude:skill:{ITEM}"]
         self.assertEqual(len(self.state()), 1)
         self.assertEqual((entry["harness"], entry["shared_with"]), ("claude", ["opencode"]))
@@ -110,17 +112,21 @@ class AliasBehaviour:
         text = self.run_cli("status")[1]
         self.assertEqual(text.count(".synced-from-test"), 1, text)
 
-    def test_gitignore_warning_once_per_park_dir_and_only_inside_a_work_tree(self) -> None:
-        none = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
-                ["warnings"] if "NOT gitignored" in w]
-        self.assertEqual(none, [])                      # no git work tree: nothing to fix
-        self.run_cli("enable", "skill", ITEM, "--harness", "opencode")
-        self.git_init()
-        warned = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
-                  ["warnings"] if "NOT gitignored" in w]
-        self.assertEqual(len(warned), 1, warned)
-        self.assertEqual(len(set(warned)), 1)
-        self.assertIn(f"{(self.tmp / '.claude').resolve()}/.gitignore", warned[0])
+    def test_gitignore_warning_once_and_only_when_the_park_dir_is_in_a_work_tree(self) -> None:
+        def warned() -> list[str]:
+            got = [w for w in self.run_json("disable", "skill", ITEM, "--harness", "opencode")[1]
+                   ["warnings"] if "NOT gitignored" in w]
+            self.run_cli("enable", "skill", ITEM, "--harness", "opencode")
+            return got
+        self.assertEqual(warned(), [])                  # no git work tree: nothing to fix
+        self.git_init()                                 # a tracked harness home: parks are not in it
+        self.assertEqual(warned(), [])
+        self.git_init(self.tmp)                         # a tracked $HOME holds the park dir
+        got = warned()
+        self.assertEqual(len(got), 1, got)
+        self.assertIn(f"echo '.agent-toggle/parked/' >> {self.tmp.resolve()}/.gitignore", got[0])
+        (self.tmp / ".gitignore").write_text(".agent-toggle/\n", encoding="utf-8")
+        self.assertEqual(warned(), [])                  # an ignored parent dir covers it
 
 
 @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
@@ -206,4 +212,4 @@ class OpencodeTableTest(AliasBase):
         self.assertEqual(rc, 0)
         self.assertNotIn("shared_with", env["results"][0])
         self.assertNotIn("shared_with", self.state()["opencode:command:own-command"])
-        self.assertTrue((self.oc / "command-disabled" / "own-command.md").is_file())
+        self.assertTrue(self.user_parked("command", "own-command.md", owner="opencode").is_file())
