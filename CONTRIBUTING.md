@@ -26,6 +26,7 @@ The shared conformance test picks up the new fixture automatically.
 ```sh
 python3 -m unittest discover -s tests
 uvx ruff check .
+python3 tools/wheel_smoke.py   # the built wheel, no extras, temp HOME
 ```
 
 Tests must run against a temporary `HOME` and never touch real harness

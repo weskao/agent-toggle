@@ -823,6 +823,10 @@ ruff check .
 stdlib `unittest`, no fixtures, no network. Every test runs against a
 throwaway temp `HOME` and a stubbed `claude` CLI.
 
+`python3 tools/wheel_smoke.py` builds the wheel, installs it without extras into a
+fresh venv (what a PyPI user gets) and runs the CLI against a temp `HOME`; CI runs
+it on macOS, Linux and Windows.
+
 ## CI notifications
 
 `.github/workflows/ci.yml` can send a Telegram message when the test matrix fails on a
