@@ -104,7 +104,7 @@ class MultiCandidateDirsTest(SandboxCase):
         self.addCleanup(setattr, mechanisms, "harnesses", orig)
         self.assertEqual(
             mechanisms.toggle_dir_type("disable", "command", ["hello"], state, "claude", self.home), 0)
-        self.assertTrue((self.home / "prompts-disabled" / "hello.md").is_file())
+        self.assertTrue(self.user_parked("prompts", "hello.md").is_file())
         self.assertEqual(
             mechanisms.toggle_dir_type("enable", "command", ["hello"], state, "claude", self.home), 0)
         self.assertTrue((self.home / "prompts" / "hello.md").is_file())

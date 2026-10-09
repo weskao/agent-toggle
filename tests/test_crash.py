@@ -353,13 +353,13 @@ class CompanionCrashTest(CrashCase):
         other.parent.mkdir(parents=True)
         other.write_text("x", encoding="utf-8")
         entry = {"mechanism": "move", "harness": "claude", "type": "skill", "name": "tool",
-                 "parked_at": str(self.home / "skills-disabled" / "tool"),
+                 "parked_at": str(self.user_parked("skills", "tool")),
                  "origin": str(self.home / "skills" / "tool"),
                  "companions": [{"from": str(self.home / "scripts" / "x.sh"), "to": str(other)}]}
         store.save_state({"version": 3, "disabled": {self.ukey: entry},
                           "pending": {self.ukey: {"action": "enable", "entry": entry}}})
         rc, env = self.run_json("disable", "skill", "nothing-here")
-        self.assertTrue(any("refused" in w for w in env["warnings"]), env)
+        self.assertTrue(any("refused: a companion outside" in w for w in env["warnings"]), env)
         self.assertTrue(other.is_file())
         self.assertFalse((self.home / "scripts" / "x.sh").exists())
 

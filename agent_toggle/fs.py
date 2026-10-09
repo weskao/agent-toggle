@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import importlib
 import json
 import os
@@ -18,7 +19,8 @@ from pathlib import Path
 
 TEXT_SUFFIXES = {".md", ".sh", ".py", ".js", ".mjs", ".cjs", ".ts", ".json",
                  ".yaml", ".yml", ".toml", ".txt", ".zsh", ".bash"}
-# Directories never worth walking when deciding if a companion is shared.
+# Directories never worth walking when deciding if a companion is shared. The
+# `*-disabled` names are legacy sibling park dirs, still there until `migrate`.
 PRUNE = {".git", "node_modules", "cache", "__pycache__", "dist", "build",
          "skills-disabled", "agents-disabled", "commands-disabled", "rules-disabled",
          "prompts-disabled", "command-disabled", "venv"}
@@ -68,6 +70,30 @@ def profiles_dir() -> Path:
 
 def parked_dir() -> Path:
     return state_dir() / "parked"
+
+
+def user_park(owner: str, sub: str) -> Path:
+    """Where `owner`'s user-scope items from `<owner home>/<sub>` park: never inside a
+    harness home (Claude Code loads commands/ and rules/ recursively, so a park dir
+    nested there would still load). An absolute sub (an OpenCode skills.paths
+    redirect) parks as ext-<sha1(its resolved path)[:8]>."""
+    base = parked_dir() / "user" / owner
+    if not Path(sub).is_absolute():
+        return base / sub
+    return base / f"ext-{hashlib.sha1(str(Path(sub).resolve()).encode('utf-8')).hexdigest()[:8]}"
+
+
+def legacy_park(live: Path) -> Path:
+    """The legacy sibling park dir `<live>-disabled`: only `migrate` and its hints use it."""
+    return live.with_name(live.name + "-disabled")
+
+
+def park_unignored() -> Path | None:
+    """The work-tree root holding parked_dir() WITHOUT ignoring it (e.g. a tracked $HOME),
+    else None: outside any work tree a park dir cannot dirty `git status`."""
+    park = parked_dir().resolve()        # git_toplevel is resolved; /var vs /private/var
+    top = git_toplevel(next(p for p in (park, *park.parents) if p.is_dir()))
+    return top if top and not gitignored(park, top) else None
 
 
 def contained(path: Path, *roots: Path) -> bool:
@@ -224,13 +250,14 @@ def lock():
             pass
 
 
-def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
-    """Write `text` to `path` via a same-dir tmp file created with `mode`."""
+def atomic_write(path: Path, text: str, mode: int = 0o600, newline: str | None = None) -> None:
+    """Write `text` to `path` via a same-dir tmp file created with `mode`.
+    `newline=""` writes line endings as given (a user file edited in place)."""
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.unlink(missing_ok=True)          # leftover from a crashed run with our PID
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as fh:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())

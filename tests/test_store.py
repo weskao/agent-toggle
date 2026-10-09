@@ -38,6 +38,121 @@ class MigrateTest(SandboxCase):
         self.assertTrue(backup.is_file())
 
 
+class UserParkLayoutTest(CliCase):
+    """User scope parks under parked/user/<owner>/<sub>/<name>, never in a harness home."""
+
+    def test_disable_parks_centrally_and_enable_restores(self) -> None:
+        self.write("skills/demo-skill/SKILL.md", "demo")
+        before = sorted(p.name for p in self.home.iterdir())
+        self.assertEqual(self.run_cli("disable", "skill", "demo-skill")[0], 0)
+        parked = self.user_parked("skills", "demo-skill")
+        self.assertEqual(parked, fs.parked_dir() / "user" / "claude" / "skills" / "demo-skill")
+        self.assertEqual((parked / "SKILL.md").read_text(encoding="utf-8"), "demo")
+        self.assertEqual(sorted(p.name for p in self.home.iterdir()), before)  # home untouched
+        entry = store.load_state()["disabled"]["claude:skill:demo-skill"]
+        self.assertEqual(entry["parked_at"], str(parked))
+        self.assertEqual(self.run_cli("enable", "skill", "demo-skill")[0], 0)
+        self.assertEqual((self.home / "skills/demo-skill/SKILL.md").read_text(encoding="utf-8"),
+                         "demo")
+        self.assertFalse(parked.exists())
+        self.assertEqual(store.load_state()["disabled"], {})
+
+    def test_an_absolute_sub_parks_under_ext_sha8(self) -> None:
+        ext = self.tmp / "ext-skills"
+        (ext / "x").mkdir(parents=True)
+        (ext / "x" / "SKILL.md").write_text("x", encoding="utf-8")
+        oc = self.tmp / ".config" / "opencode"
+        oc.mkdir(parents=True)
+        (oc / "opencode.json").write_text(json.dumps({"skills": {"paths": [str(ext)]}}),
+                                          encoding="utf-8")
+        self.assertEqual(self.run_cli("disable", "skill", "x", "--harness", "opencode")[0], 0)
+        sha8 = hashlib.sha1(str(ext.resolve()).encode("utf-8")).hexdigest()[:8]
+        parked = fs.parked_dir() / "user" / "opencode" / f"ext-{sha8}" / "x"
+        self.assertTrue((parked / "SKILL.md").is_file())
+        self.assertEqual(sorted(p.name for p in ext.iterdir()), [])     # nothing beside it
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir() if "disabled" in p.name), [])
+        self.assertEqual(self.run_cli("enable", "skill", "x", "--harness", "opencode")[0], 0)
+        self.assertTrue((ext / "x" / "SKILL.md").is_file())
+
+
+class MigrateParksTest(CliCase):
+    """`migrate` moves legacy `<live>-disabled` dirs into parked/user/<owner>/<sub>."""
+
+    def save(self, entries: dict) -> None:
+        fs.private_dir(fs.state_dir())
+        fs.state_file().write_text(json.dumps({"version": 3, "disabled": entries}),
+                                   encoding="utf-8")
+
+    def entry(self, type_: str, name: str, origin: str, parked: str) -> dict:
+        return {"mechanism": "move", "harness": "claude", "type": type_, "name": name,
+                "origin": str(self.home / origin), "parked_at": str(self.home / parked),
+                "companions": [], "at": "2026-01-01T00:00:00+0000"}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("skills-disabled/demo-skill/SKILL.md", "demo")
+        self.write("skills-disabled/stray/SKILL.md")              # no state entry: moves too
+        self.write("skills-disabled/clash/SKILL.md", "legacy")
+        self.write("commands-disabled/orch/batch.md", "batch")
+        self.write_parked("skills/clash/SKILL.md", "new")           # parked since the upgrade
+        self.write_parked("commands/orch/other.md")                 # a group to merge into
+        self.save({
+            "claude:skill:demo-skill": self.entry("skill", "demo-skill", "skills/demo-skill",
+                                                  "skills-disabled/demo-skill"),
+            "claude:command:orch:batch": self.entry("command", "orch:batch",
+                                                    "commands/orch/batch.md",
+                                                    "commands-disabled/orch/batch.md")})
+
+    def test_enable_before_migrate_names_the_fix(self) -> None:
+        rc, env = self.run_json("enable", "skill", "demo-skill")
+        self.assertEqual(rc, 1)
+        self.assertIn("agent-toggle migrate", env["results"][0]["detail"])
+        rc, out, _ = self.run_cli("status")
+        self.assertIn(f"{self.home / 'skills-disabled'} is a legacy park dir -- run: "
+                      f"agent-toggle migrate", out)
+
+    def test_moves_repoints_refuses_a_clash_and_is_idempotent(self) -> None:
+        rc, env = self.run_json("migrate")
+        self.assertEqual(rc, 1)                                     # the clash is refused
+        detail = env["results"][0]["detail"]
+        self.assertIn(f"refused: {self.user_parked('skills', 'clash')} already exists", detail)
+        state = store.load_state()["disabled"]
+        self.assertEqual(state["claude:skill:demo-skill"]["parked_at"],
+                         str(self.user_parked("skills", "demo-skill")))
+        self.assertEqual(state["claude:command:orch:batch"]["parked_at"],
+                         str(self.user_parked("commands", "orch", "batch.md")))
+        for parts, text in ((("skills", "demo-skill", "SKILL.md"), "demo"),
+                            (("skills", "clash", "SKILL.md"), "new"),
+                            (("commands", "orch", "batch.md"), "batch")):
+            self.assertEqual(self.user_parked(*parts).read_text(encoding="utf-8"), text)
+        self.assertTrue(self.user_parked("skills", "stray", "SKILL.md").is_file())
+        self.assertTrue(self.user_parked("commands", "orch", "other.md").is_file())
+        self.assertFalse((self.home / "commands-disabled").exists())   # emptied: removed
+        self.assertEqual([p.name for p in (self.home / "skills-disabled").iterdir()], ["clash"])
+        self.assertEqual(self.run_cli("enable", "skill", "demo-skill")[0], 0)
+        self.assertEqual((self.home / "skills/demo-skill/SKILL.md").read_text(encoding="utf-8"),
+                         "demo")
+        # the user resolves the clash; the next run finishes, the one after changes nothing
+        (self.home / "skills-disabled/clash/SKILL.md").unlink()
+        (self.home / "skills-disabled/clash").rmdir()
+        rc, env = self.run_json("migrate")
+        self.assertEqual(rc, 0, env)
+        self.assertFalse((self.home / "skills-disabled").exists())
+        before = fs.state_file().read_bytes()
+        rc, out, _ = self.run_cli("migrate")
+        self.assertEqual(rc, 0)
+        self.assertIn("park dirs: nothing to migrate", out)
+        self.assertEqual(fs.state_file().read_bytes(), before)
+
+    def test_a_killed_run_is_repointed_by_the_next(self) -> None:
+        # the item moved but the state save never happened
+        self.user_parked("skills").mkdir(parents=True, exist_ok=True)
+        (self.home / "skills-disabled/demo-skill").rename(self.user_parked("skills", "demo-skill"))
+        self.assertEqual(self.run_cli("migrate")[0], 1)            # the clash still refuses
+        self.assertEqual(store.load_state()["disabled"]["claude:skill:demo-skill"]["parked_at"],
+                         str(self.user_parked("skills", "demo-skill")))
+
+
 class LogSchemaTest(SandboxCase):
     FIELDS = {"ts", "harness", "type", "name", "action", "result", "batch",
               "project", "scope", "detail"}
@@ -148,10 +263,10 @@ class CheckEntryTest(SandboxCase):
 
     def test_legit_entries_pass(self) -> None:
         self.assertOk(self.entry(mechanism="move", origin=str(self.home / "skills/demo-skill"),
-                                 parked_at=str(self.home / "skills-disabled/demo-skill")))
+                                 parked_at=str(self.user_parked("skills", "demo-skill"))))
         self.assertOk(self.entry(mechanism="move", name="orch:batch",
                                  origin=str(self.home / "commands/orch/batch.md"),
-                                 parked_at=str(self.home / "commands-disabled/orch/batch.md")))
+                                 parked_at=str(self.user_parked("commands", "orch/batch.md"))))
         self.assertOk(self.entry(mechanism="move", project=str(self.proj),
                                  origin=str(self.proj / ".claude/skills/demo-skill"),
                                  parked_at=str(self.park / "skills-disabled/demo-skill")))
@@ -165,21 +280,48 @@ class CheckEntryTest(SandboxCase):
 
     def test_tampered_origin(self) -> None:
         self.assertRefused(self.entry(origin=str(self.tmp / "elsewhere/demo-skill"),
-                                      parked_at=str(self.home / "skills-disabled/demo-skill")),
+                                      parked_at=str(self.user_parked("skills", "demo-skill"))),
                            "origin")
         # another harness's home is not this entry's home
         self.assertRefused(self.entry(origin=str(self.tmp / ".codex/skills/demo-skill"),
-                                      parked_at=str(self.home / "skills-disabled/demo-skill")),
+                                      parked_at=str(self.user_parked("skills", "demo-skill"))),
                            "origin")
 
     def test_tampered_parked_at(self) -> None:
         good_origin = str(self.home / "skills/demo-skill")
         for bad in (self.tmp / "elsewhere/demo-skill",
-                    self.home / "skills/demo-skill",          # not a *-disabled dir
-                    self.home / "other-disabled/demo-skill",  # not a declared dir's sibling
+                    self.home / "skills/demo-skill",          # the live dir
+                    self.home / "skills-disabled/demo-skill", # a legacy park dir
                     fs.state_dir() / "demo-skill",
-                    fs.parked_dir() / "claude/skill/demo-skill"):   # parked_dir is project-only
+                    fs.parked_dir() / "demo-skill",           # the park root itself
+                    fs.parked_dir() / "user/claude/other/demo-skill",       # undeclared sub
+                    self.user_parked("skills", "demo-skill", owner="codex")):  # not its owner
             self.assertRefused(self.entry(origin=good_origin, parked_at=str(bad)), "parked_at")
+        legacy = self.entry(origin=good_origin,
+                            parked_at=str(self.home / "skills-disabled/demo-skill"))
+        self.assertIn("agent-toggle migrate", store.check_entry(legacy, self.table))
+
+    @unittest.skipUnless(CAN_SYMLINK, "cannot create symlinks here")
+    def test_user_park_through_a_symlinked_parent_is_refused(self) -> None:
+        real = self.tmp / "elsewhere"
+        real.mkdir()
+        self.user_parked("skills").parent.mkdir(parents=True)
+        self.user_parked("skills").symlink_to(real)
+        self.assertRefused(self.entry(origin=str(self.home / "skills/demo-skill"),
+                                      parked_at=str(self.user_parked("skills", "demo-skill"))),
+                           "parked_at")
+
+    def test_absolute_sub_parks_under_ext_sha8(self) -> None:
+        ext = self.tmp / "ext-skills"
+        oc = self.tmp / ".config" / "opencode"
+        oc.mkdir(parents=True)
+        (oc / "opencode.json").write_text(json.dumps({"skills": {"paths": [str(ext)]}}),
+                                          encoding="utf-8")
+        sha8 = hashlib.sha1(str(ext.resolve()).encode("utf-8")).hexdigest()[:8]
+        park = fs.parked_dir() / "user" / "opencode" / f"ext-{sha8}"
+        self.assertEqual(fs.user_park("opencode", str(ext)), park)
+        entry = self.entry(harness="opencode", origin=str(ext / "x"), parked_at=str(park / "x"))
+        self.assertIsNone(store.check_entry(entry, harnesses.build(self.tmp)))
 
     def test_forged_project(self) -> None:
         for proj in (Path(self.tmp.anchor), self.tmp, self.tmp.parent):   # root, $HOME, above
@@ -202,7 +344,7 @@ class CheckEntryTest(SandboxCase):
         origin = str(self.proj / ".claude/skills/demo-skill")
         other = fs.parked_dir() / store.project_digest(self.tmp / "other")
         for bad in (self.proj / ".claude/skills-disabled/demo-skill",   # inside the repo
-                    self.home / "skills-disabled/demo-skill",           # user scope park
+                    self.user_parked("skills", "demo-skill"),          # user scope park
                     other / "skills-disabled/demo-skill",               # another project's
                     Path(str(self.park) + "0") / "demo-skill",          # string prefix
                     fs.parked_dir() / "demo-skill"):
@@ -239,7 +381,7 @@ class CheckEntryTest(SandboxCase):
     def test_dotdot_in_any_path_field(self) -> None:
         dd = str(self.home / "skills" / ".." / "skills" / "demo-skill")
         self.assertRefused(self.entry(origin=dd,
-                                      parked_at=str(self.home / "skills-disabled/demo-skill")),
+                                      parked_at=str(self.user_parked("skills", "demo-skill"))),
                            "origin")
         self.assertRefused(self.entry(type="mcp", mechanism="remove_backup",
                                       backup=str(fs.backup_dir() / ".." / "x.json")), "backup")

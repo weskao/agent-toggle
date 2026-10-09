@@ -18,7 +18,7 @@ class DirTypeTest(SandboxCase):
 
         mech.toggle_dir_type("disable", "command", ["orch:batch"], state, "claude", self.home)
         # nested command parked with its parent dir
-        self.assertTrue((self.home / "commands-disabled/orch/batch.md").is_file())
+        self.assertTrue(self.user_parked("commands", "orch", "batch.md").is_file())
         # sibling with same basename untouched
         self.assertEqual((self.home / "commands/other/batch.md").read_text(encoding="utf-8"), "other")
         # origin recorded
@@ -31,9 +31,11 @@ class DirTypeTest(SandboxCase):
         # state entry cleared
         self.assertFalse(state["disabled"])
         # empty park subdir pruned
-        self.assertFalse((self.home / "commands-disabled/orch").exists())
-        # park root kept
-        self.assertTrue((self.home / "commands-disabled").is_dir())
+        self.assertFalse(self.user_parked("commands", "orch").exists())
+        # park root kept; nothing was ever parked inside the harness home
+        self.assertTrue(self.user_parked("commands").is_dir())
+        self.assertEqual(sorted(p.name for p in self.home.iterdir()),
+                         ["agents", "commands", "scripts", "skills"])
 
     def test_resolve_probes_shapes(self) -> None:
         self.write("skills/dir-skill/SKILL.md")
@@ -56,7 +58,7 @@ class DirTypeTest(SandboxCase):
         # broken symlink disabled without error
         self.assertEqual(fails, 0)
         # broken symlink moved to parked
-        self.assertTrue((self.home / "skills-disabled" / "broken-symlink").is_symlink())
+        self.assertTrue(self.user_parked("skills", "broken-symlink").is_symlink())
         # broken symlink gone from live
         self.assertFalse(link.exists() or link.is_symlink())
         fails_enable = mech.toggle_dir_type("enable", "skill", ["broken-symlink"], state,

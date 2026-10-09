@@ -51,8 +51,8 @@ first push.
 | area | state |
 |---|---|
 | harnesses | claude, codex, grok, opencode, openclaw, copilot, vibe, devin (explicit not applicable), agy (table row only) — one `Harness` record each in `harnesses.py` |
-| types | skill, agent, command, rule (move to `*-disabled/`), plugin (claude CLI only), mcp (remove + verbatim backup) |
-| safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; park dirs checked for gitignore; symlinks and broken links handled; `0600` state/backups, lock per batch |
+| types | skill, agent, command, rule (move to `~/.agent-toggle/parked/user/<owner>/<dir>/`, never inside a harness home), plugin (claude CLI only), mcp (remove + verbatim backup) |
+| safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; parks are central, so a harness home is never written into except for the shim (the park dir is checked for gitignore only when it sits in a git work tree); symlinks and broken links handled; `0600` state/backups, lock per batch |
 | state | `~/.agent-toggle/state.json` (schema v3, atomic write), `log.jsonl`, `mcp-backups/`, `companions/`, `lock` |
 | MCP scopes | Claude user + local scope (project path recorded); codex and grok through the TOML backend; claude.ai connectors parked per existing project (`disabledMcpServers`) |
 | cost | `cost` command and picker column (chars / 4 estimate) |
@@ -295,6 +295,20 @@ rename into place; a source that cannot be renamed aside drops the copy again
 At every point the source is intact or the target complete. `enable` prunes the emptied `parked/<sha8>/*-disabled` and
 `parked/<sha8>` dirs (never a non-empty one, never outside `parked/`).
 
+User scope parks centrally too: `fs.user_park(owner, sub)` =
+`parked/user/<owner>/<sub>/` (`ext-<sha8 of the resolved path>/` for an absolute
+sub, an OpenCode `skills.paths` redirect), where `<owner>` is `dir_view`'s owner
+(a dir shared by several harnesses parks once). Nesting a park dir inside the live
+dir was rejected: Claude Code loads `commands/` and `rules/` recursively, so a
+parked item there would still load. Older versions parked in a sibling
+`<home>/<sub>-disabled/`; `migrate` (`mechanisms.migrate_parks`) moves each child
+with `fs.safe_move`, repoints `parked_at` in `disabled` and `pending`, removes the
+emptied dir, refuses a name already at the destination (a group dir such as
+`commands/orch/` is merged into, a skill dir never), and repoints an entry whose
+item a killed run already moved. `status` / `doctor` list each old dir with
+`run: agent-toggle migrate`, and `check_entry` names the same fix when it refuses
+a `parked_at` still in one.
+
 ### 5.5 State schema v3
 
 ```json
@@ -414,7 +428,7 @@ harness and a definition of "project" that differs per harness.
 
 ### 5.8 New resource types
 
-- **`rule`** — claude only (`rules/*.md`, park dir `rules-disabled/`). Codex's
+- **`rule`** — claude only (`rules/*.md`, park dir `parked/user/claude/rules/`). Codex's
   `rules/` is a permission file and is excluded by the table (not listed in
   `dirs`).
 - **project scope** — `--project <dir>` (default: none; `--project .` for
@@ -536,7 +550,7 @@ directories, and the promise that a disable never loses data.
 | # | threat | control | status |
 |---|---|---|---|
 | 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
-| 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside `~/.agent-toggle/parked` and the `*-disabled` dirs; profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
+| 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside its own park dir (`parked/<sha8>` for a project, `parked/user/<harness>/<declared dir>` for user scope; a symlinked parent is refused); profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
 | 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; a project `.mcp.json` backup holds only the toggled server's entry (the copilot user-scope JSON backend still backs up the whole file); `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`; disabling one project `.mcp.json` server leaves no trace of another server's token under `~/.agent-toggle/`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs. A project backup written before the G15 fix still holds the whole file text until that server is disabled again |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | done: both shim templates carry a Safety section; `ops` warns when a plan disables a `rule` |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | done: argv form, and `mechanisms.valid_plugin_id` refuses any other id before `claude plugin ...` runs (`tests/test_platform.py`) |
@@ -653,10 +667,16 @@ runs this pattern in production:
   bare entry, which `enable name` removes.
 - Fixed: picker typing mode (after `/`) now shows `filter: /text█` plus a hint on the
   top line (§5.10).
-- Fixed: `disable` warns "NOT gitignored" once per real park dir, and only when the
-  dir sits inside a git work tree (the fix is then `echo '<dir>/' >> <repo>/.gitignore`);
-  a dir outside any work tree (e.g. `~/.agents/skills-disabled`) gets no warning, as
-  `git status` cannot be dirtied there. `status` still shows its `[NOT gitignored]` tag.
+- Fixed: `disable` warns "NOT gitignored" once per run, and only when the central
+  park dir `~/.agent-toggle/parked/` sits inside a git work tree that does not ignore
+  it (a tracked `$HOME`; the fix is then `echo '.agent-toggle/parked/' >> <repo>/.gitignore`);
+  a harness home that is its own repo never sees parked items. `status` shows
+  `[NOT gitignored]` only in that case (one check per run, not one per dir).
+- Fixed: `install-shims` no longer appends `<dir>-disabled/` lines to a harness-home
+  `.gitignore`. Inside a git work tree it reports the stale ones (exact lines only, and
+  only once `migrate` emptied the dir they cover), asks y/n on a terminal, removes them
+  with `--gitignore` (atomic, every other byte kept), skips the check with
+  `--no-gitignore`; `--dry-run` only reports.
 - Fixed: `install-shims` skips the OpenCode shim (`covered by <path>`) when an alias dir
   it scans (`~/.claude/skills`, `~/.agents/skills`, a `skills.paths` entry) already
   holds a shim with the same text. The claude shim is not that: its text says `--harness`
@@ -788,6 +808,7 @@ Known gaps found at the final verification (not fixed; each has a stated ceiling
 | 2026-10-02 | Explicit security model (§6.1): same-user local scope; validate every name at the boundary; profiles never carry paths; no subprocess shell; trusted publishing | ad hoc per-feature checks; defending against same-user malware | the tool moves files and holds secrets and is driven by AI agents that read untrusted text; a written model makes each control testable, and same-user malware could already edit every file involved |
 | 2026-10-02 | No cache, no export/import command, no account sync; profiles are the portable unit | mtime-keyed cost cache; `export`/`import` bundle; hosted sync of `~/.agent-toggle` | cost is ms-scale file reads; state is machine-local and backups hold secrets; sync would need a server or account (the update check is a read-only GET, not sync) and dotfiles + git already solve it |
 | 2026-10-02 | `profile apply` toggles only the items a profile mentions; profiles are CLI only in phase 2 | apply = exact set (disable everything else); picker `p` key | an exact-set apply would park anything installed after the save; the picker key adds UI surface before the semantics have been used |
+| 2026-10-09 | User-scope parks move to `~/.agent-toggle/parked/user/<owner>/<dir>/`; `migrate` moves the old `<dir>-disabled/` siblings (breaking on-disk layout) | sibling `<dir>-disabled/` (old); a park dir nested in the live dir (`skills/.disabled/`) | a harness home is often a git repo and must not be written into beyond the shim; nesting fails because Claude Code loads `commands/` and `rules/` recursively; project scope already parked centrally |
 
 ## 11. Open questions (need a real install to answer)
 

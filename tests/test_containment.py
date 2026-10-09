@@ -19,7 +19,7 @@ class NameValidationTest(SandboxCase):
     def assert_refused(self, *argv: str) -> None:
         self.assertEqual(cli.main(list(argv)), 2, argv)
         self.assertTrue((self.victim / "SKILL.md").is_file(), "victim was moved")
-        self.assertFalse((self.home / "skills-disabled").exists(), "something was parked")
+        self.assertFalse(self.user_parked("skills").exists(), "something was parked")
 
     def test_dotdot_name_is_refused(self) -> None:
         self.assert_refused("disable", "skill", "../../victim")
@@ -70,7 +70,7 @@ class SymlinkItemTest(SandboxCase):
         (target / "SKILL.md").write_text("x\n", encoding="utf-8")
         (self.home / "skills" / "linked-skill").symlink_to(target)
         self.assertEqual(cli.main(["disable", "skill", "linked-skill"]), 0)
-        parked = self.home / "skills-disabled" / "linked-skill"
+        parked = self.user_parked("skills", "linked-skill")
         self.assertTrue(parked.is_symlink())
         self.assertTrue((target / "SKILL.md").is_file(), "link target was moved")
         self.assertEqual(cli.main(["enable", "skill", "linked-skill"]), 0)

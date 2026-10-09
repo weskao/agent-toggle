@@ -33,10 +33,16 @@ CATALOG: dict[str, str] = {
     "help.config.desc": "不帶動作時開啟設定；`test` 送出一則 Telegram 訊息，"
                         "`sync-ci` 設定 GitHub repo secrets。",
     "help.install_shims.summary": "把 skill shim 寫入每個已安裝的 harness",
-    "help.install_shims.desc": "安裝 agent-toggle skill，讓各 harness 的 agent 能呼叫此工具。"
+    "help.install_shims.desc": "安裝 agent-toggle skill，讓各 harness 的 agent 能呼叫此工具，"
+                             "並回報 harness 家目錄 .gitignore 中舊版遺留的 "
+                             "`<dir>-disabled/` 行（在終端機上會詢問 y/n）。"
                              "在終端機上，接著逐一詢問 y/n 修復 doctor 能自動修復的問題。",
-    "help.migrate.summary": "匯入舊版 ~/.claude-toggle 的狀態",
-    "help.migrate.desc": "一次性匯入舊版 claude-toggle 工具的狀態。",
+    "help.opt.gitignore": "不詢問，直接移除過期的停放目錄 .gitignore 行",
+    "help.opt.no_gitignore": "略過過期停放目錄 .gitignore 行的檢查",
+    "help.migrate.summary": "匯入 ~/.claude-toggle 狀態；搬移舊版停放目錄",
+    "help.migrate.desc": "一次性匯入舊版 claude-toggle 工具的狀態，並把舊版的 "
+                         "`<dir>-disabled/` 停放目錄從 harness 家目錄搬到 "
+                         "~/.agent-toggle/parked/user/。可安全重複執行。",
     "help.arg.names": "一或多個項目名稱",
     "help.opt.all": "還原所有停用的項目",
     "help.arg.profile_action": "要執行的動作",

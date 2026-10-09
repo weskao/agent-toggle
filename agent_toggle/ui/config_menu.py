@@ -43,7 +43,9 @@ class Row:
 def _shims(ctx: Ctx, res: Result) -> None:
     # lazy: cli imports config, which imports this module
     from ..cli import cmd_install_shims
-    cmd_install_shims(argparse.Namespace(dry_run=False, harness=None), res)
+    # prompt=False: no y/n under curses; stale .gitignore lines are only reported
+    cmd_install_shims(argparse.Namespace(dry_run=False, harness=None, gitignore=False,
+                                         no_gitignore=False, prompt=False), res)
 
 
 def _doctor(ctx: Ctx, res: Result) -> None:

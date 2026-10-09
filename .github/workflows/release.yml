@@ -95,7 +95,8 @@ jobs:
           agent-toggle status
           agent-toggle disable skill demo-skill
           test ! -e "$HOME/.claude/skills/demo-skill"
-          test -f "$HOME/.claude/skills-disabled/demo-skill/SKILL.md"
+          test -f "$HOME/.agent-toggle/parked/user/claude/skills/demo-skill/SKILL.md"
+          test ! -e "$HOME/.claude/skills-disabled"     # nothing parked inside a harness home
           agent-toggle enable skill demo-skill
           test -f "$HOME/.claude/skills/demo-skill/SKILL.md"
-          test ! -e "$HOME/.claude/skills-disabled/demo-skill"
+          test ! -e "$HOME/.agent-toggle/parked/user/claude/skills/demo-skill"

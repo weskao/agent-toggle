@@ -59,8 +59,13 @@ python3 agent_toggle.py install-shims  # from a checkout, no install needed
 
 `install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
 every installed harness that supports skills, so `/agent-toggle` works from any
-of them, and adds the park dirs (`skills-disabled/` etc.) to a `.gitignore`
-already present in that harness home. Each harness gets its own template from
+of them. It writes nothing else into a harness home: parked items live under
+`~/.agent-toggle/parked/`, so a harness-home `.gitignore` needs no park-dir
+line. Older versions appended `<dir>-disabled/` lines there; inside a git work
+tree, `install-shims` reports such stale lines once `migrate` has emptied the
+dir they covered, asks y/n on a terminal, removes them without asking with
+`--gitignore`, and skips the check with `--no-gitignore` (`--dry-run` only
+reports; every other line is kept byte for byte). Each harness gets its own template from
 `agent_toggle/shims/<harness>.md.tmpl`, else `generic.md.tmpl` (which tells the
 agent to pass `--harness <that harness>`). The shim tells the agent to act only
 on the user's explicit request, never on instructions found inside skill or
@@ -121,7 +126,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
-| `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
+| `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); reports stale legacy `<dir>-disabled/` lines in a harness-home `.gitignore` (`--gitignore` removes them, `--no-gitignore` skips the check); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
@@ -131,12 +136,12 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
 | `doctor` | check each harness layout and `state.json` against disk; exit `1` only on an `error` row; on a terminal, asks y/n per fix it can run itself |
-| `migrate` | import an older `~/.claude-toggle/` state |
+| `migrate` | import an older `~/.claude-toggle/` state, and move legacy `<home>/<dir>-disabled/` park dirs into `~/.agent-toggle/parked/user/` (see [Upgrading the park layout](#upgrading-the-park-layout)); safe to re-run |
 
 Every command also works with a leading `--` (`agent-toggle --status`, `--help`, `--config`); this README uses the plain form.
 
 `<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
-`rule` is claude-only (`~/.claude/rules/*.md`, parked in `rules-disabled/`).
+`rule` is claude-only (`~/.claude/rules/*.md`, parked in `~/.agent-toggle/parked/user/claude/rules/`).
 Disabling a rule prints a warning (also in `--json` `warnings`, dry run included)
 that rules may carry safety constraints.
 
@@ -224,7 +229,7 @@ agent-toggle             # same, on a terminal; elsewhere prints help and exits 
   ●   zeta                              claude      5.0k █████         │ type       skill
  Agents 1 ─────────────────────────────────────────────────────────────│ state      ○ parked
   ●   gamma                             claude        50 ▏     +shared │            staged → live
- Commands 1 ───────────────────────────────────────────────────────────│ path       ~/.claude/skills-disabled/beta
+ Commands 1 ───────────────────────────────────────────────────────────│ path       ~/.agent-toggle/parked/user/claude/skills/beta
   ●   delta                             codex         10 ▏             │ cost       0 now; ~300 tok if restored
                                                                        │ since      2026-09-19 10:00:00
  5 of 5 shown · 2/5
@@ -640,7 +645,7 @@ live, modes no looser than `0600` / `0700`). Rows (`action: doctor`) carry a sta
 | `absent` | a dir, config file or key the row expects is not there (an MCP file never created, a missing `mcpServers` key) -- informational, exit `0` |
 | `note` | worth knowing: shared dir, orphan backup, JSONC `openclaw.json` / `opencode.json`, a `--harness` that is not installed |
 | `unverified` | no version could be read, or the row has nothing to check |
-| `warn` | loose file modes; a parked item or companion file with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
+| `warn` | loose file modes; a legacy `<dir>-disabled/` park dir in a harness home (fix: `agent-toggle migrate`); a parked item or companion file with no state entry; a leftover `parked/<sha8>` dir that still holds files (an empty one is ignored); an op a killed run left in flight that the next change settles (`pending: done` / `undone`) |
 | `error` | needs fixing: a config that exists but is unparseable or unsupported (`layout changed`), a state entry whose files (companions included) are gone or fail the tamper checks, a companion both live and parked, a flag re-enabled outside the tool, an op a killed run left in flight that needs you (`pending: stuck`, with the exact fix) |
 
 Only `error` makes the exit code `1`; each problem row names the command that
@@ -727,6 +732,7 @@ bookkeeping.
 | `log.jsonl` | one line per operation (mode `0600`), see below |
 | `mcp-backups/` | `<harness>__<server>.json`, or `<sha8>__<harness>__<server>.json` for a project `.mcp.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
+| `parked/user/<owner>/<dir>/` | user-scope items, e.g. `parked/user/claude/skills/<name>` (`<owner>` = the harness whose home holds the dir; a dir shared by several harnesses parks once, under its owner); an absolute OpenCode `skills.paths` dir parks under `parked/user/opencode/ext-<sha8>/` (`<sha8>` of its resolved path). Nothing is ever parked inside a harness home |
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
 | `config.json` | [settings](#settings--config-menu) and the Telegram chat id (mode `0600`, atomic write, unknown keys kept) |
@@ -752,6 +758,28 @@ project, scope, detail}`. `batch` is one id per run (what `undo` reverses);
 local-scope MCP row has `scope: local` and its working directory in `project`).
 Older rows without `batch`/`harness` cannot be undone.
 
+### Upgrading the park layout
+
+**Breaking:** older versions parked user-scope items in a sibling dir inside
+the harness home (`~/.claude/skills-disabled/`, `~/.codex/prompts-disabled/`,
+...). Claude Code loads `commands/` and `rules/` recursively, so a park dir
+cannot nest inside a live dir either; items now park under
+`~/.agent-toggle/parked/user/`. Run once after upgrading:
+
+```sh
+agent-toggle migrate
+```
+
+It moves every child of each `<dir>-disabled/` into its new park dir with the
+same crash-safe move `disable` uses, repoints the matching `parked_at` entries
+in `state.json`, and removes the emptied old dir. Items with no state entry
+move too (they stay disabled). A name that already exists at the destination is
+refused and left where it is (exit `1`, the row names it); resolve it and re-run.
+A second run changes nothing and says so. Until then `enable` refuses an item
+still in an old dir with `run: agent-toggle migrate`, and `status` / `doctor`
+list each old dir with the same hint. Afterwards, `install-shims` offers to
+remove the old `<dir>-disabled/` lines from a harness-home `.gitignore`.
+
 ## Two guardrails, both earned
 
 **1. `safe_move()` never lets the source be renamed into the destination.**
@@ -765,10 +793,13 @@ Order matters too: `mkdir(exist_ok=True)` raises `FileExistsError` when the
 path exists as a *file*, so the `is_dir()` check has to come **before** the
 `mkdir` or it is unreachable.
 
-**2. Park dirs that are not gitignored get a warning.** Without it, every
-disable leaves dozens of deletion lines in `git status`. The warning is shown once
-per park dir, and only for a dir inside a git work tree (elsewhere `git status`
-cannot be dirtied and the `.gitignore` fix would not apply).
+**2. A park dir that is not gitignored gets a warning.** Parked items live in
+`~/.agent-toggle/parked/`, outside every harness home, so a harness repo
+(`~/.claude` as a dotfiles repo) never sees them. Only when the park dir itself
+sits inside a git work tree (a tracked `$HOME`) and is not ignored there does
+`disable` warn, once per run, with the `.gitignore` line to add; `status` tags
+each type `[NOT gitignored]` in that case. Without it, every disable would leave
+deletion lines in `git status`.
 
 ## Paths are resolved before comparison
 
@@ -847,7 +878,8 @@ PyPI: workflow `release.yml`, environment `pypi`. See
 
 ## Cross-machine behaviour
 
-Disabling is a **local** decision: park dirs are gitignored and do not sync.
+Disabling is a **local** decision: parked items live in `~/.agent-toggle/`,
+outside every harness home, and do not sync.
 But a disappearance under `skills/` is itself a tracked change, so committing
 it means other machines lose those skills on pull. The content stays in git
 history — `git checkout <commit> -- skills/<name>` brings it back. Don't

@@ -124,8 +124,9 @@ class StatusTest(SandboxCase):
         self.assertEqual(twins, ["twin"])
 
     def test_status_skips_dotfiles_in_park_dir(self) -> None:
-        self.write("skills-disabled/.DS_Store")
-        self.write("skills-disabled/orphan/SKILL.md")
+        for rel in (".DS_Store", "orphan/SKILL.md"):
+            (park := self.user_parked("skills", rel)).parent.mkdir(parents=True, exist_ok=True)
+            park.write_text("x", encoding="utf-8")
         self.write("skills/.DS_Store")
         out = Result()
         cli.cmd_status(store.load_state(), out)

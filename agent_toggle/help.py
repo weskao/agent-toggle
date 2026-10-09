@@ -132,18 +132,29 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
                                      "sync-ci: show the plan; set nothing"))],
             examples=["config", "config test", "config sync-ci --dry-run"]),
         "install-shims": Cmd(
-            "install-shims [--dry-run]",
+            "install-shims [--dry-run] [--gitignore | --no-gitignore]",
             t("help.install_shims.summary", "write the skill shim into every installed harness"),
             t("help.install_shims.desc", "Install the agent-toggle skill so each harness's "
-                                         "agent can call this tool. "
+                                         "agent can call this tool, and report stale "
+                                         "legacy `<dir>-disabled/` lines in a harness "
+                                         "home's .gitignore (asked y/n on a terminal). "
                                          "On a terminal, then offers y/n for each "
                                          "problem doctor can fix."),
-            options=[_dry_run()],
-            examples=["install-shims --dry-run", "install-shims --harness codex"]),
+            options=[_dry_run(),
+                     ("--gitignore", t("help.opt.gitignore",
+                                       "remove stale park-dir .gitignore lines without asking")),
+                     ("--no-gitignore", t("help.opt.no_gitignore",
+                                          "skip the stale park-dir .gitignore check"))],
+            examples=["install-shims --dry-run", "install-shims --harness codex",
+                      "install-shims --gitignore"]),
         "migrate": Cmd(
             "migrate",
-            t("help.migrate.summary", "import an older ~/.claude-toggle state"),
-            t("help.migrate.desc", "Import the state of the older claude-toggle tool once."),
+            t("help.migrate.summary",
+              "import ~/.claude-toggle state; move legacy park dirs"),
+            t("help.migrate.desc", "Import the state of the older claude-toggle tool once, "
+                                   "and move legacy `<dir>-disabled/` park dirs out of the "
+                                   "harness homes into ~/.agent-toggle/parked/user/. "
+                                   "Safe to re-run."),
             examples=["migrate"]),
     }
 

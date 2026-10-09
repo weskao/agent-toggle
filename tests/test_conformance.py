@@ -83,16 +83,12 @@ class ConformanceTest(CliCase):
     def test_park_dirs_come_from_the_table(self) -> None:
         self.load("claude")
         self.run_cli("disable", "rule", "demo-rule")
-        self.assertTrue((self.tmp / ".claude/rules-disabled/demo-rule.md").is_file())
+        self.assertTrue(self.user_parked("rules", "demo-rule.md").is_file())
         self.load("codex")
         self.run_cli("disable", "command", "demo-prompt", "--harness", "codex")
-        self.assertTrue((self.tmp / ".codex/prompts-disabled/demo-prompt.md").is_file())
+        self.assertTrue(self.user_parked("prompts", "demo-prompt.md", owner="codex").is_file())
         self.run_cli("install-shims")
-        ignore = (self.tmp / ".claude/.gitignore")
-        self.assertFalse(ignore.exists())      # only an existing .gitignore is touched
-        ignore.write_text("", encoding="utf-8")
-        self.run_cli("install-shims", "--harness", "claude")
-        self.assertIn("rules-disabled/", ignore.read_text(encoding="utf-8").splitlines())
+        self.assertFalse((self.tmp / ".claude/.gitignore").exists())    # parks need no ignore line
 
     def test_claude_cli_pairs_drive_the_cli(self) -> None:
         self.load("claude")
@@ -191,7 +187,7 @@ class FlagMechanismTest(CliCase):
         (d / "SKILL.md").write_text("x", encoding="utf-8")
         before = file_bytes(self.tmp)
         self.assertEqual(self.run_cli("disable", "skill", "plain-skill", "--harness", "openclaw")[0], 0)
-        self.assertTrue((self.tmp / ".openclaw/skills-disabled/plain-skill/SKILL.md").is_file())
+        self.assertTrue(self.user_parked("skills", "plain-skill", "SKILL.md", owner="openclaw").is_file())
         self.assertEqual(self.state()["disabled"]["openclaw:skill:plain-skill"]["mechanism"], "move")
         self.assertEqual(self.run_cli("enable", "skill", "plain-skill", "--harness", "openclaw")[0], 0)
         self.assertEqual(file_bytes(self.tmp), before)
@@ -304,7 +300,7 @@ class FlagMechanismTest(CliCase):
         rc, out, err = self.run_cli("disable", "skill", "demo-skill", "--harness", "openclaw")
         self.assertEqual(rc, 0)
         self.assertIn("duplicate key", out + err)
-        self.assertTrue((self.tmp / ".openclaw/skills-disabled/demo-skill/SKILL.md").is_file())
+        self.assertTrue(self.user_parked("skills", "demo-skill", "SKILL.md", owner="openclaw").is_file())
         self.assertEqual(f.read_bytes(), before)
 
     def test_flag_file_not_editable_is_refused(self) -> None:

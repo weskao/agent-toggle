@@ -62,9 +62,18 @@ class LayoutTest(DoctorCase):
         self.assertEqual(len(self.rows(rows, "absent", harness="claude", type="skill")), 1)
 
     def test_park_dir_alone_counts_as_present(self) -> None:
+        self.user_parked("skills").parent.mkdir(parents=True)
+        (self.home / "skills").rename(self.user_parked("skills"))
+        rc, rows = self.doctor("--harness", "claude")
+        self.assertEqual(self.rows(rows, "absent", type="skill"), [])
+
+    def test_legacy_park_dir_counts_as_present_and_asks_for_migrate(self) -> None:
         (self.home / "skills").rename(self.home / "skills-disabled")
         rc, rows = self.doctor("--harness", "claude")
         self.assertEqual(self.rows(rows, "absent", type="skill"), [])
+        (warn,) = self.rows(rows, "warn", harness="claude", type="skill")
+        self.assertIn("legacy park dir", warn["detail"])
+        self.assertIn("agent-toggle migrate", warn["detail"])
 
     @unittest.skipUnless(HAS_TOMLLIB, "needs tomllib")
     def test_truncated_toml_is_layout_changed(self) -> None:
@@ -165,7 +174,7 @@ class StateTest(DoctorCase):
     def test_missing_parked_item_is_an_error(self) -> None:
         self.assertEqual(self.run_cli("disable", "skill", "demo-skill")[0], 0)
         self.assertEqual(self.doctor()[0], 0)
-        shutil.rmtree(self.home / "skills-disabled" / "demo-skill")
+        shutil.rmtree(self.user_parked("skills", "demo-skill"))
         rc, rows = self.doctor()
         self.assertEqual(rc, 1)
         (bad,) = self.rows(rows, "error", harness="claude", type="skill", name="demo-skill")
@@ -177,7 +186,7 @@ class StateTest(DoctorCase):
         self.run_cli("disable", "skill", "demo-skill", "--harness", "codex")
         rc, env = self.run_json("status")
         self.assertEqual(self.rows(env["results"], "stale"), [])
-        shutil.rmtree(self.tmp / ".codex" / "skills-disabled" / "demo-skill")
+        shutil.rmtree(self.user_parked("skills", "demo-skill", owner="codex"))
         before = snapshot(self.tmp)
         rc, env = self.run_json("status")
         self.assertEqual(rc, 0)                      # a health report, not a failure
@@ -303,7 +312,7 @@ class StateTest(DoctorCase):
         orphan = fs.parked_dir() / "deadbeef" / "skills-disabled" / "old-skill"
         orphan.mkdir(parents=True)
         (orphan / "SKILL.md").write_text("x", encoding="utf-8")
-        stray = self.home / "skills-disabled" / "stray-skill"
+        stray = self.user_parked("skills", "stray-skill")
         stray.mkdir(parents=True)
         fs.backup_dir().mkdir(parents=True)
         (fs.backup_dir() / "claude__gone-mcp.json").write_text("{}", encoding="utf-8")
@@ -316,10 +325,10 @@ class StateTest(DoctorCase):
 
     def test_orphan_fix_depends_on_the_live_copy(self) -> None:
         for n, text in (("same", "a"), ("drift", "old")):
-            self.write(f"skills-disabled/{n}/SKILL.md", text)
+            self.write_parked(f"skills/{n}/SKILL.md", text)
             self.write(f"skills/{n}/SKILL.md", "a" if n == "same" else "new")
-        self.write("skills-disabled/solo/SKILL.md")
-        self.write("agents-disabled/solo-agent.md")
+        self.write_parked("skills/solo/SKILL.md")
+        self.write_parked("agents/solo-agent.md")
         rc, rows = self.doctor("--harness", "claude")
         self.assertEqual(rc, 0, rows)
         got = {r["name"]: r for r in self.rows(rows, "warn") if r.get("orphan")}
@@ -331,14 +340,14 @@ class StateTest(DoctorCase):
         # parked-only: put it back, then re-park through the tool so state records it
         self.assertIn("`agent-toggle disable skill solo`", got["solo"]["detail"])
         self.assertIn("`agent-toggle disable agent solo-agent`", got["solo-agent.md"]["detail"])
-        self.assertTrue((self.home / "skills-disabled/same").exists())    # still read-only
+        self.assertTrue(self.user_parked("skills", "same").exists())    # still read-only
 
 
 class ReadOnlyTest(DoctorCase):
     def test_doctor_writes_nothing(self) -> None:
         self.run_cli("disable", "skill", "demo-skill")
         self.run_cli("disable", "mcp", "example-mcp", "--harness", "opencode")
-        shutil.rmtree(self.home / "skills-disabled" / "demo-skill")      # an error row
+        shutil.rmtree(self.user_parked("skills", "demo-skill"))      # an error row
         (self.tmp / ".codex" / "config.toml").write_text("[x", encoding="utf-8")
         before = snapshot(self.tmp)
         for argv in ((), ("--json",)):
@@ -360,7 +369,7 @@ class FixTest(DoctorCase):
     def test_no_answers_change_nothing(self) -> None:
         fs.private_dir(fs.state_dir())
         fs.state_dir().chmod(0o755)
-        self.write("skills-disabled/solo/SKILL.md")
+        self.write_parked("skills/solo/SKILL.md")
         before = snapshot(self.tmp)
         asked, _ = self.fixes(answer=False)
         self.assertEqual(len(asked), 1 if os.name == "nt" else 2, asked)   # no loose-mode fix on Windows
@@ -396,14 +405,14 @@ class FixTest(DoctorCase):
 
     def test_orphans_identical_deleted_parked_only_restored_differs_left(self) -> None:
         for n, text in (("same", "a"), ("drift", "old")):
-            self.write(f"skills-disabled/{n}/SKILL.md", text)
+            self.write_parked(f"skills/{n}/SKILL.md", text)
             self.write(f"skills/{n}/SKILL.md", "a" if n == "same" else "new")
-        self.write("skills-disabled/solo/SKILL.md", "solo")
+        self.write_parked("skills/solo/SKILL.md", "solo")
         asked, _ = self.fixes()
         self.assertEqual(len(asked), 2, asked)               # differs needs a human
-        self.assertFalse((self.home / "skills-disabled/same").exists())
+        self.assertFalse(self.user_parked("skills", "same").exists())
         self.assertEqual((self.home / "skills/solo/SKILL.md").read_text(encoding="utf-8"), "solo")
-        self.assertTrue((self.home / "skills-disabled/drift").exists())
+        self.assertTrue(self.user_parked("skills", "drift").exists())
 
     def test_backup_deleted_only_when_its_server_is_live_again(self) -> None:
         self.claude_json({"mcpServers": {"back-mcp": {"command": "x"}}})
