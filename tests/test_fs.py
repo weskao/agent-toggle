@@ -47,11 +47,13 @@ class SafeMoveTest(SandboxCase):
         parked = fs.safe_move(link, fs.user_park("claude", "skills"))
         self.assertEqual(parked.resolve(), real.resolve())        # not dangling while parked
         back = fs.safe_move(parked, self.home / "skills")
-        self.assertEqual(os.readlink(back), "../.repos/r/demo")   # the round trip is exact
+        # the round trip is exact (Windows re-aims with native separators)
+        self.assertEqual(os.path.normpath(os.readlink(back)), os.path.normpath("../.repos/r/demo"))
         absolute = self.home / "skills" / "abs"
         absolute.symlink_to(real)
+        text = os.readlink(absolute)                              # Windows may add \\?\
         self.assertEqual(os.readlink(fs.safe_move(absolute, fs.user_park("claude", "skills"))),
-                         str(real))                               # absolute: untouched
+                         text)                                    # absolute: untouched
 
 
 POSIX = os.name != "nt"
