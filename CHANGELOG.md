@@ -1,3 +1,8 @@
+## [0.7.2] - 2026-10-09
+
+### ⚙️ Miscellaneous Tasks
+
+- **release:** Bump version to 0.7.2
 ## [0.7.1] - 2026-10-09
 
 ### 🐛 Bug Fixes
