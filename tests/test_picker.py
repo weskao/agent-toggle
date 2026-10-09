@@ -465,6 +465,19 @@ class LayoutTest(ScreenCase):
         self.assertIn("alpha beta", body)
         self.assertIn("gamma delta", body)
 
+    def test_long_description_is_cut_so_the_fields_still_show(self) -> None:
+        r = model.Row("claude", "skill", "solo", True, description="word " * 200,
+                      mechanism="move")
+        lines = picker.detail_lines(r, 30, theme.ASCII, height=12)
+        self.assertLessEqual(len(lines), 12)
+        flat = ["".join(s for s, _ in line) for line in lines]
+        self.assertTrue(any(line.rstrip().endswith("...") for line in flat))
+        self.assertTrue(any(line.startswith("mechanism") for line in flat))
+        r.staged = False                     # toggling adds the "staged" line, not a cut
+        toggled = picker.detail_lines(r, 30, theme.ASCII, height=12)
+        self.assertLessEqual(len(toggled), 12)
+        self.assertEqual(lines[:8], toggled[:8])
+
     def test_detail_pane_description_is_translated(self) -> None:
         self.addCleanup(i18n.set_language, i18n.LANGUAGE)
         i18n.set_language("zh-TW")

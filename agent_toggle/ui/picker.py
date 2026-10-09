@@ -201,22 +201,18 @@ def heading(type_: str, count: int, width: int, g: theme.Glyphs) -> list[theme.S
     return [(label, "title"), (str(count), "muted"), (" " + g.h * max(0, rest), "muted")]
 
 
-def detail_lines(r: Row, width: int, g: theme.Glyphs) -> list[list[theme.Segment]]:
-    """The detail pane for the cursor row: one segment list per screen line."""
+def detail_lines(r: Row, width: int, g: theme.Glyphs,
+                 height: int | None = None) -> list[list[theme.Segment]]:
+    """The detail pane for the cursor row: one segment list per screen line. With `height`,
+    the description is cut (with an ellipsis) so the fields below it still fit."""
     lab = 12                                 # "description" is 11 cells; leave a gap
     val = max(1, width - lab)
     out = [[(theme.truncate(r.name, width, g.ellipsis), "title")], []]
+    rest: list[list[theme.Segment]] = []
 
     def field(label: str, text: str, role: str = "text") -> None:
         for n in range(0, max(1, len(text)), val):          # a long path wraps
-            out.append([(pad(label if n == 0 else "", lab), "muted"), (text[n:n + val], role)])
-
-    if r.description:                        # frontmatter prose, not a path
-        chunks = wrap_cells(r.description, val)
-        label = t("picker.d.description", "description")
-        for n, chunk in enumerate(chunks):
-            out.append([(pad(label if n == 0 else "", lab), "muted"), (chunk, "text")])
-        out.append([])
+            rest.append([(pad(label if n == 0 else "", lab), "muted"), (text[n:n + val], role)])
 
     state = t("picker.state.live", "live") if r.enabled else t("picker.state.parked", "parked")
     field(t("picker.d.harness", "harness"), r.harness, theme.harness_role(r.harness))
@@ -242,7 +238,20 @@ def detail_lines(r: Row, width: int, g: theme.Glyphs) -> list[list[theme.Segment
         field(t("picker.d.since", "since"), r.since[:19].replace("T", " "))
     if r.mechanism:
         field(t("picker.d.mechanism", "mechanism"), r.mechanism)
-    return out
+
+    if r.description:                        # frontmatter prose, not a path
+        chunks = wrap_cells(r.description, val)
+        # the "staged" line comes and goes with Space; reserving it keeps the text from jumping
+        spare = len(rest) + (not r.changed)
+        room = len(chunks) if height is None else max(1, height - len(out) - spare - 1)
+        if len(chunks) > room:
+            chunks = chunks[:room - 1] + [theme.truncate(" ".join(chunks[room - 1:]), val,
+                                                         g.ellipsis)]
+        label = t("picker.d.description", "description")
+        for n, chunk in enumerate(chunks):
+            out.append([(pad(label if n == 0 else "", lab), "muted"), (chunk, "text")])
+        out.append([])
+    return out + rest
 
 
 def chips(v: View, g: theme.Glyphs) -> list[tuple[str, str]]:
@@ -322,7 +331,7 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
         else:
             put(y, row_segments(line[1], lw, v, g, line[1] is cursor_row, any_shared))
     if dw:
-        pane = detail_lines(cursor_row, dw - 2, g) if cursor_row else []
+        pane = detail_lines(cursor_row, dw - 2, g, body) if cursor_row else []
         for i in range(body):
             put(BODY_TOP + i, [(g.v, "muted"), (" ", "text"), *(pane[i] if i < len(pane) else [])],
                 lw)
