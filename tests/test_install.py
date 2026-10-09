@@ -158,6 +158,8 @@ class InstallShimsCase(SandboxCase):
         for d in ("skills-disabled/", "agents-disabled/", "commands-disabled/"):
             self.assertEqual(lines.count(d), 1, d)
         self.assertIn("keep", lines)
+        for d in ("prompts-disabled/", "command-disabled/"):            # codex / opencode only
+            self.assertNotIn(d, lines)
         self.assertFalse((self.tmp / ".codex" / ".gitignore").exists())   # never created
 
     def test_foreign_file_is_refused_others_proceed(self) -> None:

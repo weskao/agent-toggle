@@ -410,9 +410,6 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
     A harness switched off in settings is skipped unless named with --harness."""
     table = harnesses()
     on = set(settings.enabled_harnesses())
-    park = sorted({f"{sub}-disabled" for h in table.values()
-                   for subs in h.dirs.values() for sub in subs
-                   if not Path(sub).is_absolute()})     # skills.paths redirects live elsewhere
     verb = "would install" if args.dry_run else "installed"
     installed = found = 0
     for hname, h in table.items():
@@ -477,6 +474,9 @@ def cmd_install_shims(args: argparse.Namespace, out: Result) -> None:
         # `git status`; only touch a .gitignore that already exists.
         ignore = home / ".gitignore"
         if ignore.is_file():
+            # only this harness's own park dirs; skills.paths redirects live elsewhere
+            park = sorted({f"{sub}-disabled" for subs in h.dirs.values() for sub in subs
+                           if not Path(sub).is_absolute()})
             body = ignore.read_text(encoding="utf-8")
             missing = [f"{d}/" for d in park if f"{d}/" not in body.splitlines()]
             if missing and not args.dry_run:
