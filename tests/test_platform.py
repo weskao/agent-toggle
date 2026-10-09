@@ -11,6 +11,7 @@ from base import SandboxCase
 
 from agent_toggle import fs
 from agent_toggle import mechanisms as mech
+from agent_toggle.backends import plugin_cli
 
 
 class PluginIdTest(SandboxCase):
@@ -101,6 +102,17 @@ class CaseRulesTest(SandboxCase):
     def test_nested_names_use_a_colon_on_every_os(self) -> None:
         self.write("commands/group/sub/tool.md")
         self.assertEqual(mech.live_names(self.home / "commands", "command"), ["group:sub:tool"])
+
+
+class ClaudeBinTest(SandboxCase):
+    def test_off_path_windows_install_is_found_by_its_exe_name(self) -> None:
+        """The native Windows installer writes ~/.local/bin/claude.exe; PATH may lack it."""
+        plugin_cli.which = lambda name: None
+        exe = self.tmp / ".local" / "bin" / "claude.exe"
+        exe.parent.mkdir(parents=True)
+        exe.touch()
+        exe.chmod(0o755)
+        self.assertEqual(plugin_cli.claude_bin(), str(exe))
 
 
 if __name__ == "__main__":

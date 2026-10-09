@@ -28,7 +28,8 @@ def claude_bin() -> str | None:
     if found:
         return found
     home = fs.home()
-    for cand in (home / ".local/bin/claude", home / ".claude/local/claude"):
+    for cand in (home / ".local/bin/claude", home / ".local/bin/claude.exe",   # .exe: Windows
+                 home / ".claude/local/claude"):
         if cand.is_file() and os.access(cand, os.X_OK):
             return str(cand)
     return None
