@@ -1,19 +1,3 @@
-## [Unreleased]
-
-### 💥 Breaking Changes
-
-- **park:** User-scope items now park under `~/.agent-toggle/parked/user/<owner>/<dir>/<name>` (an absolute OpenCode `skills.paths` dir under `parked/user/opencode/ext-<sha8>/`) instead of a sibling `<home>/<dir>-disabled/`; nothing but the skill shim is written into a harness home. **Upgrade step:** run `agent-toggle migrate` once. Until then `enable` refuses an item still in an old dir (`run: agent-toggle migrate`), and `status` / `doctor` list each old dir with the same hint
-- **install-shims:** No longer appends `<dir>-disabled/` lines to a harness-home `.gitignore`
-
-### 🚀 Features
-
-- **migrate:** Also moves every legacy `<dir>-disabled/` park dir into the central park dir (crash-safe `safe_move` per item), repoints `parked_at` in `state.json`, and removes the emptied old dir; items with no state entry move too; a name already at the destination is refused and left in place (exit `1`); re-running is safe and repairs entries a killed run left behind
-- **install-shims:** In a git work tree, reports stale `<dir>-disabled/` lines in a harness-home `.gitignore` once `migrate` has emptied the dir they covered; asks y/n on a terminal, `--gitignore` removes them without asking, `--no-gitignore` skips the check, `--dry-run` only reports; every other line is kept byte for byte
-
-### 🔧 Changed
-
-- **disable/status:** The "NOT gitignored" warning and `[NOT gitignored]` tag check the central park dir, so they appear only when `~/.agent-toggle/parked/` sits inside a git work tree that does not ignore it (e.g. a tracked `$HOME`)
-
 ## [0.6.2] - 2026-10-08
 
 ### ⚙️ Miscellaneous Tasks
