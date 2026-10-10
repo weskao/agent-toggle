@@ -167,7 +167,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `disable\|enable all <name>...` | every type on the harness with that name at once (skill, command, MCP, ...); a name with no match is an `error` row; one batch, so `undo` reverses it |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
-| `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
+| `profile save\|apply\|diff\|list\|delete\|rename` | named sets of live items; see [Profiles](#profiles) |
 | `config` | settings menu (curses, else a numbered list); `config --json` lists every setting and the package version; see [Settings & config menu](#settings--config-menu) |
 | `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
@@ -597,6 +597,8 @@ agent-toggle profile diff work                       # what apply would do; writ
 agent-toggle profile apply ~/dotfiles/agent-toggle/work.json --dry-run
 agent-toggle profile apply work
 agent-toggle profile list
+agent-toggle profile rename work flutter             # -> ~/.agent-toggle/profiles/flutter.json
+agent-toggle profile delete flutter
 ```
 
 **`apply` toggles only the items the profile mentions.** An item the profile
@@ -625,6 +627,14 @@ one batch, logged, undoable with `undo`).
   so a project profile can never disable the user's items.
 - `save` skips (with a warning) any item whose name `apply` would refuse, such as
   an MCP server called `team/search`, so a saved profile always applies.
+- `save` to an existing name overwrites it with the live state now; that is how a
+  profile is updated.
+- `delete <name>` and `rename <old> <new>` work on stored profiles only (a file
+  you saved with `--out` is yours to move or remove) and change no item. Both exit
+  `2` for a name with no stored profile or a path; `rename` also exits `2` when
+  `<new>` already exists (it never overwrites) or is not a valid profile name, and
+  keeps the file byte for byte. Neither takes `--dry-run` or `--project`: a
+  project profile is renamed or deleted by its name like any other.
 
 ## Undo and `enable --all`
 

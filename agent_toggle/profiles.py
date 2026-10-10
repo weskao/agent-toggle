@@ -8,6 +8,7 @@ the profile names that this machine lacks is skipped, not failed.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ MAX_BYTES = 1 << 20                      # a real profile is a few KB
 ITEM_KEYS = {"harness", "type", "name", "live"}
 WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                 *(f"LPT{i}" for i in range(1, 10))}     # not valid file names on Windows
-ACTIONS = ("save", "apply", "diff", "list")
+ACTIONS = ("save", "apply", "diff", "list", "delete", "rename")
 
 
 def _is_path(arg: str) -> bool:
@@ -201,6 +202,41 @@ def cmd_list(out: Result) -> None:
         out.row(None, None, p.stem, "list", "ok", detail, show=False, path=str(p))
 
 
+def _existing(name: str) -> Path:
+    """The stored profile `name`; exit 2 for a path or a name with no stored profile."""
+    if _is_path(name):
+        die(f"{name!r} looks like a path: delete and rename take a stored profile name", 2)
+    p = _stored_path(name)
+    if not p.is_file():
+        die(f"no profile named {name!r} (see: profile list)", 2)
+    return p
+
+
+def cmd_delete(name: str, out: Result) -> None:
+    p = _existing(name)
+    try:
+        p.unlink()
+    except OSError as e:
+        die(f"cannot delete profile {name!r}: {e.strerror or e}", 1)
+    out.say(f"deleted {name} ({p})")
+    out.row(None, None, name, "delete", "ok", str(p), show=False, path=str(p))
+
+
+def cmd_rename(old: str, new: str, out: Result) -> None:
+    src = _existing(old)
+    if _is_path(new):
+        die(f"{new!r} looks like a path: rename <old> <new-name>", 2)
+    dst = _stored_path(new)
+    if dst.exists():
+        die(f"profile {new!r} already exists; delete it first", 2)
+    try:
+        os.rename(src, dst)      # shortcut: a profile saved as `new` between the check and here is overwritten on POSIX
+    except OSError as e:
+        die(f"cannot rename profile {old!r}: {e.strerror or e}", 1)
+    out.say(f"renamed {old} -> {new} ({dst})")
+    out.row(None, None, new, "rename", "ok", f"from {old}", show=False, path=str(dst), old=old)
+
+
 def cmd_profile(args, out: Result) -> None:
     action, target = args.action, args.target
     if action not in ACTIONS:
@@ -208,16 +244,23 @@ def cmd_profile(args, out: Result) -> None:
     if (action == "list") == (target is not None):
         die("profile list takes no argument" if action == "list"
             else f"profile {action} needs a <name|file>", 2)
+    if (action == "rename") != (args.new_name is not None):
+        die("profile rename needs <old> <new>" if action == "rename"
+            else f"profile {action} takes one <name|file>", 2)
     if args.out and action != "save":
         die("--out only applies to `profile save`", 2)
     if args.dry_run and action not in ("apply", "diff"):
         die("--dry-run only applies to `profile apply` / `diff`", 2)
-    if args.project is not None and action == "list":
-        die("--project does not apply to `profile list`", 2)
+    if args.project is not None and action in ("list", "delete", "rename"):
+        die(f"--project does not apply to `profile {action}`", 2)
     project = project_dir(args.project, args.harness)
     if action == "save":
         cmd_save(target, args.out, args.harness, out, project)
     elif action == "list":
         cmd_list(out)
+    elif action == "delete":
+        cmd_delete(target, out)
+    elif action == "rename":
+        cmd_rename(target, args.new_name, out)
     else:                                  # diff is apply, planned only
         cmd_apply(target, args.harness, action == "diff" or args.dry_run, out, project)

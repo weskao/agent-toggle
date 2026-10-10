@@ -242,6 +242,38 @@ class SemanticsTest(ProfileCase):
         self.assertEqual((rc, [r["name"] for r in env["results"]]), (0, ["work"]))
 
 
+class LifecycleTest(ProfileCase):
+    """delete / rename work on stored profiles only, and never overwrite one."""
+
+    def stored(self) -> list[str]:
+        return sorted(f.stem for f in fs.profiles_dir().glob("*.json"))
+
+    def test_delete_removes_only_that_profile(self) -> None:
+        self.run_cli("profile", "save", "work")
+        self.run_cli("profile", "save", "home")
+        before = file_bytes(self.home)
+        rc, env = self.run_json("profile", "delete", "work")
+        self.assertEqual((rc, env["command"]), (0, "profile"))
+        self.assertEqual([(r["name"], r["action"], r["status"]) for r in env["results"]],
+                         [("work", "delete", "ok")])
+        self.assertEqual(self.stored(), ["home"])
+        self.assertEqual(file_bytes(self.home), before)      # no item is touched
+
+    def test_rename_keeps_the_bytes(self) -> None:
+        self.run_cli("profile", "save", "work")
+        data = (fs.profiles_dir() / "work.json").read_bytes()
+        rc, env = self.run_json("profile", "rename", "work", "flutter")
+        self.assertEqual((rc, [r["action"] for r in env["results"]]), (0, ["rename"]))
+        self.assertEqual(self.stored(), ["flutter"])
+        self.assertEqual((fs.profiles_dir() / "flutter.json").read_bytes(), data)
+        self.assertEqual(self.run_cli("profile", "apply", "flutter")[0], 0)
+
+    def test_text_output_names_the_change(self) -> None:
+        self.run_cli("profile", "save", "work")
+        self.assertIn("renamed work -> flutter",
+                      self.run_cli("profile", "rename", "work", "flutter")[1])
+        self.assertIn("deleted flutter", self.run_cli("profile", "delete", "flutter")[1])
+
 class ValidationTest(ProfileCase):
     def assert_usage(self, *argv: str) -> None:
         before = snapshot(self.tmp)
@@ -305,6 +337,26 @@ class ValidationTest(ProfileCase):
         self.assert_usage("profile", "apply", "x", "--out", "y.json")
         self.assert_usage("profile", "save", "x", "--dry-run")
         self.assert_usage("profile", "frobnicate")
+        self.assert_usage("profile", "delete")
+        self.assert_usage("profile", "rename", "x")
+        self.assert_usage("profile", "list", "x", "y")
+        self.assert_usage("profile", "apply", "x", "y")
+
+    def test_delete_and_rename_misuse_exit_2_and_change_nothing(self) -> None:
+        self.run_cli("profile", "save", "work")
+        self.run_cli("profile", "save", "home")
+        (self.tmp / "file.json").write_text("{}", encoding="utf-8")
+        self.assert_usage("profile", "delete", "missing")
+        self.assert_usage("profile", "delete", str(self.tmp / "file.json"))   # stored names only
+        self.assert_usage("profile", "delete", "..")
+        self.assert_usage("profile", "delete", "work", "--dry-run")
+        self.assert_usage("profile", "delete", "work", "--project", str(self.tmp))
+        self.assert_usage("profile", "rename", "missing", "new")
+        self.assert_usage("profile", "rename", "work", "home")      # never overwrites
+        self.assert_usage("profile", "rename", "work", "work")
+        self.assert_usage("profile", "rename", "work", "nul")
+        self.assert_usage("profile", "rename", "work", "x.json")
+        self.assert_usage("profile", "rename", "work", "a:b")
 
 
 @unittest.skipIf(os.name == "nt", "POSIX modes")

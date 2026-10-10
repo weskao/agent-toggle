@@ -79,18 +79,20 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             options=[_dry_run()],
             examples=["undo --dry-run", "undo"]),
         "profile": Cmd(
-            "profile save|apply|diff|list [name|file] [--out file] [--dry-run] [--project dir]",
-            t("help.profile.summary", "save / apply / diff / list named sets of live items"),
+            "profile save|apply|diff|list|delete|rename [name|file] [new] [--out file] [--dry-run] "
+            "[--project dir]",
+            t("help.profile.summary", "save / apply / diff / list / delete / rename named sets of live items"),
             t("help.profile.desc", "A profile records which items are live, so a whole "
                                    "setup can be switched in one step."),
-            args=[("save|apply|diff|list", t("help.arg.profile_action", "what to do")),
-                  ("name|file", t("help.arg.profile_target", "a profile name or a JSON file"))],
+            args=[("save|apply|diff|list|delete|rename", t("help.arg.profile_action", "what to do")),
+                  ("name|file", t("help.arg.profile_target", "a profile name or a JSON file")),
+                  ("new", t("help.arg.profile_new", "rename: the new name"))],
             options=[("--out file", t("help.opt.out", "save: write the profile here instead")),
                      ("--dry-run", t("help.opt.profile_dry_run",
                                      "apply: show the plan; change nothing")),
                      _project()],
             examples=["profile save work", "profile diff work", "profile apply work --dry-run",
-                      "profile list"]),
+                      "profile list", "profile rename work flutter", "profile delete flutter"]),
         "status": Cmd(
             "status",
             t("help.status.summary", "health check"),

@@ -262,6 +262,19 @@ class SpellingTest(CliCase):
         self.assertEqual(self.run_cli("--harness=codex", "--list"),
                          self.run_cli("--harness=codex", "list"))
         self.assertEqual(self.run_cli("--pick", "--json"), self.run_cli("pick", "--json"))
+        # delete / rename change disk, so each spelling gets its own profile
+        for a, b in (("one", "uno"), ("two", "dos")):
+            self.run_cli("profile", "save", a)
+        renamed = [self.run_json(*argv) for argv in (("profile", "rename", "one", "uno"),
+                                                     ("--profile", "rename", "two", "dos"))]
+        deleted = [self.run_json(*argv) for argv in (("profile", "delete", "uno"),
+                                                     ("--profile", "delete", "dos"))]
+        for (rc1, e1), (rc2, e2) in (renamed, deleted):
+            self.assertEqual((rc1, e1["command"], [r["action"] for r in e1["results"]]),
+                             (rc2, e2["command"], [r["action"] for r in e2["results"]]))
+            self.assertEqual(rc1, 0)
+        self.assertEqual(self.run_cli("profile", "delete", "uno"),
+                         self.run_cli("--profile", "delete", "uno"))   # same exit-2 error
 
     def test_help_topics_behave_the_same_with_and_without_dashes(self) -> None:
         for topic in ("version", "help", "status", "config"):
