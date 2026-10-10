@@ -36,3 +36,10 @@ Rules:
   compares output and exit code.
 - `README.md` and the shims document the plain form; the `--` form is a
   convenience, not a second documented interface.
+
+## Cross-platform
+
+When modifying code, also consider whether it runs on macOS, Linux, and Windows
+(paths, separators, shell commands, line endings, `$HOME` vs `%USERPROFILE%`,
+file locking, symlinks, terminal/ANSI support). If a change is platform-specific,
+guard it and say so.
