@@ -1,5 +1,7 @@
 # agent-toggle
 
+PyPI: <https://pypi.org/project/agent-toggle/>
+
 Temporarily disable and restore AI-agent resources — skills, agents, commands,
 rules, plugins (mods included), MCP servers — across Claude Code, Codex, Grok CLI, OpenCode,
 OpenClaw, Copilot, Vibe, Devin and Antigravity — and show what each one costs at
