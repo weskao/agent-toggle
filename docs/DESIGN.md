@@ -56,7 +56,7 @@ first push.
 | state | `~/.agent-toggle/state.json` (schema v3, atomic write), `log.jsonl`, `mcp-backups/`, `companions/`, `lock` |
 | MCP scopes | Claude user + local scope (project path recorded); codex and grok through the TOML backend; claude.ai connectors parked per existing project (`disabledMcpServers`) |
 | cost | `cost` command and picker column (chars / 4 estimate) |
-| UI | curses picker: cost column, sort, harness/type filters, `/` text filter, plugins included, `--dry-run` |
+| UI | curses picker: cost column, sort, harness/type filters, `/` text filter, plugins (mods in their own group) included, `--dry-run` |
 | AI access | `SKILL.md` shim using `--json`, written by `install-shims` |
 
 ### What is strong and must be kept

@@ -1,7 +1,7 @@
 # agent-toggle
 
 Temporarily disable and restore AI-agent resources — skills, agents, commands,
-rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode,
+rules, plugins (mods included), MCP servers — across Claude Code, Codex, Grok CLI, OpenCode,
 OpenClaw, Copilot, Vibe, Devin and Antigravity — and show what each one costs at
 session start.
 
@@ -122,7 +122,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 
 | command | what it does |
 |---|---|
-| `ui` (alias `pick`) | interactive picker — harness tabs, type groups, cost bars, search, sort, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope; see [Interactive picker](#interactive-picker) |
+| `ui` (alias `pick`) | interactive picker — harness tabs, type groups (plus a Mods group), cost bars, search, sort, profiles (`p`); `--dry-run` shows the plan for what you stage and changes nothing; `--project <dir>` picks in a repo's own scope; see [Interactive picker](#interactive-picker) |
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
@@ -143,6 +143,8 @@ Every command also works with a leading `--` (`agent-toggle --status`, `--help`,
 
 `<type>` = `skill` / `agent` / `command` / `rule` / `plugin` / `mcp`.
 `rule` is claude-only (`~/.claude/rules/*.md`, parked in `~/.agent-toggle/parked/user/claude/rules/`).
+A **mod** (a claude plugin that loads UI code, see [Mods](#mods)) is type `plugin` on the
+command line: `disable plugin blast-radius@example-marketplace`.
 Disabling a rule prints a warning (also in `--json` `warnings`, dry run included)
 that rules may carry safety constraints.
 
@@ -243,18 +245,14 @@ What is on screen:
 - **Title bar**: version and a summary (resources, live tokens, staged changes and their token effect).
 - **Harness tab bar**: `All` plus each enabled harness, with counts. Harnesses switched off in
   the [settings](#settings--config-menu) are hidden.
-- **Rows grouped by type** (Skills, Agents, Commands, ...) under a heading with a count.
+- **Rows grouped by type** (Skills, Agents, Commands, Rules, Plugins, Mods, MCP) under a heading
+  with a count.
   `●` is live, `○` parked (`*` / `o` in ASCII); a `+` / `-` before the name marks a staged change,
   and `+shared` marks a directory another harness also reads.
 - **Cost column**: estimated startup tokens (chars / 4, about +-25 %) with a colored bar. A parked
   row shows `(N)` in brackets, what restoring it would load. Plugins appear as rows too (via
   `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
-  A plugin whose `hooks/hooks.json` has a top-level `modules` key is a **mod** (checked in
-  its install path and in every cached copy under `~/.claude/plugins/cache/<marketplace>/<name>/`,
-  so a parked mod still counts; it loads
-  `.mjs`/`.tsx` code that draws UI) and is listed under its own **Mods** heading, right
-  after Plugins; `t` and the `picker_type` setting take `mod` too. It still toggles as a
-  plugin, and profiles store it as one.
+  Mods get their own **Mods** heading right after Plugins (see [Mods](#mods)).
 - **Detail pane** at 100 columns or wider: the file's frontmatter `description` (skills,
   agents, commands, rules), then harness, type, state, staged, path, cost, since,
   mechanism, and what it is shared with.
@@ -314,6 +312,28 @@ row's name, `/text` to filter (`/` alone clears it),
 `p <number|name>` to stage one and `p save <name>` to save the live state, `a` to
 apply, `q` (or end of input) to cancel.
 
+### Mods
+
+A mod is a claude plugin whose `hooks/hooks.json` has a top-level `modules` key, for example
+`{ "modules": ["./register.tsx"] }`: it loads `.mjs` / `.tsx` code that can draw UI (a pane,
+a band above the prompt, buttons) and change Claude Code's behaviour. A plugin with no
+`hooks.json`, or with only ordinary hooks (shell commands such as `PreToolUse`), is a plain
+plugin: it ships skills, commands, agents, MCP servers or hooks and draws nothing.
+
+- The check reads the install path `claude plugin list` reports and every cached version
+  under `~/.claude/plugins/cache/<marketplace>/<name>/`, so a parked mod is still a mod.
+  To list the installed mods by hand:
+
+  ```sh
+  grep -l modules ~/.claude/plugins/cache/*/*/*/hooks/hooks.json
+  ```
+
+- The picker lists mods under **Mods**, right after Plugins. `t` cycles to it, the
+  `picker_type` setting can open on it, and a search for `mod` or `mods` finds every mod.
+- A mod is still a plugin everywhere else: it toggles through `claude plugin
+  enable/disable`, `disable plugin <id>` reaches it, profiles store it as `plugin`, and
+  `list` / `cost` show it with the plugins.
+
 The chrome (title, tabs, footer, help, detail labels) is translated when `language` is
 `zh-TW`; item names and paths are never translated.
 
@@ -355,7 +375,7 @@ tool does not know are kept):
 | `harness.<name>` | `true` / `false`, for `claude` `codex` `grok` `opencode` `openclaw` `copilot` `vibe` `devin` `agy` | `true` | |
 | `picker_sort` | `name` / `cost` | `name` | |
 | `picker_harness` | `all` or a harness name | `all` | |
-| `picker_type` | `all` or a type | `all` | |
+| `picker_type` | `all`, a type, or `mod` | `all` | |
 | `telegram_chat_id` | a number, `-100...` or `@channel` | unset | `TG_CHAT_ID` |
 
 The bot token is not in this file: it is in the OS keystore through telegram-kit
@@ -410,7 +430,7 @@ translated when `language` is `zh-TW`.
 
 | harness | home | skill | agent | command | rule | plugin | mcp |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ `~/.claude.json` |
+| claude | `~/.claude` | ✓ | ✓ | ✓ | ✓ | ✓ (mods too) | ✓ `~/.claude.json` |
 | codex | `~/.codex` | ✓ | ✓ | ✓ (`commands/` + `prompts/`) | — | — | ✓ `config.toml` |
 | grok | `~/.grok` | ✓ | — | — | — | — | ✓ `config.toml` |
 | opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` | ✓ | — | ✓ (`command/`) | — | — | ✓ `opencode.json` (flag, *assumed*) |

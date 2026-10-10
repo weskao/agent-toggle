@@ -43,7 +43,7 @@ A dash means the harness has no such resource this tool can toggle.
 
 | harness | home | skill | agent | command | rule | plugin | mcp |
 |---|---|---|---|---|---|---|---|
-| claude | `~/.claude` | `skills/` — move | `agents/` — move | `commands/` — move | `rules/` — move | native CLI (`claude plugin enable/disable`) | remove-with-backup |
+| claude | `~/.claude` | `skills/` — move | `agents/` — move | `commands/` — move | `rules/` — move | native CLI (`claude plugin enable/disable`); a plugin whose `hooks/hooks.json` has `modules` is a mod | remove-with-backup |
 | codex | `~/.codex` | `skills/` — move | `agents/` — move | `commands/` or `prompts/` — move | — (`rules/default.rules` is a permission file) | — (no CLI this tool can drive) | remove-with-backup |
 | grok | `~/.grok` | `skills/` — move | — | — | — | — | remove-with-backup |
 | opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (every OS) | every `skills.paths[]` entry of `opencode.json` (else `opencode.jsonc`; `~`, `$HOME/`, `${HOME}/` expanded, relative entries skipped), `skills/`, `skill/`, `~/.claude/skills`, `~/.agents/skills` — move | — (agents are config entries) | `command/` — move | — | — | flag |
