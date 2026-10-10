@@ -44,6 +44,7 @@ import argparse
 import contextlib
 import io
 import os
+import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -76,6 +77,7 @@ from .mechanisms import (
 )
 from .output import COLOR_MODES, CliError, Result, die, scan_color, use_color
 from .store import load_state, save_state
+from .ui import logo
 from .ui import theme as ui_theme
 
 
@@ -764,6 +766,9 @@ def _main(argv: list[str], color: str) -> int:
             text = (helptext.version_help(on) if topic == "version"
                     else helptext.command_help(topic, on, default) if topic
                     else helptext.top_help(on, default))
+            if topic is None:
+                logo.banner(sys.stdout, settings.get("logo"), on,
+                            shutil.get_terminal_size().columns)
             print(ui_theme.encodable(text, sys.stdout))     # an ASCII stdout must not crash
             return 2 if bare else 0
         args = build_parser().parse_args(argv)

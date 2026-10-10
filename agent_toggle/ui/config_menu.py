@@ -16,16 +16,18 @@ import argparse
 import contextlib
 import io
 import sys
+import time
 from dataclasses import dataclass
 from typing import Callable
 
 from .. import __version__, config, doctor, fs, harnesses, i18n, settings, undo
 from ..i18n import t
 from ..output import CliError, Result, use_color
-from . import theme
+from . import logo, theme
 from .theme import Segment, cell_width
 
 MAX_INPUT = 256          # an inline field stops growing here (a paste-flood backstop)
+_IDLE = "idle"           # Menu.key's "no key for logo.IDLE seconds"
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,9 @@ ROWS: tuple[Row, ...] = (
     Row("choice", lambda: t("config.color", "Color"), key="color",
         help=lambda: t("config.help_color",
                        "auto: color on a terminal only. --color and NO_COLOR still win.")),
+    Row("choice", lambda: t("config.logo", "Logo"), key="logo",
+        help=lambda: t("config.help_logo", "The logo above help and this menu: color, mono, "
+                                         "animated (a light sweep) or off.")),
     # Named in its own script in both languages, so the row stays findable right after
     # switching to a language the user cannot read.
     Row("choice", lambda: t("config.language", "Language / 語言"), key="language",
@@ -468,33 +473,86 @@ class Menu:
         import curses
         self.curses, self.win, self.ctx = curses, win, ctx
         self.g = theme.get_glyphs(sys.stdout)
-        self.palette = theme.init_curses_colors(ctx.use_color(sys.stdout))
+        self.recolor()
         self.cur, self.top = _move(0, 1), 0
         self.enter = ("\n", "\r", curses.KEY_ENTER)
+        self.pending = None                         # a key read during the logo's sweep
+        self.logo_at: tuple[tuple[str, ...], int] | None = None    # (rows, x) last drawn
+
+    def recolor(self) -> None:
+        self.palette = theme.init_curses_colors(self.ctx.use_color(sys.stdout))
+        self.logo_attrs = None if self.palette.mono else logo.curses_attrs(self.curses)
 
     def draw(self, msg: Segment = ("", "text"), editing: str | None = None) -> None:
         self.ctx.refresh()
         if self.ctx.recolor:
-            self.palette = theme.init_curses_colors(self.ctx.use_color(sys.stdout))
+            self.recolor()
             self.ctx.recolor = False
         h, w = self.win.getmaxyx()
-        self.top = _scroll(self.cur, self.top, max(1, h - 5))
-        self.paint(screen(self.ctx, self.cur, self.top, h, w, self.g, msg, editing))
+        # the logo only when the whole menu still fits beside it: it never costs a row
+        rows = () if self.ctx.values["logo"] == "off" or not self.g.unicode else \
+            logo.pick(w, h, len(ROWS) + 5)
+        self.logo_at = (rows, (w - len(rows[0])) // 2) if rows else None
+        top = len(rows) + 1 if rows else 0
+        self.top = _scroll(self.cur, self.top, max(1, h - top - 5))
+        self.paint(screen(self.ctx, self.cur, self.top, h - top, w, self.g, msg, editing), top)
 
-    def paint(self, lines: list[list[Segment]]) -> None:
+    def paint(self, lines: list[list[Segment]], top: int = 0) -> None:
+        """*lines* from screen row *top*; a non-zero *top* is room for the logo above."""
         self.win.erase()
+        if top and self.logo_at:
+            logo.draw_curses(self.win, 0, self.logo_at[1], self.logo_at[0],
+                             self.ctx.values["logo"], self.logo_attrs)
         for y, segs in enumerate(lines):
-            theme.draw_segments(self.win, y, 0, segs, self.palette)
+            theme.draw_segments(self.win, top + y, 0, segs, self.palette)
         self.win.refresh()
 
-    def key(self):
-        """The next key; Ctrl-C reads as "\\x03" and a dead input as None (quit)."""
+    def sweeps(self) -> bool:
+        return bool(self.logo_at) and self.logo_attrs is not None \
+            and self.ctx.values["logo"] == "animated"
+
+    def shimmer(self) -> None:
+        """One light sweep over the drawn logo. Any key ends it at once and is kept for
+        the next :meth:`key`."""
+        if not self.sweeps():
+            return
+        rows, x = self.logo_at
+        self.win.timeout(round(logo.PASS / logo.FRAMES * 1000))
+        try:
+            for glint in logo.sweep(len(rows[0])):
+                logo.draw_curses(self.win, 0, x, rows, "animated", self.logo_attrs, glint)
+                self.win.refresh()
+                try:
+                    self.pending = self.win.get_wch()
+                    break
+                except KeyboardInterrupt:
+                    self.pending = "\x03"
+                    break
+                except self.curses.error:           # the frame's timeout: no key yet
+                    pass
+        finally:
+            self.win.timeout(-1)
+        logo.draw_curses(self.win, 0, x, rows, "animated", self.logo_attrs)
+        self.win.refresh()
+
+    def key(self, idle: float | None = None):
+        """The next key; Ctrl-C reads as "\\x03", a dead input as None (quit), and *idle*
+        seconds without a key as ``_IDLE``."""
+        if self.pending is not None:
+            key, self.pending = self.pending, None
+            return key
+        start = time.monotonic()
+        if idle is not None:
+            self.win.timeout(round(idle * 1000))
         try:
             return self.win.get_wch()
         except KeyboardInterrupt:
             return "\x03"
-        except self.curses.error:
-            return None
+        except self.curses.error:                   # an instant error is a dead input
+            return _IDLE if idle is not None and time.monotonic() - start >= idle / 2 else None
+        finally:
+            if idle is not None:
+                self.win.timeout(-1)
 
     def ask(self, question: str) -> bool:
         self.draw((f"{question} {t('config.yes_no', '(y/n)')}", "warning"))
@@ -565,10 +623,15 @@ class Menu:
         return "", "text"
 
     def run(self) -> int:
-        c, msg = self.curses, ("", "text")
+        c, msg, idle = self.curses, ("", "text"), True     # idle=True: the entrance sweep
         while True:
             self.draw(msg)
-            key, msg, row = self.key(), ("", "text"), ROWS[self.cur]
+            if idle:
+                self.shimmer()
+            key = self.key(logo.IDLE if self.sweeps() else None)
+            if idle := key == _IDLE:
+                continue                            # sweep again; the message stays
+            msg, row = ("", "text"), ROWS[self.cur]
             if key in ("q", "Q", "\x1b", "\x03", None):
                 return 0
             if key == c.KEY_UP:

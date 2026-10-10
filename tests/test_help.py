@@ -43,7 +43,8 @@ class HelpTest(SandboxCase):
             for n in names:
                 self.assertIn(f"\n  {n} ", sections[head], (head, n))
         self.assertEqual(sum(ln.lstrip().startswith("--json") for ln in out.splitlines()), 1)
-        self.assertIn(cli.__version__, out.splitlines()[0])
+        title = next(ln for ln in out.splitlines() if ln.startswith("agent-toggle "))   # under the logo
+        self.assertIn(cli.__version__, title)
         self.assertIn("every command also works with a leading --", out)
 
     def test_per_command_help_is_the_same_in_every_spelling(self) -> None:

@@ -365,7 +365,7 @@ end of input, `q` or an empty line exits `0`
 
 | group | rows |
 |---|---|
-| General | Check for updates, Color, Language, Default harness |
+| General | Check for updates, Color, Logo, Language, Default harness |
 | Harnesses | one On/Off per harness, with `found ~/.x` or `not on this machine` |
 | Picker | default sort, harness filter, type filter |
 | Notifications | Telegram bot token (masked, last 4 characters shown), Telegram chat ID |
@@ -384,6 +384,7 @@ tool does not know are kept):
 |---|---|---|---|
 | `update_check` | `true` / `false` | `true` | `AGENT_TOGGLE_UPDATE_CHECK` |
 | `color` | `auto` / `always` / `never` | `auto` | `AGENT_TOGGLE_COLOR` |
+| `logo` | `color` / `mono` / `animated` / `off` | `animated` | `AGENT_TOGGLE_LOGO` |
 | `language` | `en` / `zh-TW` | `en` | `AGENT_TOGGLE_LANG` |
 | `default_harness` | a harness name | `claude` | `AGENT_TOGGLE_DEFAULT_HARNESS` |
 | `harness.<name>` | `true` / `false`, for `claude` `codex` `grok` `opencode` `openclaw` `copilot` `vibe` `devin` `agy` | `true` | |
@@ -439,6 +440,13 @@ options, examples and exit codes. `help <command>` shows that command's usage, a
 options and examples; `help help` is the overview, `help version` shows how to print the version,
 and an unknown command exits `2`. It honours `--color` and `NO_COLOR`, and is
 translated when `language` is `zh-TW`.
+
+The overview opens with the agent-toggle logo (cyan to blue to magenta): the large one from 97
+columns, a compact one from 49, none below that. Piped output gets the plain glyphs, a stream
+that cannot encode them gets none. The `logo` setting picks `color`, `mono` (one colour),
+`animated` (one light sweep, only on a colour terminal) or `off`. The config menu shows the same
+logo, centred, when the window is tall enough to fit the whole menu beside it; there,
+`animated` sweeps on entry and again after every 5 s without a key, and any key stops it.
 
 ## What each harness supports
 

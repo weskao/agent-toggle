@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import fs, harnesses
+from .ui import logo
 
 CHAT_ID_RE = re.compile(r"-?\d{1,20}|@[A-Za-z0-9_]{5,64}")
 HARNESS_NAMES: tuple[str, ...] = tuple(harnesses.build(Path("/")))
@@ -43,6 +44,7 @@ DEFAULTS: dict[str, Spec] = {
     "picker_harness": Spec("choice", "all", ("all", *HARNESS_NAMES)),
     "picker_type": Spec("choice", "all", ("all", *harnesses.TYPES, "mod")),
     "language": Spec("choice", "en", ("en", "zh-TW"), "AGENT_TOGGLE_LANG"),
+    "logo": Spec("choice", logo.DEFAULT_MODE, logo.MODES, "AGENT_TOGGLE_LOGO"),
     "telegram_chat_id": Spec("chat_id"),
 }
 _warned: dict[tuple[str, str], bool] = {}   # a dict: this module defines set()

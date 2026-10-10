@@ -77,7 +77,7 @@ class MenuCase(SandboxCase):
         self.addCleanup(setattr, i18n, "LANGUAGE", i18n.LANGUAGE)
         i18n.set_language("en")
         # base.py's AGENT_TOGGLE_UPDATE_CHECK=0 would win over the file; restored after
-        for var in ("AGENT_TOGGLE_UPDATE_CHECK", "AGENT_TOGGLE_COLOR", "AGENT_TOGGLE_LANG", "AGENT_TOGGLE_DEFAULT_HARNESS",
+        for var in ("AGENT_TOGGLE_UPDATE_CHECK", "AGENT_TOGGLE_COLOR", "AGENT_TOGGLE_LANG", "AGENT_TOGGLE_DEFAULT_HARNESS", "AGENT_TOGGLE_LOGO",
                     "TG_BOT_TOKEN", "TG_CHAT_ID"):
             self.addCleanup(self._restore_env, var, os.environ.get(var))
             os.environ.pop(var, None)
@@ -116,7 +116,7 @@ class CursesMenuTest(MenuCase):
         self.assertNotIn("q/Ctrl+C", help_line)
 
     def test_title_puts_version_next_to_the_name(self) -> None:
-        win, _ = self.menu(["q"])
+        win, _ = self.menu(["q"], size=(24, 100))    # too short for the logo
         first = win.text().splitlines()[0]
         self.assertIn(f"agent-toggle config  v{__version__}", first)
         self.assertLess(first.index(f"v{__version__}"), first.index("saves as you go"))
