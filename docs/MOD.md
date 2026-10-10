@@ -46,6 +46,7 @@ so a schema change and the mod's fix land in one PR and one CI run; the mod is
 | `/agent-toggle` | opens the pane titled `agent-toggle`; a pane the person asked for is placed at any width, and if no surface can place it a toast says so (`isPlaced` false) |
 | pane opens | runs `agent-toggle cost --json --harness claude`, draws the curses picker's look: bold title with the live-token total, a search line with the sort label, rows grouped by type (`model.py` GROUPS order, a heading with count and rule per group), green `●` live / yellow `○` parked, tokens (`(N)` for a parked row) and a bar, the cursor row in reverse video, a key-chip footer |
 | keys (after a click on the list) | `↑ ↓ PgUp PgDn Home End Ctrl-P Ctrl-N` move; `Space`/`Enter` toggle; `Tab` toggles and advances; `/` or a letter starts a search; `s` cycles sort (name, cost); `Backspace`, `Ctrl-U` edit; a click moves the cursor |
+| mouse wheel over the list (no click needed) | moves the cursor a row per tick, as the wheel sends Up/Down to the curses picker |
 | toggle a row | runs `agent-toggle <disable\|enable> <type> <name> --json --harness claude`, then re-runs `cost --json` and redraws; a toast carries `ok` or the error line. It applies at once: no staging, no Enter-to-apply |
 | search | terms ANDed over `type/name` and the group (`mod`, `mods`); with no hit, letters-in-order on the name (`ctxmd` finds `context-md`, status line says `≈ fuzzy match`); a second `Space` toggles. Command letters (`s`) act only while the query is empty |
 | `/agent-toggle` again | refreshes the list (re-open is idempotent) |
@@ -96,7 +97,7 @@ export type Row = { type: string; name: string; enabled: boolean; tokens: number
 
 declare module 'claude-code' {
   interface PluginState {
-    'agent-toggle': { rows: Row[]; busy: boolean; error: string }
+    'agent-toggle': { rows: Row[]; busy: boolean; error: string; wheel: number }
   }
 }
 ```
@@ -111,6 +112,9 @@ dropped, and the picker says `working…`; `error` is the last failure text or `
 - `session.start`: `$.command.register({ name: "agent-toggle", description })`. Does **not** open the pane unasked.
 - `command.run { command: "agent-toggle" }`: open pane, `refresh()`, return `{ text: "agent-toggle pane opened." }`.
 - `ui.message`: a `Client` post `{ op: "toggle", type, name, mod }` toggles that row if the list holds it.
+- `ui.scroll` on the pane: a `Client` gets no wheel events, and the picker never overflows its pane, so the
+  engine has nothing to scroll. The hook keeps the window, adds `by` to the `wheel` atom, and the picker
+  moves its cursor by the change. A list taller than the pane (the Button list) scrolls as usual.
 - `ui.render { component: "Pane", requestId: "agent-toggle" }`: on terminal and
   desktop (decided by `e.surface`: the element table lists `Client` everywhere) a
   `Client` of `picker.tsx` as tall as the pane's `scroll.bodyRows` or the content,
@@ -127,7 +131,7 @@ dropped, and the picker says `working…`; `error` is the last failure text or `
 |---|---|
 | manifest + hook surface | `claude plugin validate mod` |
 | types | `tsc -p mod` (after first load lays `.claude-plugin/types/`) |
-| behaviour | `claude plugin test mod` — 12 tests, driven by `ui.key`; the core one: a fake `process.run` returning two rows, press Space on the first, assert the second `process.run` argv is `["agent-toggle","disable","skill","a","--json","--harness","claude"]` and the toast is `ok` |
+| behaviour | `claude plugin test mod` — 13 tests, driven by `ui.key`; the core one: a fake `process.run` returning two rows, press Space on the first, assert the second `process.run` argv is `["agent-toggle","disable","skill","a","--json","--harness","claude"]` and the toast is `ok` |
 | manual | `claude --plugin-dir ./mod`, `/agent-toggle`, toggle one skill, confirm with `agent-toggle status` |
 
 CI: one extra job `mod` on `ubuntu-latest` that runs validate + test. It

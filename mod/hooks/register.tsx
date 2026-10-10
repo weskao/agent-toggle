@@ -7,6 +7,8 @@ const PANE = 'agent-toggle'
 const rows = atom({ plugin: 'agent-toggle', key: 'rows' } as const, [])
 const busy = atom({ plugin: 'agent-toggle', key: 'busy' } as const, false)
 const error = atom({ plugin: 'agent-toggle', key: 'error' } as const, '')
+// the wheel ticks over the picker, summed: picker.tsx moves its cursor by the change
+const wheel = atom({ plugin: 'agent-toggle', key: 'wheel' } as const, 0)
 
 type Result = { ok?: boolean; needs_new_session?: boolean; results?: Array<Record<string, unknown>> }
 
@@ -107,15 +109,22 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // the picker is no taller than its pane, so the engine has nothing to scroll: hand the ticks to the picker
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    if (e.contentRows > e.bodyRows) return next(e) // the Button list elsewhere scrolls as usual
+    await update($, wheel, n => n + e.by)
+    return {}
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Button, Text } = ui
-    const [all, isBusy, err] = await Promise.all([read($, rows), read($, busy), read($, error)])
+    const [all, isBusy, err, w] = await Promise.all([read($, rows), read($, busy), read($, error), read($, wheel)])
 
     // terminal and desktop: the picker itself, drawn with its own keys and scrolling (picker.tsx)
     if ('Client' in ui && (e.surface === 'terminal' || e.surface === 'desktop')) { // the table reports Client on every surface, so the surface decides
       const need = all.length + GROUPS.length + 5 // rows, a heading per group, the chrome
-      return <ui.Client key="picker" module="./picker.tsx" width="100%" height={Math.min(e.props.scroll?.bodyRows ?? 24, need)} props={{ rows: all, busy: isBusy, error: err }} />
+      return <ui.Client key="picker" module="./picker.tsx" width="100%" height={Math.min(e.props.scroll?.bodyRows ?? 24, need)} props={{ rows: all, busy: isBusy, error: err, wheel: w }} />
     }
 
     // mobile and vscode draw no Client: one Button per row, the surface scrolls

@@ -4,15 +4,15 @@ import type { Row } from '../types'
 
 // The curses picker's look and keys (agent_toggle/ui/picker.py), drawn by the engine.
 // Runs in a surface module: no `$`, so a toggle is posted to register.tsx's `ui.message` hook.
-type Props = { rows: Row[]; busy: boolean; error: string }
-type State = { cursor: number; top: number; query: string; typing: boolean; sort: 'name' | 'cost' }
+type Props = { rows: Row[]; busy: boolean; error: string; wheel: number }
+type State = { cursor: number; top: number; query: string; typing: boolean; sort: 'name' | 'cost'; wheel: number }
 type Item = { head: string; count: number } | { row: Row }
 
 // model.py GROUPS and type_label: mods sit right after plugins
 const GROUPS = ['skill', 'agent', 'command', 'rule', 'plugin', 'mod', 'mcp']
 const LABEL: Record<string, string> = { skill: 'Skills', agent: 'Agents', command: 'Commands', rule: 'Rules', plugin: 'Plugins', mod: 'Mods', mcp: 'MCP' }
 const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
-const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name' }
+const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name', wheel: 0 }
 const CHROME = 5 // title, search, status, chips, and one spare for the error line
 
 const groupOf = (r: Row) => (r.mod ? 'mod' : r.type)
@@ -69,6 +69,9 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     const r = rows[cursor]
     if (r && !props.busy) surface.post({ op: 'toggle', type: r.type, name: r.name, mod: r.mod })
   }
+  // the wheel moves the cursor, as it sends Up/Down to the curses picker; ticks from before this instance are not ours
+  if (!surface.state) surface.setState({ ...INIT, wheel: props.wheel })
+  else if (props.wheel !== s.wheel) go(cursor + props.wheel - s.wheel, { wheel: props.wheel })
 
   surface.onKey(e => {
     const k = e.key

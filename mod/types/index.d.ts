@@ -3,6 +3,6 @@ export type Row = { type: string; name: string; enabled: boolean; tokens: number
 
 declare module 'claude-code' {
   interface PluginState {
-    'agent-toggle': { rows: Row[]; busy: boolean; error: string }
+    'agent-toggle': { rows: Row[]; busy: boolean; error: string; wheel: number }
   }
 }

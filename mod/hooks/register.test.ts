@@ -137,4 +137,19 @@ describe('agent-toggle pane', () => {
     await tick()
     expect(argvs[1]).toEqual(['agent-toggle', 'disable', 'skill', 'a', '--json', '--harness', 'claude'])
   })
+
+  test('a wheel tick over the picker moves the cursor; over a list taller than the pane it scrolls as usual', async ($, on) => {
+    const reached: number[] = []
+    on('ui.scroll', (_$, e) => (reached.push(e.by), {}))
+    const { toggles, ui, tick } = await open($, on)
+    const tickDown = (contentRows: number) => $.ui.scroll({ component: 'Pane', requestId: 'agent-toggle', offset: 0, by: 1, bodyRows: 20, contentRows, origin: { kind: 'person' } })
+    await ui.advance(16) // a frame: the picker records where the wheel stood when it opened
+    await tickDown(9) // the picker fits the pane: the tick is the picker's
+    await tick()
+    await ui.advance(16)
+    await ui.key({ key: ' ' })
+    await tick()
+    await tickDown(40) // the Button list on vscode/mobile: the engine scrolls it
+    expect({ toggles: toggles(), reached }).toEqual({ toggles: ['enable skill b'], reached: [1] })
+  })
 })
