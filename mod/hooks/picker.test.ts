@@ -50,3 +50,16 @@ describe('picker scroll cues', () => {
     expect((await lines()).filter(t => /[↑↓] \d+$/.test(t))).toEqual([])
   })
 })
+
+describe('picker search', () => {
+  test('the term separator keeps the cursor: Space and Backspace match the same rows', async ($, on) => {
+    const { ui } = await open($, on, 30)
+    const status = async () => (await ui.find({ in: 'picker', type: 'Text', text: / shown/ }))?.text
+    for (const key of ['/', 's', 'down', 'down', 'down']) await ui.key({ key })
+    expect(await status()).toBe(' 30 of 30 shown · 4/30')
+    await ui.key({ key: ' ' })
+    expect(await status()).toBe(' 30 of 30 shown · 4/30')
+    await ui.key({ key: 'backspace' })
+    expect(await status()).toBe(' 30 of 30 shown · 4/30')
+  })
+})

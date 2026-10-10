@@ -97,12 +97,13 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     if (k === 'end') return go(rows.length - 1)
     if (k === 'return') return toggle()
     if (k === 'tab') return toggle(), go(cursor + 1)
-    if (k === 'backspace') return go(0, { query: s.query.slice(0, -1), typing: s.query.length > 1 })
+    // a trailing Space is only the term separator: the rows, and so the cursor, stay
+    if (k === 'backspace') return go(s.query.endsWith(' ') ? cursor : 0, { query: s.query.slice(0, -1), typing: s.query.length > 1 })
     if (e.ctrl && k === 'u') return go(0, { query: '', typing: false })
     if (k === ' ' || k === 'space') {
-      if (!searching) return toggle()
+      if (!s.query.trim()) return toggle() // as the curses picker: no term yet, nothing to separate
       if (s.query.endsWith(' ')) return toggle(), go(cursor, { query: s.query.trimEnd() }) // second Space toggles
-      return go(0, { query: s.query + ' ' })
+      return go(cursor, { query: s.query + ' ' })
     }
     if (k.length !== 1 || e.ctrl || e.meta) return
     if (!searching && k === 's') return go(0, { sort: s.sort === 'name' ? 'cost' : 'name' })
