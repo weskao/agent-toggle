@@ -1,0 +1,6 @@
+{
+  "name": "agent-toggle",
+  "description": "Claude Code mods for the agent-toggle CLI",
+  "owner": { "name": "weskao", "url": "https://github.com/weskao" },
+  "plugins": [{ "name": "agent-toggle", "source": "./mod", "description": "The agent-toggle picker as a pane inside Claude Code" }]
+}
