@@ -337,7 +337,8 @@ off under `--dry-run`. Esc closes the prompt.
 Nothing happens while the picker is open. Changes are staged, the screen is
 torn down, and only then do the real operations run, so their output (which
 companion files moved, which were kept because they are shared) is readable
-instead of fighting curses for the terminal.
+instead of fighting curses for the terminal. Claude Code sessions running the
+[pane mod](#claude-code-pane-mod) pick up the Claude changes within 5 s and reload them.
 
 Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
@@ -931,8 +932,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   ...), like `disable all <name>`; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state
   with an emoji and a bracketed tag (no colour codes, so nothing garbles; on the Linux console and the
-  legacy Windows console, where emoji draw as boxes, the tag alone): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (takes effect in a new
-  session)`, `⛔ [DISABLED] all: foo` after `n`, or `❌ [FAILED] disable skill: foo - <error>`.
+  legacy Windows console, where emoji draw as boxes, the tag alone): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (/reload-plugins)`,
+  `⛔ [DISABLED] rule: baz (takes effect in a new session)`, `⛔ [DISABLED] all: foo` after `n`, or `❌ [FAILED] disable skill: foo - <error>`.
   The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
 - Opening the pane shows the same braille spinner and `Loading resources…` as `agent-toggle ui`

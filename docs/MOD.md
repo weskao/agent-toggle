@@ -78,8 +78,15 @@ ui.message (the Client's post)            # input, not fact
   └─ toggle(row), using the list's own `enabled`
   └─ $.process.run(["agent-toggle", row.enabled ? "disable" : "enable",
                     row.type, row.name, "--json", "--harness", "claude"])
-  └─ $.ui.toast(ok ? (needs_new_session ? "ok — takes effect in a new session" : "ok") : error)
+  └─ needs_new_session → reload(): one $.command.run per kind, deferred a tick:
+       skill/command → /reload-skills, plugin → /reload-plugins, mcp → /mcp disable|enable <name>;
+       agent/rule have none ("takes effect in a new session")
+  └─ $.ui.toast(ok ? "<state> <type>: <name> (<reload or note>)" : error)
   └─ refresh()
+
+clock.every(5 s), started at session.start   # `agent-toggle ui` in another terminal
+  └─ $.fs.stat("~/.agent-toggle/reload.json"); mtime unchanged → nothing
+  └─ changed → read its claude rows → reload() → toast → refresh an open pane
 ```
 
 `cost --json` is used instead of `list --json` because its rows already carry
