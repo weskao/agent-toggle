@@ -173,7 +173,8 @@ class UpdateCheckTest(CliCase):
         self.addCleanup(env.stop)
         os.environ.pop("AGENT_TOGGLE_UPDATE_CHECK", None)
         for target, kw in ((update_check, {"fetch_pypi": mock.Mock(return_value=PYPI_99)}),
-                           (update_prompt, {"is_interactive": mock.Mock(return_value=False)})):
+                           (update_prompt, {"is_interactive": mock.Mock(return_value=False)}),
+                           (fs, {"WIN": False})):     # the panel/upgrade flow; Windows has its own test
             patch = mock.patch.multiple(target, **kw)
             patch.start()
             self.addCleanup(patch.stop)
@@ -238,6 +239,17 @@ class UpdateCheckTest(CliCase):
         self.assertIn("did not finish", run.call_args.kwargs["stdout"].getvalue())  # = stderr
         self.assertIn("upgrade did not finish — run it yourself: uv tool upgrade agent-toggle"
                       "\n  agent-toggle install-shims", err)
+
+    def test_windows_tty_only_hints_and_never_upgrades(self) -> None:
+        update_prompt.is_interactive.return_value = True
+        with mock.patch.object(fs, "WIN", True), \
+                mock.patch.object(update_prompt, "ask") as ask, \
+                mock.patch.object(update_prompt.subprocess, "run") as run:
+            rc, _, err = self.run_cli("--version")     # agent-toggle.exe cannot replace itself
+        self.assertEqual(rc, 0)
+        self.assertIn(HINT, err)
+        ask.assert_not_called()
+        run.assert_not_called()
 
     def test_tty_skip_version_and_ctrl_c(self) -> None:
         update_prompt.is_interactive.return_value = True
