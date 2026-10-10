@@ -52,6 +52,28 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
   }
 }
 
+// What `/agent-toggle <action>` and the model's `pane` tool both do; an empty argument opens.
+const ACTIONS = ['open', 'close', 'toggle']
+type Action = 'open' | 'close' | 'toggle'
+const isAction = (s: string): s is Action => ACTIONS.includes(s)
+const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]'
+const TOOL = 'mcp__agent-toggle__pane'
+
+async function pane($: Engine, action: Action): Promise<string> {
+  const isOpen = action === 'toggle' && (await $.ui.panes()).some(p => p.id === PANE)
+  if (action === 'close' || isOpen) {
+    await $.ui.close({ id: PANE })
+    return 'agent-toggle pane closed.'
+  }
+  await update($, rows, () => [])
+  const opened = await $.ui.open({ id: PANE, title: 'agent-toggle' })
+  if (!opened.isPlaced) $.ui.toast('agent-toggle: no surface could place the pane')
+  await update($, error, () => '')
+  await update($, busy, () => false) // state survives a hot reload: a cut-off call would leave busy true and drop every press
+  await exclusive($, () => refresh($))
+  return 'agent-toggle pane opened.'
+}
+
 // Bumped by each toggle: a refresh that started before one would draw that row's old state.
 // A module variable, not an atom: every read of one dispatch sees one moment. A hot reload resets it, harmlessly.
 let seq = 0
@@ -134,20 +156,23 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // Left deferred (behind ToolSearch): no schema cost in every prompt, the name is enough to find it.
+    await $.tool.register({
+      name: 'pane',
+      description: "Opens, closes or toggles the agent-toggle picker pane in the person's Claude Code session. Use when they ask to open/show or close/hide agent-toggle.",
+      inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ACTIONS } }, required: ['action'] },
+    })
+    // Refused when the install-shims skill already owns /agent-toggle; command.run still reaches this mod then.
     await $.command.register({
       name: 'agent-toggle',
       description: 'Toggle Claude Code resources in a pane',
-      argumentHint: '[close | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
-    })
+      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
+    }).catch(() => {})
 
     return next(e)
   })
 
   on('command.run', { command: 'agent-toggle' }, async ($, e) => {
-    if (/^close\b/i.test(e.args.trim())) {
-      await $.ui.close({ id: PANE })
-      return { text: 'agent-toggle pane closed.' }
-    }
     const words = e.args.trim().split(/\s+/)
     if (VERB.test(words[0] ?? '')) {
       const text = await runArgs($, words)
@@ -158,14 +183,14 @@ export const register: Register = on => {
       }
       return { text }
     }
-    await update($, rows, () => [])
-    const opened = await $.ui.open({ id: PANE, title: 'agent-toggle' })
-    if (!opened.isPlaced) $.ui.toast('agent-toggle: no surface could place the pane')
-    await update($, error, () => '')
-    await update($, busy, () => false) // state survives a hot reload: a cut-off call would leave busy true and drop every press
-    await exclusive($, () => refresh($))
+    const action = words[0].toLowerCase() || 'open'
+    return { text: isAction(action) ? await pane($, action) : USAGE }
+  })
 
-    return { text: 'agent-toggle pane opened.' }
+  // the model's `pane` tool (registered in session.start): "open/close agent-toggle" in a prompt lands here
+  on('tool.call', { tool: TOOL }, async ($, e) => {
+    const action = String((e as { action?: unknown }).action) // a tool's input fields sit on e itself
+    return isAction(action) ? { result: await pane($, action) } : { deny: `action must be one of: ${ACTIONS.join(', ')}` }
   })
 
   // A Client's post is input, not fact: toggle only a row the list holds, in the state the list has it.
