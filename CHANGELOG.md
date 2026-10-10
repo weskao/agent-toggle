@@ -1,3 +1,13 @@
+## [0.8.1] - 2026-10-10
+
+### 🚀 Features
+
+- **cost:** Mark mods in cost --json rows
+
+### 📚 Documentation
+
+- Document the cost --json mod flag
+- **mod:** Add the claude code pane mod design draft
 ## [0.8.0] - 2026-10-10
 
 ### 🚀 Features
