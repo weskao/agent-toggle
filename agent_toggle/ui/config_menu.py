@@ -137,11 +137,12 @@ class Ctx:
                     if s.env and settings.source(k) == "env"}
 
     def refresh_token(self) -> None:
-        self.token = self.token_env = False
+        self.token, self.token_env = "", False      # token: masked (stars + last chars), never raw
         if self.tk is not None:
             stored = self.store.get(self.tk.TOKEN_KEY)
-            self.token = bool(stored or config.credentials(self.tk, self.store)[0])
-            self.token_env = self.token and not stored
+            token = config.credentials(self.tk, self.store)[0]
+            self.token = self.tk.mask_secret(token) if token else ""
+            self.token_env = bool(token) and not stored
 
     def use_color(self, stream) -> bool:
         mode = self.color_mode if self.color_mode != "auto" else settings.get("color")
@@ -269,7 +270,7 @@ def value_segments(ctx: Ctx, row: Row, g: theme.Glyphs) -> list[Segment]:
     if row.kind == "secret":
         if not ctx.token:
             return [(t("config.not_set", "not set"), "muted")]
-        segs = [("••••" if g.unicode else "****", "choice")]
+        segs = [(ctx.token.replace("*", "•") if g.unicode else ctx.token, "choice")]
         return segs + [("  " + t("config.tag_env", "env"), "muted")] if ctx.token_env else segs
     value = ctx.values[row.key]
     if row.kind == "bool":

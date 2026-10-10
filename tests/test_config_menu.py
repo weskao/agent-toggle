@@ -212,6 +212,23 @@ class CursesMenuTest(MenuCase):
         self.menu([*to("Telegram chat"), "\n", *["\x7f"] * 7, "-", "\n", "q"])
         self.assertNotIn("telegram_chat_id", self.file())
 
+    def test_token_row_shows_mask_with_last_chars_never_the_token(self) -> None:
+        FakeStore.items = {"telegram_bot_token": "123456:ABCDEFtoken"}
+        ctx = self.ctx()
+        self.assertEqual(ctx.token, "********oken")
+        row = next(r for r in cm.ITEMS if r.kind == "secret")
+        shown = lambda g: "".join(s for s, _ in cm.value_segments(ctx, row, g))
+        self.assertEqual(shown(cm.theme.UNICODE), "••••••••oken")
+        self.assertEqual(shown(cm.theme.ASCII), "********oken")
+        self.assertNotIn("ABCDEF", shown(cm.theme.UNICODE))
+        # env fallback: masked too, tagged env; unset: "not set"
+        FakeStore.items = {}
+        with mock.patch.object(self.kit, "resolve_credentials",
+                               return_value=("999999:ZZZZwxyz", "")):
+            self.assertEqual(self.ctx().token, "********wxyz")
+            self.assertTrue(self.ctx().token_env)
+        self.assertEqual(self.ctx().token, "")
+
     def test_token_edit_is_hidden_and_stored(self) -> None:
         win, _ = self.menu([*to("Telegram bot"), "\n", *"sekrit", "\n", "q"])
         self.assertEqual(FakeStore.items["telegram_bot_token"], "sekrit")

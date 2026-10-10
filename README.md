@@ -368,7 +368,7 @@ end of input, `q` or an empty line exits `0`
 | General | Check for updates, Color, Language, Default harness |
 | Harnesses | one On/Off per harness, with `found ~/.x` or `not on this machine` |
 | Picker | default sort, harness filter, type filter |
-| Notifications | Telegram bot token (masked), Telegram chat ID |
+| Notifications | Telegram bot token (masked, last 4 characters shown), Telegram chat ID |
 | Tools | Health check (`doctor`; then asks y/n per fix it can run), Install shims, Undo last change (asks y/n), Send test message, Sync CI secrets (asks y/n); their output shows in an overlay |
 
 Keys: `↑` `↓` move (wraps, skips headings), `←` `→` cycle a value, `Enter` / `Space` change or run
