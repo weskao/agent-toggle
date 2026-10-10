@@ -27,18 +27,19 @@ uv tool install agent-toggle
 agent-toggle --version
 ```
 
-Straight from this repository, pinned to a release tag (`v0.5.1` is the current one;
-an unpinned `git+` URL installs whatever is on the default branch):
+Straight from this repository, pinned to a release tag (replace `vX.Y.Z` with one from
+[tags](https://github.com/weskao/agent-toggle/tags); an unpinned `git+` URL installs
+whatever is on the default branch):
 
 ```sh
-uv tool install git+https://github.com/weskao/agent-toggle@v0.5.1
+uv tool install git+https://github.com/weskao/agent-toggle@vX.Y.Z
 agent-toggle --version
 ```
 
 Alternatively, use `pipx`:
 
 ```sh
-pipx install agent-toggle             # from PyPI; or: pipx install git+https://github.com/weskao/agent-toggle@v0.5.1
+pipx install agent-toggle             # from PyPI; or: pipx install git+https://github.com/weskao/agent-toggle@vX.Y.Z
 ```
 
 From a checkout, either install it editable or run it in place:
@@ -236,7 +237,7 @@ agent-toggle             # same, on a terminal; elsewhere prints help and exits 
 ```
 
 ```
- agent-toggle  v0.5.1                                 5 resources · ~6.3k tok live · 1 staged (+300 tok)
+ agent-toggle  vX.Y.Z                                 5 resources · ~6.3k tok live · 1 staged (+300 tok)
  All 5 │ claude 4 │ codex 2
  🔍 Type to search (name, path, fuzzy)                                           type: All  sort: name
  Skills 3 ─────────────────────────────────────────────────────────────│ beta
