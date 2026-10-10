@@ -217,7 +217,7 @@ def detail_lines(r: Row, width: int, g: theme.Glyphs,
 
     state = t("picker.state.live", "live") if r.enabled else t("picker.state.parked", "parked")
     field(t("picker.d.harness", "harness"), r.harness, theme.harness_role(r.harness))
-    field(t("picker.d.type", "type"), r.type, "type")
+    field(t("picker.d.type", "type"), f"mod ({r.type})" if r.mod else r.type, "type")
     field(t("picker.d.state", "state"),
           f"{g.live if r.enabled else g.parked} {state}", "live" if r.enabled else "parked")
     if r.changed:
