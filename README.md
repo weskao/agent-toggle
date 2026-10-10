@@ -896,6 +896,10 @@ run your own checkout instead (edits reload as you save):
 claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 ```
 
+- `/agent-toggle` or `/agent-toggle open` opens the pane, `/agent-toggle close` closes it,
+  `/agent-toggle toggle` does whichever applies; any other argument prints the usage. Ctrl-X X
+  also closes it. Claude can do the same when you ask it to open or close agent-toggle: the mod
+  registers a `pane` tool (`mcp__agent-toggle__pane`, `action`: `open` | `close` | `toggle`).
 - It looks like the `ui` picker: a title with the live-token total, a search line, rows under
   type headings with counts, green `●` live / yellow `○` parked, tokens and a bar per row (a
   parked row shows `(N)`, what restoring it would load), the cursor row in reverse video, and a
