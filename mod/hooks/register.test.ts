@@ -151,6 +151,38 @@ describe('agent-toggle pane', () => {
     expect({ mid: [mid.enabled, mid.save], end: (await first()).enabled }).toEqual({ mid: [false, 100], end: true })
   })
 
+  test('n toggles every type with the row name, as one disable all, flipping only rows in its state', async ($, on) => {
+    const same = cost(row('skill', 'demo', true, 10), row('command', 'demo', true, 10), row('mcp', 'demo', false, 10), row('skill', 'other', true, 10))
+    let release = () => {}
+    const gate = new Promise<void>(r => (release = r))
+    const argvs: string[][] = []
+    on('process.run', async (_$, e) => {
+      argvs.push([...e.argv])
+      if (e.argv[1] === 'cost') return { value: done(0, same) }
+      await gate
+      return { value: OK }
+    })
+    on('ui.toast', () => ({ value: undefined }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
+    const pressed = ui.key({ key: 'n' }) // the cursor starts on skill/demo
+    for (let i = 0; i < 500; i++) await Promise.resolve()
+    const mid = ((await ui.drawn()) as any).props.props.rows.map((r: { type: string; name: string; enabled: boolean }) => `${r.type}/${r.name} ${r.enabled}`)
+    release()
+    await pressed
+    expect(argvs[1]).toEqual(['agent-toggle', 'disable', 'all', 'demo', '--json', '--harness', 'claude'])
+    expect(mid).toEqual(['skill/demo false', 'command/demo false', 'mcp/demo false', 'skill/other true'])
+  })
+
+  test('n types into a filter once one is started', async ($, on) => {
+    const { toggles, type, ui, tick } = await open($, on, cost(row('skill', 'an', true, 5), row('skill', 'b', true, 5)))
+    await type('/an')
+    await ui.key({ key: 'return' })
+    await tick()
+    expect(toggles()).toEqual(['disable skill an'])
+  })
+
   test('a pane with no list yet spins a Loading resources line, a frame at a time', async ($, _on) => {
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     const text = async () => (await ui.find({ type: 'Text', text: /Loading resources/, in: 'picker' }))?.text

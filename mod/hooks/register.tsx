@@ -78,9 +78,9 @@ async function pane($: Engine, action: Action): Promise<string> {
 // A module variable, not an atom: every read of one dispatch sees one moment. A hot reload resets it, harmlessly.
 let seq = 0
 
-// The row moves as cost --json reports it: a parked row costs 0 and would save what it cost. Applied twice it undoes itself.
-const flip = (row: Row) => (list: Row[]) =>
-  list.map(r => (r.type === row.type && r.name === row.name && r.mod === row.mod ? { ...r, enabled: !r.enabled, tokens: r.save, save: r.tokens } : r))
+// Each row moves as cost --json reports it: a parked row costs 0 and would save what it cost. Applied twice it undoes itself.
+const flip = (rows: Row[]) => (list: Row[]) =>
+  list.map(r => (rows.some(x => x.type === r.type && x.name === r.name && x.mod === r.mod) ? { ...r, enabled: !r.enabled, tokens: r.save, save: r.tokens } : r))
 
 async function refresh($: Engine) {
   const at = seq
@@ -98,24 +98,26 @@ async function refresh($: Engine) {
   await update($, rows, () => list)
 }
 
-async function toggle($: Engine, row: Row) {
+// `same`: every row named like `row` that is in `row`'s state, as the curses `n` key (`disable|enable all <name>`, one batch for undo)
+async function toggle($: Engine, row: Row, same?: Row[]) {
+  const moved = same ?? [row]
   try {
     let ran = false
     await exclusive($, async () => {
       ran = true
       seq++
       await update($, error, () => '')
-      await update($, rows, flip(row)) // drawn now, not after the CLI and the refresh
+      await update($, rows, flip(moved)) // drawn now, not after the CLI and the refresh
       // --harness: disable/enable otherwise fall back to the user's settings default_harness
-      const out = await cli($, ['agent-toggle', row.enabled ? 'disable' : 'enable', row.type, row.name, '--json', '--harness', 'claude'])
-      const type = row.mod ? 'mod' : row.type
+      const out = await cli($, ['agent-toggle', row.enabled ? 'disable' : 'enable', same ? 'all' : row.type, row.name, '--json', '--harness', 'claude'])
+      const type = same ? 'all' : row.mod ? 'mod' : row.type
       if (out) {
         const note = out.needs_new_session ? 'takes effect in a new session' : ''
         // a toast is plain text (no colour option, ANSI codes show as garbage): an emoji and an ASCII tag mark the state;
         // the tag still reads where the emoji draws as a box (old Windows consoles)
         $.ui.toast(`${row.enabled ? '⛔ [DISABLED]' : '✅ [ENABLED]'} ${type}: ${row.name}${note && ` (${note})`}`)
       } else {
-        await update($, rows, flip(row))
+        await update($, rows, flip(moved))
         $.ui.toast(`❌ [FAILED] ${row.enabled ? 'disable' : 'enable'} ${type}: ${row.name} - ${await read($, error)}`)
       }
     })
@@ -196,9 +198,10 @@ export const register: Register = on => {
   // A Client's post is input, not fact: toggle only a row the list holds, in the state the list has it.
   on('ui.message', async ($, e, next) => {
     const d = e.data as { op?: string; type?: string; name?: string; mod?: boolean } | null
-    if (e.element === 'picker' && d?.op === 'toggle') {
-      const row = (await read($, rows)).find(r => r.type === d.type && r.name === d.name && r.mod === (d.mod === true))
-      if (row) await toggle($, row)
+    if (e.element === 'picker' && (d?.op === 'toggle' || d?.op === 'same')) {
+      const list = await read($, rows)
+      const row = list.find(r => r.type === d.type && r.name === d.name && r.mod === (d.mod === true))
+      if (row) await toggle($, row, d.op === 'same' ? list.filter(r => r.name === row.name && r.enabled === row.enabled) : undefined)
     }
 
     return next(e)
