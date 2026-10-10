@@ -938,6 +938,11 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `undo`, `list`, `status`, `cost` or `doctor` runs the CLI instead of opening the pane and prints
   one line per result row: `/agent-toggle disable skill foo bar` (it adds `--json`, and
   `--harness claude` unless you pass `--harness`). A toggle reloads an open pane.
+- Inside Claude Code the mod then applies the change to the running session by queueing the slash
+  command for you, once per kind: skills and commands `/reload-skills`, plugins (mods included)
+  `/reload-plugins`, an MCP server `/mcp disable|enable <name>`. The toast names it, e.g.
+  `⛔ [DISABLED] skill: foo (/reload-skills)`. Agents and rules have no reload and still say
+  `takes effect in a new session`. If Claude refuses a queued command, a toast says so.
 - Needs `agent-toggle` on `PATH`.
 - On Windows `agent-toggle` must resolve to a real executable on `PATH` (a pip or uv install
   provides `agent-toggle.exe`).

@@ -67,11 +67,23 @@ describe('agent-toggle pane', () => {
     expect(toasts).toContain('❌ [FAILED] disable skill: a - not found')
   })
 
-  test('a toggle that needs a new session says so', async ($, on) => {
-    const { toasts, ui, tick } = await open($, on, COST, done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ status: 'ok' }] })))
+  test('a skill toggle queues /reload-skills and names it in the toast', async ($, on) => {
+    const ran: string[] = []
+    const clock = mock.clock(on)
+    on('command.run', { command: 'reload-skills' }, (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' }))
+    const { toasts, ui, tick } = await open($, on, COST, done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'skill', name: 'a', action: 'disable', status: 'ok' }] })))
     await ui.key({ key: ' ' })
     await tick()
-    expect(toasts).toContain('⛔ [DISABLED] skill: a (takes effect in a new session)')
+    await clock.advance(0)
+    expect(toasts).toContain('⛔ [DISABLED] skill: a (/reload-skills)')
+    expect(ran).toEqual(['reload-skills'])
+  })
+
+  test('a toggle with no reload (a rule) still says a new session is needed', async ($, on) => {
+    const { toasts, ui, tick } = await open($, on, cost(row('rule', 'r', true, 5)), done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'rule', name: 'r', action: 'disable', status: 'ok' }] })))
+    await ui.key({ key: ' ' })
+    await tick()
+    expect(toasts).toContain('⛔ [DISABLED] rule: r (takes effect in a new session)')
   })
 
   test('two simultaneous keys run exactly one toggle', async ($, on) => {
@@ -297,6 +309,17 @@ describe('agent-toggle pane', () => {
       opened: 0,
       text: 'disabled skill a\ndisabled skill b',
     })
+  })
+
+  test('/agent-toggle disable mcp runs /mcp disable <name> and reports it', async ($, on) => {
+    const ran: string[] = []
+    const clock = mock.clock(on)
+    on('command.run', { command: 'mcp' }, (_$, e) => (ran.push(`${e.command} ${e.args}`), { text: '' }))
+    on('process.run', () => ({ value: done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'mcp', name: 'x', action: 'disable', status: 'ok' }] })) }))
+    const r = await $.command.run({ command: 'agent-toggle', args: 'disable mcp x', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await clock.advance(0) // the /mcp run is deferred past the hook that reported it
+    expect(r.text).toBe('ok mcp x\n/mcp disable x')
+    expect(ran).toEqual(['mcp disable x'])
   })
 
   test('a failed CLI run from arguments says why; an explicit --harness is kept', async ($, on) => {

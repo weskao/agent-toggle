@@ -86,6 +86,29 @@ async function pane($: Engine, action: Action): Promise<string> {
   return 'agent-toggle pane opened.'
 }
 
+// The slash command that makes a toggled resource take effect in this session; agents and rules have none (a new
+// session). MCP is `/mcp enable|disable <name>` instead: it connects or disconnects the server too.
+const RELOAD: Record<string, string> = { skill: 'reload-skills', command: 'reload-skills', plugin: 'reload-plugins' }
+type Done = { type?: unknown; name?: unknown; action?: unknown; status?: unknown }
+
+// Queues one slash command per kind the CLI's ok disable/enable rows touched (what needs_new_session counts) and
+// answers the note for the person. Deferred a tick: `$.command.run` rejects inside a hook the turn is waiting on
+// (`/agent-toggle disable ...` is one), and runs once the session is idle; a refusal is toasted.
+function reload($: Engine, rows: Done[]): string {
+  const cmds = new Set<string>()
+  let later = false
+  for (const r of rows) {
+    if (r.status !== 'ok' || (r.action !== 'disable' && r.action !== 'enable')) continue
+    const cmd = r.type === 'mcp' ? `mcp ${r.action} ${r.name}` : RELOAD[String(r.type)]
+    cmd ? cmds.add(cmd) : (later = true)
+  }
+  for (const c of cmds) {
+    const [command, ...args] = c.split(' ')
+    $.clock.after(0, () => void $.command.run({ command: command!, args: args.join(' ') }).catch(err => $.ui.toast(`agent-toggle: /${c} failed - ${String(err)}`)))
+  }
+  return later ? 'takes effect in a new session' : [...cmds].map(c => `/${c}`).join(', ')
+}
+
 // Bumped by each toggle: a refresh that started before one would draw that row's old state.
 // A module variable, not an atom: every read of one dispatch sees one moment. A hot reload resets it, harmlessly.
 let seq = 0
@@ -128,7 +151,7 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
       const emoji = await emojiOk($)
       const tag = (glyph: string, text: string) => (emoji ? `${glyph} ${text}` : text)
       if (out) {
-        const note = out.needs_new_session ? 'takes effect in a new session' : ''
+        const note = out.needs_new_session ? reload($, out.results ?? []) : ''
         $.ui.toast(`${row.enabled ? tag('⛔', '[DISABLED]') : tag('✅', '[ENABLED]')} ${type}: ${row.name}${note && ` (${note})`}`)
       } else {
         await update($, rows, flip(moved))
@@ -164,7 +187,7 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
       .filter(r => r.type != null || r.name != null) // cost/list end with a summary row
       .map(r => [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '))
     for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
-    if (out.needs_new_session) lines.push('Takes effect in a new session.')
+    if (out.needs_new_session) lines.push(reload($, out.results ?? []))
     if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
     return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
   } catch (err) {
