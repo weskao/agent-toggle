@@ -76,12 +76,13 @@ Python 3.10+, no runtime dependencies. Then write the skill shim:
 
 ```sh
 agent-toggle install-shims             # installed, or: ./install.sh (a thin wrapper)
-python3 agent_toggle.py install-shims  # from a checkout, no install needed
+python3 agent_toggle.py install-shims  # from a checkout
 ```
 
 `install-shims` writes a thin skill shim (`skills/agent-toggle/SKILL.md`) into
 every installed harness that supports skills, so `/agent-toggle` works from any
-of them. It writes nothing else into a harness home: parked items live under
+of them. The shim calls `agent-toggle` on `PATH` and never a checkout path, so install
+the package (or `pip install -e .`) before relying on it. It writes nothing else into a harness home: parked items live under
 `~/.agent-toggle/parked/`, so a harness-home `.gitignore` needs no park-dir
 line. Older versions appended `<dir>-disabled/` lines there; inside a git work
 tree, `install-shims` reports such stale lines once `migrate` has emptied the

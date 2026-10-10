@@ -13,8 +13,8 @@ MCP servers). **Never deletes anything**; every change is reversible.
 
 ```bash
 agent-toggle <command> --json
-python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> --json   # if agent-toggle is not on PATH
 ```
+If `agent-toggle` is not on PATH, ask the user to install it (`uv tool install agent-toggle`); do not guess where a checkout lives.
 
 Commands: `status` (run first), `doctor` (read-only health check), `list [type]`,
 `cost [--type T]` (startup token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name),

@@ -47,8 +47,7 @@ class InstallShimsCase(SandboxCase):
                          {"grok", "opencode", "openclaw", "copilot", "vibe", "devin", "agy"})
         text = shim(self.tmp / ".claude").read_text(encoding="utf-8")
         self.assertIn("--json", text)
-        self.assertNotIn("__AGENT_TOGGLE_ROOT__", text)
-        self.assertIn("agent_toggle.py", text)     # checkout fallback line kept
+        self.assertNotIn("agent_toggle.py", text)  # no machine-specific checkout path
 
     def test_rerun_is_idempotent(self) -> None:
         self.run_cli()

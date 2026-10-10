@@ -403,18 +403,8 @@ def shim_text(harness: str) -> str:
     """The shim for `harness`: shims/<harness>.md.tmpl, else shims/generic.md.tmpl."""
     tmpl = SHIMS / f"{harness}.md.tmpl"
     template = (tmpl if tmpl.is_file() else SHIMS / "generic.md.tmpl").read_text(encoding="utf-8")
-    template = template.replace("__HARNESS__", harness)
-    root = Path(__file__).resolve().parent.parent
-    if (root / "agent_toggle.py").is_file():
-        # Harness dirs often sync across machines: write `~`-relative under $HOME.
-        try:
-            shown = "~/" + root.relative_to(fs.home()).as_posix()
-        except ValueError:
-            shown = str(root)
-        return template.replace("__AGENT_TOGGLE_ROOT__", shown)
-    # installed package: no checkout to point at
-    return "".join(ln for ln in template.splitlines(keepends=True)
-                   if "__AGENT_TOGGLE_ROOT__" not in ln)
+    # No checkout path: shims sync across machines and the checkout can live anywhere.
+    return template.replace("__HARNESS__", harness)
 
 
 def shim_refusal(dest: Path) -> str | None:

@@ -13,8 +13,8 @@ MCP servers). **Never deletes anything**; every change is reversible.
 
 ```bash
 agent-toggle <command> --harness __HARNESS__ --json
-python3 __AGENT_TOGGLE_ROOT__/agent_toggle.py <command> --harness __HARNESS__ --json   # if agent-toggle is not on PATH
 ```
+If `agent-toggle` is not on PATH, ask the user to install it (`uv tool install agent-toggle`); do not guess where a checkout lives.
 
 You are running in `__HARNESS__`: pass `--harness __HARNESS__` for its own items
 (the default is `claude`). Other harnesses: `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`.
