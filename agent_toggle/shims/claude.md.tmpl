@@ -1,6 +1,6 @@
 ---
 name: agent-toggle
-description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "停用這個 skill" / "關掉某個 MCP" / "把它加回來".
+description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "停用這個 skill" / "關掉某個 MCP" / "把它加回來". Also when they ask to open, close or toggle the agent-toggle pane ("open agent-toggle" / "打開 agent-toggle 面板" / "關掉 agent-toggle").
 ---
 <!-- agent-toggle shim: written by `agent-toggle install-shims`; re-running it overwrites this file -->
 
@@ -29,6 +29,15 @@ disabling those plugin ids.
 A row with `shared_with` means another harness reads the same directory (OpenCode
 aliasing a skills dir): the change affects them too, so say so.
 `ui` is an interactive picker for the user, not for you.
+
+## The pane (Claude Code)
+
+With the agent-toggle mod installed, the picker also opens as a pane in the session.
+When the user asks to open/show or close/hide agent-toggle, call the
+`mcp__agent-toggle__pane` tool with `action`: `open`, `close` or `toggle`
+(load it with ToolSearch if only its name is listed). The user can do the same
+with `/agent-toggle [open | close | toggle]`, or close it with ctrl+x x.
+No tool and no mod: tell them to run `/agent-toggle` themselves.
 
 ## Safety
 
