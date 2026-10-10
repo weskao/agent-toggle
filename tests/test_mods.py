@@ -176,6 +176,15 @@ class PickerModOpsTest(SandboxCase):
         _, win = self.run_keys([*MODS, "\x1b"])
         self.assertRegex(win.text(), r"type\s+mod \(plugin\)")
 
+    def test_space_after_a_search_space_toggles_the_mod(self) -> None:
+        """The README's way to a mod is a search: the first Space ends the term, the next
+        toggles, and a later letter still starts a second term."""
+        out, _ = self.run_keys([*"mods", " ", " ", "\n"])
+        self.assertEqual([(r.name, r.staged) for r in out], [("big@mk", False)])
+        out, win = self.run_keys([*"mods", " ", " ", *"pa", "\x1b"])
+        self.assertIn("pane@mk", win.text())
+        self.assertNotIn("big@mk", win.text())
+
     def test_search_keeps_the_mods_heading(self) -> None:
         _, win = self.run_keys(["/", "p", "a", "n", "e", "\x1b"])
         self.assertIn("Mods 1", win.text())

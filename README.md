@@ -265,7 +265,7 @@ What is on screen:
 
 | key | action |
 |---|---|
-| `Space` | toggle the highlighted row (live / parked) and stay on it (while filtering, `Space` types a space) |
+| `Space` | toggle the highlighted row (live / parked) and stay on it (while searching, the first `Space` separates search terms and a second one toggles) |
 | `Tab` | toggle the highlighted row and advance to the next |
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |

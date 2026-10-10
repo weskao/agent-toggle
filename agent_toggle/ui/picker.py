@@ -478,7 +478,8 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
             return None
         if key in ENTER:            # only the rows on offer: a hidden harness is never touched
             return [r for r in v.rows if r.changed]
-        if key == "\t" or key == " " and not v.filtering:
+        # a search keeps one Space as the term separator; a second one toggles
+        if key == "\t" or key == " " and (not v.query.strip() or v.query.endswith(" ")):
             if shown:                                     # an empty list: Space is a no-op
                 shown[v.cur].staged = not shown[v.cur].staged
             if key == "\t":                               # Space stays on the row, Tab moves on
