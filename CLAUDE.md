@@ -39,15 +39,11 @@ Rules:
 
 ## Cross-platform
 
-When modifying code, also consider whether it runs on macOS, Linux, and Windows
-(paths, separators, shell commands, line endings, `$HOME` vs `%USERPROFILE%`,
-file locking, symlinks, terminal/ANSI support). If a change is platform-specific,
-guard it and say so.
+Code must run on macOS, Linux, and Windows (paths, separators, shell commands, line
+endings, `$HOME` vs `%USERPROFILE%`, file locking, symlinks, terminal/ANSI). Guard
+platform-specific code and say so.
 
-- Guard with `os.name == "nt"` (`fs.WIN`) and reuse the existing helpers
-  (`fs.replace`, `output._vt_enable`, `ui.supports_unicode`) before adding new ones.
-- Text I/O always passes `encoding="utf-8"` (Windows defaults to cp1252); ruff does
-  not check this.
-- Windows cannot be verified locally: CI's `windows-latest` job is the check.
-  POSIX-only tests use `unittest.skipIf(os.name == "nt", "<reason>")`; Windows-only
-  logic is tested by mocking `os.name` (see `tests/test_color.py`).
+- Reuse the shared platform helpers first: `fs.WIN`, `fs.replace`, `output._vt_enable`, `ui.supports_unicode`.
+- Text I/O always passes `encoding="utf-8"` (Windows defaults to cp1252).
+- Windows is verified by CI's `windows-latest` job, not locally; POSIX-only tests are
+  skipped on Windows (`os.name == "nt"`).
