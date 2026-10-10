@@ -1,0 +1,8 @@
+{
+  "name": "agent-toggle",
+  "version": "0.8.1",
+  "description": "Toggle Claude Code skills, agents, rules and plugins from a pane, driven by the agent-toggle CLI",
+  "author": { "name": "weskao", "url": "https://github.com/weskao" },
+  "homepage": "https://github.com/weskao/agent-toggle",
+  "types": "./types/index.d.ts"
+}
