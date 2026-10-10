@@ -151,6 +151,38 @@ describe('agent-toggle pane', () => {
     expect({ mid: [mid.enabled, mid.save], end: (await first()).enabled }).toEqual({ mid: [false, 100], end: true })
   })
 
+  test('n toggles every type with the row name, as one disable all, flipping only rows in its state', async ($, on) => {
+    const same = cost(row('skill', 'demo', true, 10), row('command', 'demo', true, 10), row('mcp', 'demo', false, 10), row('skill', 'other', true, 10))
+    let release = () => {}
+    const gate = new Promise<void>(r => (release = r))
+    const argvs: string[][] = []
+    on('process.run', async (_$, e) => {
+      argvs.push([...e.argv])
+      if (e.argv[1] === 'cost') return { value: done(0, same) }
+      await gate
+      return { value: OK }
+    })
+    on('ui.toast', () => ({ value: undefined }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
+    const pressed = ui.key({ key: 'n' }) // the cursor starts on skill/demo
+    for (let i = 0; i < 500; i++) await Promise.resolve()
+    const mid = ((await ui.drawn()) as any).props.props.rows.map((r: { type: string; name: string; enabled: boolean }) => `${r.type}/${r.name} ${r.enabled}`)
+    release()
+    await pressed
+    expect(argvs[1]).toEqual(['agent-toggle', 'disable', 'all', 'demo', '--json', '--harness', 'claude'])
+    expect(mid).toEqual(['skill/demo false', 'command/demo false', 'mcp/demo false', 'skill/other true'])
+  })
+
+  test('n types into a filter once one is started', async ($, on) => {
+    const { toggles, type, ui, tick } = await open($, on, cost(row('skill', 'an', true, 5), row('skill', 'b', true, 5)))
+    await type('/an')
+    await ui.key({ key: 'return' })
+    await tick()
+    expect(toggles()).toEqual(['disable skill an'])
+  })
+
   test('a pane with no list yet spins a Loading resources line, a frame at a time', async ($, _on) => {
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     const text = async () => (await ui.find({ type: 'Text', text: /Loading resources/, in: 'picker' }))?.text
@@ -191,21 +223,42 @@ describe('agent-toggle pane', () => {
   })
 
   test('/agent-toggle close closes the pane without opening it or running the CLI', async ($, on) => {
-    const closed: string[] = []
-    let opened = 0
-    let runs = 0
-    on('ui.close', (_$, e) => (closed.push(e.id), { value: undefined }))
-    on('ui.open', () => ((opened += 1), { value: { isPlaced: true } }))
-    on('process.run', () => ((runs += 1), { value: done(0, COST) }))
-    const r = await $.command.run({ command: 'agent-toggle', args: '  Close mods pane', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
-    expect({ text: r.text, closed, opened, runs }).toEqual({ text: 'agent-toggle pane closed.', closed: ['agent-toggle'], opened: 0, runs: 0 })
+    const s = panes(on)
+    const text = await cmd($, '  Close mods pane')
+    expect({ text, closed: s.closed, opened: s.opened, runs: s.runs }).toEqual({ text: 'agent-toggle pane closed.', closed: ['agent-toggle'], opened: 0, runs: 0 })
   })
 
-  test('other arguments still open the pane', async ($, on) => {
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('process.run', () => ({ value: done(0, COST) }))
-    const r = await $.command.run({ command: 'agent-toggle', args: 'closet', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
-    expect(r.text).toBe('agent-toggle pane opened.')
+  test('no argument and open both open the pane', async ($, on) => {
+    const s = panes(on)
+    expect([await cmd($, ''), await cmd($, 'OPEN')]).toEqual(['agent-toggle pane opened.', 'agent-toggle pane opened.'])
+    expect(s.opened).toBe(2)
+  })
+
+  test('toggle opens a closed pane and closes an open one', async ($, on) => {
+    const s = panes(on)
+    expect([await cmd($, 'toggle'), await cmd($, 'toggle')]).toEqual(['agent-toggle pane opened.', 'agent-toggle pane closed.'])
+    expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 1, closed: ['agent-toggle'] })
+  })
+
+  test('an unknown argument shows the usage and touches no pane', async ($, on) => {
+    const s = panes(on)
+    expect(await cmd($, 'clsoe')).toBe('usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]')
+    expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 0, closed: [] })
+  })
+
+  test('the model opens and closes the pane through its pane tool', async ($, on) => {
+    const s = panes(on)
+    const call = (action: string) => $.tool.call({ tool: 'mcp__agent-toggle__pane', action } as never)
+    const a = await call('open')
+    const b = await call('close')
+    const c = await call('explode')
+    expect({ a: a.result, b: b.result, c: c.deny, opened: s.opened, closed: s.closed }).toEqual({
+      a: 'agent-toggle pane opened.',
+      b: 'agent-toggle pane closed.',
+      c: 'action must be one of: open, close, toggle',
+      opened: 1,
+      closed: ['agent-toggle'],
+    })
   })
 
   test('/agent-toggle disable runs the CLI with every name and reports each row, without opening the pane', async ($, on) => {
@@ -245,3 +298,17 @@ describe('agent-toggle pane', () => {
     expect(argvs.map(a => a[1])).toEqual(['cost', 'disable', 'cost'])
   })
 })
+
+// Fakes the pane surface and the CLI: tracks which panes are open, opens and closes, and CLI runs.
+function panes(on: On) {
+  const s = { open: new Set<string>(), opened: 0, closed: [] as string[], runs: 0 }
+  on('ui.open', (_$, e) => (s.open.add(e.id), (s.opened += 1), { value: { isPlaced: true } }))
+  on('ui.close', (_$, e) => (s.open.delete(e.id), s.closed.push(e.id), { value: undefined }))
+  on('ui.panes', () => ({ value: [...s.open].map(id => ({ id, title: id, isShown: true })) as never }))
+  on('process.run', () => ((s.runs += 1), { value: done(0, COST) }))
+  return s
+}
+
+async function cmd($: T, args: string) {
+  return (await $.command.run({ command: 'agent-toggle', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })).text
+}

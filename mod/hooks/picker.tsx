@@ -70,9 +70,9 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     const next = Math.max(0, Math.min(c, rows.length - 1))
     surface.setState({ ...s, ...more, cursor: next, top: fit(next, s.top) })
   }
-  const toggle = () => {
+  const toggle = (op = 'toggle') => {
     const r = rows[cursor]
-    if (r && !props.busy) surface.post({ op: 'toggle', type: r.type, name: r.name, mod: r.mod })
+    if (r && !props.busy) surface.post({ op, type: r.type, name: r.name, mod: r.mod })
   }
   // the wheel moves the cursor, as it sends Up/Down to the curses picker; ticks from before this instance are not ours
   const loading = props.rows.length === 0 && props.error === ''
@@ -106,6 +106,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     }
     if (k.length !== 1 || e.ctrl || e.meta) return
     if (!searching && k === 's') return go(0, { sort: s.sort === 'name' ? 'cost' : 'name' })
+    if (!searching && k === 'n') return toggle('same') // every type with this row's name, as the curses `n`
     if (!searching && k === '/') return go(0, { typing: true })
     go(0, { query: s.query + k, typing: true })
   })
@@ -118,7 +119,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
   const topCost = Math.max(0, ...rows.map(r => (r.enabled ? r.tokens : r.save)))
   const live = props.rows.reduce((n, r) => n + (r.enabled ? r.tokens : 0), 0)
   const summary = `${props.rows.length} resources · ~${tok(live)} tok live`
-  const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], ['s', 'sort'], ['↑↓', 'move'], ['^U', 'clear']]
+  const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], ['s', 'sort'], ['n', 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
 
   const line = (it: Item, i: number) => {
     if ('head' in it) {
