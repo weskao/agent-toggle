@@ -9,3 +9,4 @@ completions/
 .ruff_cache/
 .codegraph/
 .claude/
+uv.lock
