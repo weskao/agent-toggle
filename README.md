@@ -330,9 +330,10 @@ plugin: it ships skills, commands, agents, MCP servers or hooks and draws nothin
 
 - The picker lists mods under **Mods**, right after Plugins. `t` cycles to it, the
   `picker_type` setting can open on it, and a search for `mod` or `mods` finds every mod.
+  The detail pane shows its type as `mod (plugin)`.
 - A mod is still a plugin everywhere else: it toggles through `claude plugin
   enable/disable`, `disable plugin <id>` reaches it, profiles store it as `plugin`, and
-  `list` / `cost` show it with the plugins.
+  `list` / `cost` show it with the plugins (`cost --json` marks it `"mod": true`).
 
 The chrome (title, tabs, footer, help, detail labels) is translated when `language` is
 `zh-TW`; item names and paths are never translated.

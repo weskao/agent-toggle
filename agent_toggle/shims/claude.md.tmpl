@@ -23,7 +23,9 @@ Commands: `status` (run first), `doctor` (read-only health check), `list [type]`
 (default `claude`) and `--dry-run` to preview. `--project <dir>` targets a repo's own `.claude/` and `.mcp.json`
 (warn the user: git shows the deletion). `<type>` = `skill` / `agent` /
 `command` / `rule` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
-A mod (a plugin whose `hooks/hooks.json` has a `modules` key) is type `plugin`.
+A mod (a plugin whose `hooks/hooks.json` has a `modules` key) is type `plugin`;
+`cost --type plugin --json` marks each one `"mod": true`, so "turn off the mods" means
+disabling those plugin ids.
 A row with `shared_with` means another harness reads the same directory (OpenCode
 aliasing a skills dir): the change affects them too, so say so.
 `ui` is an interactive picker for the user, not for you.

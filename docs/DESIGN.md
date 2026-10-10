@@ -381,7 +381,7 @@ documented as ±25 %):
 Output carries a `basis` string per row ("description 412 chars", "6 tools ×
 300 flat") so the number is explainable. In `--json` the basis is the row's
 `detail` (there is no separate `basis` field); item rows add `enabled`,
-`tokens`, `would_save`, `chars`, `shared_with`, and the final `total` row
+`tokens`, `would_save`, `chars`, `shared_with`, `mod`, and the final `total` row
 carries `total_tokens`, `saved_tokens` and `formula` (the estimator rules as
 data), so an external measured total can be compared. No tokenizer dependency; if a harness ships a
 token counter later, a `CostEstimator` implementation can wrap it.
