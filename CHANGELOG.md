@@ -1,3 +1,23 @@
+## [0.8.0] - 2026-10-10
+
+### 🚀 Features
+
+- Toggle every item type by name
+- **ui:** Group mod plugins under a mods heading
+- **ui:** Toggle every type with a row's name
+
+### 🐛 Bug Fixes
+
+- **ui:** Detect cached mods and search by group
+- **ui:** Match the plural mods heading in search
+- **picker:** Clarify mod plugin type
+
+### 📚 Documentation
+
+- Add cross-platform rule to CLAUDE.md
+- Expand cross-platform rule with guards, encoding, and verification
+- Clarify cross-platform instructions
+- Document mods across readme, shim and docs
 ## [0.7.3] - 2026-10-09
 
 ### 🐛 Bug Fixes
