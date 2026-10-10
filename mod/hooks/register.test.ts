@@ -67,10 +67,10 @@ describe('agent-toggle pane', () => {
     expect(toasts).toContain('❌ [FAILED] disable skill: a - not found')
   })
 
-  test('a skill toggle queues /reload-skills and names it in the toast', async ($, on) => {
+  test('a skill toggle queues only /reload-skills (no plugin or mcp reload) and names it in the toast', async ($, on) => {
     const ran: string[] = []
     const clock = mock.clock(on)
-    on('command.run', { command: 'reload-skills' }, (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' }))
+    on('command.run', (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' })) // any command, so a stray /reload-plugins or /mcp would show
     const { toasts, ui, tick } = await open($, on, COST, done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'skill', name: 'a', action: 'disable', status: 'ok' }] })))
     await ui.key({ key: ' ' })
     await tick()
