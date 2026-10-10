@@ -217,7 +217,10 @@ class CursesMenuTest(MenuCase):
         ctx = self.ctx()
         self.assertEqual(ctx.token, "********oken")
         row = next(r for r in cm.ITEMS if r.kind == "secret")
-        shown = lambda g: "".join(s for s, _ in cm.value_segments(ctx, row, g))
+
+        def shown(g):
+            return "".join(s for s, _ in cm.value_segments(ctx, row, g))
+
         self.assertEqual(shown(cm.theme.UNICODE), "••••••••oken")
         self.assertEqual(shown(cm.theme.ASCII), "********oken")
         self.assertNotIn("ABCDEF", shown(cm.theme.UNICODE))
