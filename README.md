@@ -841,8 +841,9 @@ Both sides are resolved first.
 ## Design and roadmap
 
 Architecture, harness survey, cost model, known gaps and the phased roadmap
-toward a public multi-OS release live in `docs/DESIGN.md`. Release notes are in
-`CHANGELOG.md`.
+toward a public multi-OS release live in `docs/DESIGN.md`. The design for the
+Claude Code pane mod (the picker inside Claude, driven by this CLI) is in
+`docs/MOD.md`. Release notes are in `CHANGELOG.md`.
 
 ## Tests
 
