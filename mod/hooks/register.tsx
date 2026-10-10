@@ -114,7 +114,7 @@ export const register: Register = on => {
     if (e.contentRows > e.bodyRows) return next(e) // the Button list elsewhere scrolls as usual
     await update($, wheel, n => n + e.by)
     return {}
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : {})) // a failed tick is dropped, not handed to the engine
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
