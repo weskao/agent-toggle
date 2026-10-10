@@ -151,6 +151,14 @@ describe('agent-toggle pane', () => {
     expect({ mid: [mid.enabled, mid.save], end: (await first()).enabled }).toEqual({ mid: [false, 100], end: true })
   })
 
+  test('a pane with no list yet spins a Loading resources line, a frame at a time', async ($, _on) => {
+    const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
+    const text = async () => (await ui.find({ type: 'Text', text: /Loading resources/, in: 'picker' }))?.text
+    expect(await text()).toMatch(/⠋ Loading resources…/)
+    await ui.advance(80)
+    expect(await text()).toMatch(/⠙ Loading resources…/)
+  })
+
   test('a surface with no Client draws one Button per row', async ($, on) => {
     const { argvs, tick } = await open($, on)
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'vscode', component: 'Pane', requestId: 'agent-toggle', props: PANE })

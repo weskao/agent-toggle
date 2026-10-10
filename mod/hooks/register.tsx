@@ -104,6 +104,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'agent-toggle' }, async $ => {
+    await update($, rows, () => [])
     const opened = await $.ui.open({ id: PANE, title: 'agent-toggle' })
     if (!opened.isPlaced) $.ui.toast('agent-toggle: no surface could place the pane')
     await update($, error, () => '')

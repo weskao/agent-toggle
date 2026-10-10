@@ -5,14 +5,16 @@ import type { Row } from '../types'
 // The curses picker's look and keys (agent_toggle/ui/picker.py), drawn by the engine.
 // Runs in a surface module: no `$`, so a toggle is posted to register.tsx's `ui.message` hook.
 type Props = { rows: Row[]; busy: boolean; error: string; wheel: number }
-type State = { cursor: number; top: number; query: string; typing: boolean; sort: 'name' | 'cost'; wheel: number }
+type State = { cursor: number; top: number; query: string; typing: boolean; sort: 'name' | 'cost'; wheel: number; frame: number }
 type Item = { head: string; count: number } | { row: Row }
 
 // model.py GROUPS and type_label: mods sit right after plugins
 const GROUPS = ['skill', 'agent', 'command', 'rule', 'plugin', 'mod', 'mcp']
 const LABEL: Record<string, string> = { skill: 'Skills', agent: 'Agents', command: 'Commands', rule: 'Rules', plugin: 'Plugins', mod: 'Mods', mcp: 'MCP' }
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' // spinner.py BRAILLE, what `agent-toggle ui` shows while it loads
+const TICK = 80 // spinner.py INTERVAL
 const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
-const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name', wheel: 0 }
+const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name', wheel: 0, frame: 0 }
 const CHROME = 5 // title, search, status, chips, and one spare for the error line
 
 const groupOf = (r: Row) => (r.mod ? 'mod' : r.type)
@@ -43,6 +45,9 @@ function filtered(rows: Row[], query: string) {
   return { list, fuzzy: list.length > 0 }
 }
 
+// Whether the last draw has something to wait for; the timer below advances the frame only then, so an idle pane draws nothing.
+let spinning = false
+
 const Picker: ClientModule<Props, State> = (props, surface) => {
   const { Box, Text } = surface.elements
   const s = surface.state ?? INIT
@@ -70,8 +75,16 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     if (r && !props.busy) surface.post({ op: 'toggle', type: r.type, name: r.name, mod: r.mod })
   }
   // the wheel moves the cursor, as it sends Up/Down to the curses picker; ticks from before this instance are not ours
-  if (!surface.state) surface.setState({ ...INIT, wheel: props.wheel })
-  else if (props.wheel !== s.wheel) go(cursor + props.wheel - s.wheel, { wheel: props.wheel })
+  const loading = props.rows.length === 0 && props.error === ''
+  spinning = loading || props.busy
+  const spin = SPIN[s.frame % SPIN.length]
+  if (!surface.state) {
+    surface.setState({ ...INIT, wheel: props.wheel })
+    surface.every(TICK, () => {
+      const cur = surface.state ?? INIT
+      if (spinning) surface.setState({ ...cur, frame: cur.frame + 1 })
+    })
+  } else if (props.wheel !== s.wheel) go(cursor + props.wheel - s.wheel, { wheel: props.wheel })
 
   surface.onKey(e => {
     const k = e.key
@@ -150,12 +163,16 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
         <Text dimColor>{`sort: ${s.sort}`.padStart(Math.max(0, w - 2 - (s.query || 'Type to search (name, group, fuzzy)').length - (s.typing ? 1 : 0)))}</Text>
       </Text>
       {items.slice(top, top + body).map((it, i) => line(it, top + i))}
-      {props.rows.length === 0 && props.error === '' && <Text dimColor> loading…</Text>}
+      {loading && (
+        <Text key="loading" wrap="truncate">
+          <Text color="cyan"> {spin}</Text> Loading resources…
+        </Text>
+      )}
       {props.error !== '' && <Text key="err" color="red" bold wrap="truncate">{props.error}  (run `agent-toggle doctor`)</Text>}
       <Text key="status" dimColor wrap="truncate">
         {` ${rows.length} of ${props.rows.length} shown`}
         {fuzzy ? '  ≈ fuzzy match' : ''}
-        {props.busy ? '  working…' : ''}
+        {props.busy ? `  ${spin} working…` : ''}
       </Text>
       <Text key="chips" wrap="truncate">
         {chips.map(([k, l]) => (

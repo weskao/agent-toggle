@@ -909,6 +909,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 - A toggle applies at once (no staging, no Enter to apply); the toast says `ok`, or that the change
   takes effect in a new session, or the error. The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
+- Opening the pane shows the same braille spinner and `Loading resources…` as `agent-toggle ui`
+  until the list arrives, and a spinner beside `working…` while a toggle runs.
 - Not in the pane: harness tabs (claude only), and the `t` `p` `a` `n` keys. Where Claude draws no
   such pane (the mobile app, VS Code) it is a plain list of buttons instead.
 - Needs `agent-toggle` on `PATH`.
