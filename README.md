@@ -8,6 +8,27 @@ session start.
 **Nothing is ever deleted.** Everything is parked and recorded, and `enable`
 puts it back where it came from.
 
+## At a glance
+
+<!-- Absolute URLs so the images also render on PyPI, which uses this README. -->
+
+**`agent-toggle ui`**: one list per harness, with what each resource costs in tokens.
+Toggle rows, see the token change before you apply it, and apply it as one batch that
+`undo` reverses ([Interactive picker](#interactive-picker)).
+
+![agent-toggle ui: the interactive picker](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/ui-picker.jpeg)
+
+**`agent-toggle config`**: every setting in one menu. Turn harnesses on or off and set the
+language, update check and Telegram notifications. It also runs tools such as `doctor` and
+`undo` ([Settings & config menu](#settings--config-menu)).
+
+![agent-toggle config: the settings menu](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/config-menu.jpeg)
+
+**`/agent-toggle` inside Claude Code**: the same picker as a pane, for turning skills, MCP
+servers, plugins and mods on or off without leaving the session ([Claude Code pane mod](#claude-code-pane-mod)).
+
+![/agent-toggle: the picker as a Claude Code pane](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/claude-pane-mod.jpeg)
+
 ## Why
 
 | target | native mechanism | the gap |
