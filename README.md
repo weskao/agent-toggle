@@ -899,7 +899,10 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 - `/agent-toggle` or `/agent-toggle open` opens the pane, `/agent-toggle close` closes it,
   `/agent-toggle toggle` does whichever applies; any other argument prints the usage. Ctrl-X X
   also closes it. Claude can do the same when you ask it to open or close agent-toggle: the mod
-  registers a `pane` tool (`mcp__agent-toggle__pane`, `action`: `open` | `close` | `toggle`).
+  registers a `pane` tool (`mcp__agent-toggle__pane`, `action`: `open` | `close` | `toggle`),
+  e.g. "open agent-toggle", "close the agent-toggle pane", "toggle the agent-toggle pane".
+  Turning resources on or off is unchanged: toggle a row in the pane, or ask Claude in plain
+  words ("disable the demo-skill skill", "add it back"), which runs the CLI through the skill shim.
 - It looks like the `ui` picker: a title with the live-token total, a search line, rows under
   type headings with counts, green `●` live / yellow `○` parked, tokens and a bar per row (a
   parked row shows `(N)`, what restoring it would load), the cursor row in reverse video, and a
