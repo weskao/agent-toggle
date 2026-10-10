@@ -1,3 +1,8 @@
+## [0.11.0] - 2026-10-10
+
+### 🚀 Features
+
+- Add update command and update everything
 ## [0.10.0] - 2026-10-10
 
 ### 🚀 Features
