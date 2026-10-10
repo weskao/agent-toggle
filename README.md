@@ -906,8 +906,10 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `Tab` toggles and moves on; `/` or any other letter starts a search (terms ANDed over
   `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
   `s` sorts by name or cost; `Ctrl-U` clears the search. A click moves the cursor.
-- A toggle applies at once (no staging, no Enter to apply); the toast says `ok`, or that the change
-  takes effect in a new session, or the error. The row flips the moment you press (and flips back
+- A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state
+  in plain ASCII, so it reads the same on macOS, Linux and Windows: `[ENABLED] skill: foo`,
+  `[DISABLED] mod: bar (takes effect in a new session)`, or `[FAILED] disable skill: foo - <error>`.
+  The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
 - Opening the pane shows the same braille spinner and `Loading resources…` as `agent-toggle ui`
   until the list arrives, and a spinner beside `working…` while a toggle runs.

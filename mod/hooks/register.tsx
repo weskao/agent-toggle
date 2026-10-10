@@ -86,8 +86,15 @@ async function toggle($: Engine, row: Row) {
       await update($, rows, flip(row)) // drawn now, not after the CLI and the refresh
       // --harness: disable/enable otherwise fall back to the user's settings default_harness
       const out = await cli($, ['agent-toggle', row.enabled ? 'disable' : 'enable', row.type, row.name, '--json', '--harness', 'claude'])
-      if (!out) await update($, rows, flip(row))
-      $.ui.toast(out ? (out.needs_new_session ? 'ok — takes effect in a new session' : 'ok') : await read($, error))
+      const type = row.mod ? 'mod' : row.type
+      if (out) {
+        const note = out.needs_new_session ? 'takes effect in a new session' : ''
+        // a toast is plain text (no colour option, ANSI codes show as garbage): an ASCII tag marks the state on every OS
+        $.ui.toast(`[${row.enabled ? 'DISABLED' : 'ENABLED'}] ${type}: ${row.name}${note && ` (${note})`}`)
+      } else {
+        await update($, rows, flip(row))
+        $.ui.toast(`[FAILED] ${row.enabled ? 'disable' : 'enable'} ${type}: ${row.name} - ${await read($, error)}`)
+      }
     })
     // outside busy: the next press need not wait ~1s for `claude plugin list`; seq drops this refresh if a toggle lands
     if (ran) await refresh($)
