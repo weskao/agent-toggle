@@ -869,8 +869,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   type headings with counts, green `●` live / yellow `○` parked, tokens and a bar per row (a
   parked row shows `(N)`, what restoring it would load), the cursor row in reverse video, and a
   key-chip footer. The list scrolls with the cursor.
-- Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
 - The mouse wheel over the list moves the cursor, as in the terminal picker; no click needed.
+- Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
   `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,
   `Tab` toggles and moves on; `/` or any other letter starts a search (terms ANDed over
   `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
