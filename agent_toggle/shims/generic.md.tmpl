@@ -1,6 +1,6 @@
 ---
 name: agent-toggle
-description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "turn off this MCP" / "add it back".
+description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "turn off this MCP" / "add it back". Also to save, switch, rename or delete a profile ("save my setup as work" / "switch to my work profile").
 ---
 <!-- agent-toggle shim: written by `agent-toggle install-shims`; re-running it overwrites this file -->
 
@@ -22,11 +22,43 @@ You are running in `__HARNESS__`: pass `--harness __HARNESS__` for its own items
 Commands: `status` (run first; shows which types this harness supports),
 `doctor` (read-only health check), `list [type]`, `cost [--type T]` (startup
 token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name), `enable <type> <name>...`,
-`enable --all`, `undo` (reverse the last batch), `profile save|apply|diff <name>`,
-`profile list`; add `--dry-run` to preview. `<type>` = `skill` / `agent` /
+`enable --all`, `undo` (reverse the last batch), `profile save|apply|diff|delete <name>`,
+`profile rename <old> <new>`, `profile list` (see Profiles); add `--dry-run` to preview. `<type>` = `skill` / `agent` /
 `command` / `rule` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
 A row with `shared_with` means another harness reads the same directory: the
 change affects them too, so say so. `ui` is an interactive picker for the user, not for you.
+
+## Profiles
+
+A profile is a saved snapshot of which items are live, one file per name in
+`~/.agent-toggle/profiles/` (`profile list --json` rows carry `path` and the item count in `detail`).
+
+| the user asks to | run |
+|---|---|
+| create ("save my current setup as work") | `profile save <name>` |
+| see ("what profiles do I have", "what would work change") | `profile list`; `profile diff <name>` |
+| switch ("switch to work") | `profile apply <name> --dry-run`, then `profile apply <name>` |
+| update ("update work with what I have now") | `profile save <name>`: overwrites it with the live state |
+| rename | `profile rename <old> <new>` (refuses a name that exists) |
+| delete | `profile delete <name>` (removes the file; `undo` does not restore it) |
+
+Ask instead of guessing: use your harness's question tool (multiple choice) if it
+has one, else a short numbered list the user answers by number. Run `profile list --json` first.
+
+- **No action named** ("my profiles", "manage profiles"): ask which: Switch,
+  Save current setup, Rename, Delete.
+- **No profile named, or no exact match:** offer the saved profiles (name,
+  `N items, saved <date>`), most recently saved first. None saved: say so and offer
+  Save current setup.
+- **Switch:** run the dry run, show the plan (`enable`/`disable` lines, then
+  `N to change, M already as profiled, K skipped`) and ask Apply / Cancel.
+  Nothing to change: say so, do not ask.
+- **Save over an existing name:** ask Replace / Save under a new name / Cancel.
+- **Delete:** ask Delete / Cancel, saying it cannot be undone.
+- **New name needed** (create, rename, save under a new name): ask for it in plain
+  text; if the CLI refuses it (exit 2), relay the reason and ask again.
+- To change one item without touching the live setup, edit that item's `live` in the
+  profile's JSON file, then run `profile diff <name>` to check it still loads.
 
 ## Safety
 
