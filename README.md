@@ -163,6 +163,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
+| `update` | check PyPI now (ignores the cache and a skipped version) and print the commands that update the CLI, the Claude Code plugin (when installed) and the shims; runs none of them. `/agent-toggle update` in Claude Code does the same; opening the pane toasts a newer release once |
 | `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); reports stale legacy `<dir>-disabled/` lines in a harness-home `.gitignore` (`--gitignore` removes them, `--no-gitignore` skips the check); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
@@ -440,10 +441,15 @@ before the command and is offered after it, on every exit path; it overlaps the 
 
 - **On a terminal** (stdin and stderr are TTYs, no `--json`): a panel on stderr, "agent-toggle X
   is available (you have Y)", with `Update now`, `Skip` and `Skip until next version`, a release
-  notes link, and `↑` `↓` `Enter` `q`. `Update now` runs `uv tool upgrade agent-toggle`; if that
-  fails you get a yellow warning with the command to run yourself.
-- **Off a terminal**: two stderr lines, `agent-toggle X is available (you have Y)` and
-  `  uv tool upgrade agent-toggle`.
+  notes link, and `↑` `↓` `Enter` `q`. `Update now` runs, in order and stopping at the first
+  failure: `uv tool upgrade agent-toggle` (`pipx upgrade agent-toggle` for a pipx install), then,
+  when the Claude Code plugin is installed, `claude plugin marketplace update agent-toggle` and
+  `claude plugin update agent-toggle@agent-toggle`, then `agent-toggle install-shims`. A failure
+  gives a yellow warning listing the commands to run yourself.
+- **Windows**: a running `agent-toggle.exe` cannot be replaced, so there is no `Update now`; the
+  commands are printed instead (as below), to run once agent-toggle has exited.
+- **Off a terminal** (or `--json`): a stderr line, `agent-toggle X is available (you have Y)`,
+  then those commands, one per line.
 - It never changes the exit code or stdout, so `--json` output stays one document.
 
 It is one `GET https://pypi.org/pypi/agent-toggle/json` on a background thread with a 0.8 s

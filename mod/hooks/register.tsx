@@ -20,10 +20,20 @@ const rank = (r: Row) => {
   return i < 0 ? GROUPS.length : i
 }
 
+// The CLI's own update check (cached 10 min) hints on stderr, even with --json: toast each new release once.
+let told = ''
+function tellUpdate($: Engine, stderr: string) {
+  const line = stderr.match(/^agent-toggle \S+ is available .*$/m)?.[0]
+  if (!line || line === told) return
+  told = line
+  $.ui.toast(`${line}: run /agent-toggle update for the commands`)
+}
+
 // Runs the CLI (argv, no shell), parses its JSON; on failure stores `error` and returns null.
 async function cli($: Engine, argv: string[]): Promise<Result | null> {
   try {
     const run = await $.process.run(argv)
+    tellUpdate($, run.stderr)
     let json: Result | null = null
     try {
       json = JSON.parse(run.stdout) as Result
@@ -68,7 +78,7 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
 const ACTIONS = ['open', 'close', 'toggle']
 type Action = 'open' | 'close' | 'toggle'
 const isAction = (s: string): s is Action => ACTIONS.includes(s)
-const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]'
+const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]'
 const TOOL = 'mcp__agent-toggle__pane'
 
 async function pane($: Engine, action: Action): Promise<string> {
@@ -203,7 +213,7 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
 
 // `/agent-toggle <verb> ...` runs the CLI instead of opening the pane; any other argument still opens it.
 // `--` spellings too: the CLI accepts both (CLAUDE.md "Every command has two spellings").
-const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor)$/i
+const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor|update)$/i
 
 // Runs `/agent-toggle <args>` as the CLI (argv, no shell) and answers with one line per result row.
 async function runArgs($: Engine, words: string[]): Promise<string> {
@@ -221,7 +231,10 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
     if (!out) return `${bad} agent-toggle exited ${run.exitCode}: ${run.stderr.trim() || run.stdout.trim() || 'no output'}`
     const lines = (out.results ?? [])
       .filter(r => r.type != null || r.name != null) // cost/list end with a summary row
-      .map(r => [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '))
+      .flatMap(r => [
+        [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '),
+        ...(Array.isArray(r.commands) ? r.commands.map(c => `  ${c}`) : []), // `update`: the commands to run
+      ])
     for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
     if (out.needs_new_session) lines.push(reload($, out.results ?? []))
     if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
@@ -243,7 +256,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'agent-toggle',
       description: 'Toggle Claude Code resources in a pane',
-      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
+      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]',
     }).catch(() => {})
     await watch($)
 

@@ -18,12 +18,16 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from . import __version__, fs, settings, update_check
+from .backends import plugin_cli
 from .i18n import t
 from .output import use_color
 from .ui import theme
 
 DIST = "agent-toggle"
-UPGRADE = ["uv", "tool", "upgrade", DIST]
+PLUGIN = "agent-toggle@agent-toggle"
+# shortcut: pipx is spotted by "pipx" in the venv path (its default homes); a custom PIPX_HOME gets uv
+UPGRADE = (["pipx", "upgrade", DIST] if "pipx" in Path(sys.prefix).parts
+           else ["uv", "tool", "upgrade", DIST])
 RELEASE_NOTES = "https://github.com/weskao/agent-toggle/releases/tag/v%s"
 ANSWERS = (update_check.UPDATE_NOW, update_check.SKIP, update_check.SKIP_VERSION)
 
@@ -34,6 +38,16 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 def _clean(text: str) -> str:
     """Defence in depth: version text may come from the network; never print control chars."""
     return _CONTROL.sub("", text)
+
+
+def upgrade_steps() -> list[list[str]]:
+    """Upgrade the CLI, then the Claude Code plugin when it is installed, then refresh the shims."""
+    steps = [UPGRADE]
+    # bare "claude": what a person pastes; offer()'s run() resolves it, as claude is often off PATH
+    if plugin_cli.claude_bin() and any(p["id"] == PLUGIN for p in plugin_cli.list_plugins(lambda _msg: None)):
+        steps += [["claude", "plugin", "marketplace", "update", DIST],
+                  ["claude", "plugin", "update", PLUGIN]]
+    return [*steps, [DIST, "install-shims"]]
 
 
 def cache_path() -> Path:
@@ -64,9 +78,10 @@ def _available(found: update_check.UpdateAvailable) -> str:
 
 
 def hint(found: update_check.UpdateAvailable) -> str:
-    """The `ask` off a terminal (CI, pipes, --json): two plain lines, never a block."""
+    """The `ask` off a terminal (CI, pipes, --json): the headline, then one command per line."""
     print(_available(found), file=sys.stderr)
-    print("  " + " ".join(UPGRADE), file=sys.stderr)
+    for step in upgrade_steps():
+        print("  " + " ".join(step), file=sys.stderr)
     return update_check.SKIP
 
 
@@ -182,20 +197,44 @@ def offer(started: update_check.Started | None, *, json_mode: bool = False,
     stderr only and never raises, so neither stdout nor the exit code can change."""
     if started is None:
         return None
-    if is_interactive() and not json_mode:
+    # Windows cannot replace the agent-toggle.exe that is running: print the commands, run none
+    if is_interactive() and not json_mode and not fs.WIN:
         def asker(found):
             return ask(found, color_mode)
     else:
         asker = hint
-    def run(cmd, **kw):                 # uv's output must never reach stdout
-        return subprocess.run(cmd, stdout=sys.stderr, **kw)
-    answer = update_check.offer(started, asker, cache_path=cache_path(), upgrade=UPGRADE, run=run)
+    def run(cmd, **kw):                 # their output must never reach stdout; no step may prompt
+        if cmd[0] == "claude":
+            cmd = [plugin_cli.claude_bin() or "claude", *cmd[1:]]
+        return subprocess.run(cmd, stdout=sys.stderr, stdin=subprocess.DEVNULL, **kw)
+    steps: list[list[str]] = []
+    def upgrade(_found):
+        steps.extend(upgrade_steps())
+        return steps
+    answer = update_check.offer(started, asker, cache_path=cache_path(), upgrade=upgrade, run=run)
     if answer == update_check.UPGRADE_FAILED:
         try:
             mark = theme.ansi("warning", "⚠" if theme.get_glyphs(sys.stderr).unicode else "!",
                               use_color(sys.stderr, color_mode))
             print(mark + " " + t("update.failed", "upgrade did not finish — run it yourself: %s",
-                                 " ".join(UPGRADE)), file=sys.stderr)
+                                 "\n  ".join(map(" ".join, steps or [UPGRADE]))), file=sys.stderr)
         except Exception:  # noqa: BLE001, S110 - a hint must never fail the command
             pass
     return answer
+
+
+def cmd_update(out) -> None:
+    """`update`: check PyPI now (cache and "skipped" ignored), show what would be updated and
+    the commands for it. Runs none of them: the picker's Update now does that."""
+    found = update_check.check(DIST, __version__, cache_path=cache_path(), ttl_seconds=0,
+                               timeout=5.0, ignore_skip=True)
+    if found is None:
+        out.row(None, "cli", DIST, "update", "ok", f"no newer release found (you have {__version__})",
+                current=__version__, latest=None, commands=[])
+        return
+    steps = [" ".join(s) for s in upgrade_steps()]
+    out.row(None, "cli", DIST, "update", "ok", f"{found.current} -> {found.latest}", show=False,
+            current=found.current, latest=found.latest, commands=steps)
+    out.say(_available(found) + ". Run, in order:")
+    for step in steps:
+        out.say("  " + step)

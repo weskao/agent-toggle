@@ -143,8 +143,10 @@ def check(
     timeout: float = DEFAULT_TIMEOUT,
     now: float | None = None,
     fetch: Callable[[str, float], str] | None = None,
+    ignore_skip: bool = False,
 ) -> UpdateAvailable | None:
-    """Return an update when the latest release is newer than *current*, else None."""
+    """Return an update when the latest release is newer than *current*, else None.
+    *ignore_skip* reports a "skip this version" release too (an explicit ask)."""
     current_parts = _numeric_tuple(current)
     if current_parts is None:
         return None
@@ -166,7 +168,7 @@ def check(
         # offline costs one timeout per TTL, not one per command.
         latest = fetched or latest
         _save_cache(cache_path, stamp, latest)
-    if not isinstance(latest, str) or latest == _valid_version(cached.get("skipped")):
+    if not isinstance(latest, str) or (not ignore_skip and latest == _valid_version(cached.get("skipped"))):
         return None
     latest_parts = _numeric_tuple(latest)
     if latest_parts is None or latest_parts <= current_parts:

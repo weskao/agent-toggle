@@ -181,7 +181,8 @@ class UpdateCheckTest(CliCase):
     def test_hint_on_stderr_off_a_tty(self) -> None:
         rc, out, err = self.run_cli("status")
         self.assertEqual(rc, 0)
-        self.assertEqual(err.splitlines()[-2:], [HINT, "  uv tool upgrade agent-toggle"])
+        self.assertEqual(err.splitlines()[-3:], [HINT, "  uv tool upgrade agent-toggle",
+                                                 "  agent-toggle install-shims"])
         self.assertNotIn("99.0.0", out)
 
     def test_opt_out_by_env_and_by_setting(self) -> None:
@@ -233,10 +234,10 @@ class UpdateCheckTest(CliCase):
             rc, out, err = self.run_cli("--version")      # runs no other subprocess
         self.assertEqual((rc, out.strip()), (0, f"agent-toggle {__version__}"))
         run.assert_called_once_with(["uv", "tool", "upgrade", "agent-toggle"], check=False,
-                                    stdout=mock.ANY)
+                                    stdout=mock.ANY, stdin=subprocess.DEVNULL)
         self.assertIn("did not finish", run.call_args.kwargs["stdout"].getvalue())  # = stderr
-        self.assertIn("upgrade did not finish — run it yourself: uv tool upgrade agent-toggle",
-                      err)
+        self.assertIn("upgrade did not finish — run it yourself: uv tool upgrade agent-toggle"
+                      "\n  agent-toggle install-shims", err)
 
     def test_tty_skip_version_and_ctrl_c(self) -> None:
         update_prompt.is_interactive.return_value = True

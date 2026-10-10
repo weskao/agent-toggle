@@ -20,7 +20,7 @@ You are running in `__HARNESS__`: pass `--harness __HARNESS__` for its own items
 (the default is `claude`). Other harnesses: `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`.
 
 Commands: `status` (run first; shows which types this harness supports),
-`doctor` (read-only health check), `list [type]`, `cost [--type T]` (startup
+`doctor` (read-only health check), `update` (checks for a newer release and lists the commands that update it; run none yourself, relay them), `list [type]`, `cost [--type T]` (startup
 token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name), `enable <type> <name>...`,
 `enable --all`, `undo` (reverse the last batch), `profile save|apply|diff|delete <name>`,
 `profile rename <old> <new>`, `profile list` (see Profiles); add `--dry-run` to preview. `<type>` = `skill` / `agent` /

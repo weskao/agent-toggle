@@ -20,6 +20,7 @@ behave identically (same output, same exit code):
 | `undo` | `--undo` |
 | `doctor` | `--doctor` |
 | `config` | `--config` |
+| `update` | `--update` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:

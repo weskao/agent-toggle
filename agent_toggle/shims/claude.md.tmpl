@@ -1,7 +1,7 @@
 ---
 name: agent-toggle
 description: Temporarily disable or restore AI-agent resources — skills, agents, commands, rules, plugins, MCP servers — across Claude Code, Codex, Grok CLI, OpenCode, OpenClaw, Copilot and Vibe. Nothing is deleted; everything is parked and reversible. Use when the user wants to turn something off, trim startup context cost, re-enable something previously disabled, or asks "how do I disable X" / "turn off this MCP" / "add it back". Also when they ask to open, close or toggle the agent-toggle pane ("open agent-toggle" / "close the agent-toggle pane"), and to save, switch, rename or delete a profile ("save my setup as work" / "switch to my work profile").
-argument-hint: "[status | list | cost | disable|enable <type> <name>... | undo | profile | doctor | open | close]"
+argument-hint: "[status | list | cost | disable|enable <type> <name>... | undo | profile | doctor | update | open | close]"
 ---
 <!-- agent-toggle shim: written by `agent-toggle install-shims`; re-running it overwrites this file -->
 
@@ -17,7 +17,7 @@ agent-toggle <command> --json
 ```
 If `agent-toggle` is not on PATH, ask the user to install it (`uv tool install agent-toggle`); do not guess where a checkout lives.
 
-Commands: `status` (run first), `doctor` (read-only health check), `list [type]`,
+Commands: `status` (run first), `doctor` (read-only health check), `update` (checks for a newer release and lists the commands that update it; run none yourself, relay them), `list [type]`,
 `cost [--type T]` (startup token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name),
 `enable <type> <name>...`, `enable --all`, `undo` (reverse the last batch),
 `profile save|apply|diff|delete <name>`, `profile rename <old> <new>`, `profile list` (see Profiles), `migrate`; add `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`

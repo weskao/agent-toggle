@@ -276,7 +276,7 @@ describe('agent-toggle pane', () => {
 
   test('an unknown argument shows the usage and touches no pane', async ($, on) => {
     const s = panes(on)
-    expect(await cmd($, 'clsoe')).toBe('usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]')
+    expect(await cmd($, 'clsoe')).toBe('usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]')
     expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 0, closed: [] })
   })
 

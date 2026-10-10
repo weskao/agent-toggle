@@ -135,6 +135,14 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
                      ("--dry-run", t("help.opt.config_dry_run",
                                      "sync-ci: show the plan; set nothing"))],
             examples=["config", "config test", "config sync-ci --dry-run"]),
+        "update": Cmd(
+            "update",
+            t("help.update.summary", "check for a newer release; show how to update"),
+            t("help.update.desc", "Ask PyPI now (ignoring the cache and a skipped version) and, "
+                                  "when a newer release exists, print the commands that update "
+                                  "the CLI, the Claude Code plugin (if installed) and the shims. "
+                                  "Runs none of them."),
+            examples=["update", "update --json"]),
         "install-shims": Cmd(
             "install-shims [--dry-run] [--gitignore | --no-gitignore]",
             t("help.install_shims.summary", "write the skill shim into every installed harness"),
@@ -166,7 +174,7 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
 def groups() -> list[tuple[str, list[str]]]:
     return [(t("help.group.toggle", "Toggle"), ["ui", "disable", "enable", "undo", "profile"]),
             (t("help.group.inspect", "Inspect"), ["status", "list", "cost", "doctor"]),
-            (t("help.group.setup", "Setup"), ["config", "install-shims", "migrate"])]
+            (t("help.group.setup", "Setup"), ["config", "install-shims", "update", "migrate"])]
 
 
 def _table(rows: list[tuple[str, str]], color: bool, role: str = "choice") -> list[str]:

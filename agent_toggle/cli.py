@@ -558,7 +558,7 @@ def _stale_ignore_lines(h, args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims", "profile", "undo", "doctor", "config")
+            "install-shims", "profile", "undo", "doctor", "config", "update")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -693,6 +693,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
     sub.add_parser("doctor", parents=[common],
                    help="check harness layouts and state against disk; offers y/n fixes")
+    sub.add_parser("update", parents=[common],
+                   help="check for a newer release; show the commands that update everything")
     cf = sub.add_parser("config", parents=[common],
                         help="Telegram settings for the CI failure alerts (needs the telegram extra)")
     cf.add_argument("action", nargs="?", choices=("test", "sync-ci"),
@@ -727,7 +729,8 @@ def main(argv: list[str] | None = None) -> int:
         language, color = "en", "auto"
     i18n.set_language(language)
     color = scan_color(argv, color)     # --color > env > setting > auto
-    started = update_prompt.start()
+    i = _command_index(argv)
+    started = None if argv[i:i + 1] == ["update"] else update_prompt.start()   # `update` is the check
     try:
         return _main(argv, color)
     except KeyboardInterrupt:
@@ -795,6 +798,8 @@ def _main(argv: list[str], color: str) -> int:
             fixes = doctor.cmd_doctor(args.harness, out)
             if fixes and _interactive(out):
                 doctor.offer_fixes(fixes, out)
+        elif cmd == "update":
+            update_prompt.cmd_update(out)
         elif cmd == "config":
             config.cmd_config(args, out)
         elif cmd == "undo":
