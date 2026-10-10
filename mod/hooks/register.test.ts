@@ -45,7 +45,7 @@ describe('agent-toggle pane', () => {
     await tick()
     expect(argvs[0]).toEqual(['agent-toggle', 'cost', '--json', '--harness', 'claude'])
     expect(argvs[1]).toEqual(['agent-toggle', 'disable', 'skill', 'a', '--json', '--harness', 'claude'])
-    expect(toasts).toContain('[DISABLED] skill: a')
+    expect(toasts).toContain('⛔ [DISABLED] skill: a')
   })
 
   test('the arrows and End move the cursor; the cost summary row (null type/name) is not a row', async ($, on) => {
@@ -63,14 +63,14 @@ describe('agent-toggle pane', () => {
     const { toasts, ui, tick } = await open($, on, COST, done(1, JSON.stringify({ ok: false, results: [{ status: 'error', detail: 'not found' }] })))
     await ui.key({ key: ' ' })
     await tick()
-    expect(toasts).toContain('[FAILED] disable skill: a - not found')
+    expect(toasts).toContain('❌ [FAILED] disable skill: a - not found')
   })
 
   test('a toggle that needs a new session says so', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, COST, done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ status: 'ok' }] })))
     await ui.key({ key: ' ' })
     await tick()
-    expect(toasts).toContain('[DISABLED] skill: a (takes effect in a new session)')
+    expect(toasts).toContain('⛔ [DISABLED] skill: a (takes effect in a new session)')
   })
 
   test('two simultaneous keys run exactly one toggle', async ($, on) => {
@@ -159,12 +159,12 @@ describe('agent-toggle pane', () => {
     expect(await text()).toMatch(/⠙ Loading resources…/)
   })
 
-  test('a toast names a mod as a mod, in plain ASCII', async ($, on) => {
+  test('a toast names a mod as a mod, with no escape codes', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, cost(row('plugin', 'm', false, 7, true)))
     await ui.key({ key: ' ' })
     await tick()
-    expect(toasts).toEqual(['[ENABLED] mod: m'])
-    expect(/[^\x20-\x7e]/.test(toasts[0]!)).toBe(false) // no escape codes or glyphs a console could mangle
+    expect(toasts).toEqual(['✅ [ENABLED] mod: m'])
+    expect(/[\x00-\x1f]/.test(toasts[0]!)).toBe(false) // an ANSI colour code would show as garbage
   })
 
   test('a surface with no Client draws one Button per row', async ($, on) => {
