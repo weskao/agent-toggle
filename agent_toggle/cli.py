@@ -67,6 +67,7 @@ from .backends.plugin_cli import claude_bin
 from .harnesses import TYPES, harness_of, harnesses, project_view
 from .mechanisms import (
     dir_view,
+    fail_row,
     legacy_parks,
     migrate_parks,
     settle,
@@ -337,21 +338,39 @@ def cmd_toggle(args: argparse.Namespace, out: Result) -> None:
         if harness != "claude":
             die(f"--project supports only the claude layout, not {harness}", 4)
         h = project_view(args.project)
-        if type_ not in h.types:
+        if type_ not in (*h.types, "all"):
             die(f"--project supports {', '.join(h.types)} (not {type_})", 4)
-        ops.apply_plan([ops.Op(harness, type_, action, n, str(h.project)) for n in names],
-                       out, args.dry_run, batch=store.BATCH)
-        return
-    h = harness_of(harness)
-    home, supported = h.home, h.types
-    if not home.is_dir():
-        die(f"{harness} is not installed ({home} does not exist)", 4)
-    if type_ not in supported:
-        have = f"it has: {', '.join(supported)}" if supported else "no supported types"
-        die(f"{harness} has no {type_} support ({have})", 4)
+        project = str(h.project)
+    else:
+        h, project = harness_of(harness), None
+        home, supported = h.home, h.types
+        if not home.is_dir():
+            die(f"{harness} is not installed ({home} does not exist)", 4)
+        if type_ not in (*supported, "all"):
+            have = f"it has: {', '.join(supported)}" if supported else "no supported types"
+            die(f"{harness} has no {type_} support ({have})", 4)
+    pairs = [(type_, n) for n in names]
+    if type_ == "all":
+        pairs = _every_type(action, names, harness, h.project)
+        for name in sorted(set(names) - {n for _, n in pairs}):
+            fail_row(out, args.dry_run, harness, "all", action, name,
+                     f"no {'live' if action == 'disable' else 'disabled'} item named {name} "
+                     f"on {harness}", batch=store.BATCH, project=project)
+    ops.apply_plan([ops.Op(harness, t, action, n, project) for t, n in pairs], out,
+                   args.dry_run, batch=store.BATCH)
 
-    ops.apply_plan([ops.Op(harness, type_, action, n) for n in names], out, args.dry_run,
-                   batch=store.BATCH)
+
+def _every_type(action: str, names: list[str], harness: str,
+                project: Path | None) -> list[tuple[str, str]]:
+    """`all`: each (type, name) on `harness` that `action` can act on -- live items for
+    disable, parked ones for enable -- in one scope (user, or the --project dir)."""
+    state, table = profiles.scope(load_state(write_back=False), project)
+    want = action == "disable"
+    # plugin ids are `name@marketplace`: skip the claude CLI call unless one could match
+    plugins = project is None and any("@" in n for n in names)
+    return sorted({(i.type, i.name) for i in cost.inventory(state, table, plugins=plugins)
+                   if i.name in names and i.enabled == want
+                   and harness in (i.harness, *i.shared_with)})
 
 
 def cmd_migrate(out: Result) -> None:
@@ -690,7 +709,7 @@ def build_parser() -> argparse.ArgumentParser:
     up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
         sp = sub.add_parser(name, parents=[common], help=f"{verb} one or more items")
-        sp.add_argument("type", choices=TYPES, nargs="?" if name == "enable" else None)
+        sp.add_argument("type", choices=(*TYPES, "all"), nargs="?" if name == "enable" else None)
         sp.add_argument("names", nargs="*" if name == "enable" else "+", metavar="name")
         sp.add_argument("--dry-run", action="store_true",
                         help="show the plan; change nothing")

@@ -37,7 +37,8 @@ def _dry_run() -> tuple[str, str]:
 
 
 def _type_arg() -> tuple[str, str]:
-    return ("<type>", " | ".join(TYPES))
+    return ("<type>", " | ".join(TYPES) + " | all "
+            + t("help.arg.all", "(every type with that name)"))
 
 
 def commands(default_harness: str = "claude") -> dict[str, Cmd]:
@@ -57,7 +58,8 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
                                    "Without --harness this acts on %s.", default_harness),
             args=[_type_arg(), ("<name>...", t("help.arg.names", "one or more item names"))],
             options=[_dry_run(), _project()],
-            examples=["disable skill my-skill", "disable mcp my-server --harness codex",
+            examples=["disable skill my-skill", "disable all my-tool",
+                      "disable mcp my-server --harness codex",
                       "disable agent my-agent --project . --dry-run"]),
         "enable": Cmd(
             "enable <type> <name>... | enable --all [--dry-run] [--project dir]",

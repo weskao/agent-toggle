@@ -13,6 +13,7 @@ CATALOG: dict[str, str] = {
     "help.disable.summary": "停用（暫存）一或多個項目",
     "help.disable.desc": "把項目移出 harness 的視野，不會刪除任何東西。未指定 --harness 時作用於 %s。",
     "help.enable.summary": "還原一或多個項目",
+    "help.arg.all": "（同名的所有類型）",
     "help.enable.desc": "把暫存的項目放回去。未指定 --harness 時作用於 %s；"
                         "--all 還原全部（可搭配一個 --harness）。",
     "help.undo.summary": "復原最近一次記錄的批次",

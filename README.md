@@ -129,6 +129,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); reports stale legacy `<dir>-disabled/` lines in a harness-home `.gitignore` (`--gitignore` removes them, `--no-gitignore` skips the check); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
+| `disable\|enable all <name>...` | every type on the harness with that name at once (skill, command, MCP, ...); a name with no match is an `error` row; one batch, so `undo` reverses it |
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list` | named sets of live items; see [Profiles](#profiles) |
@@ -205,6 +206,7 @@ agent-toggle disable skill   demo-skill other-skill
 agent-toggle disable command demo:batch             # nested commands/demo/batch.md
 agent-toggle disable agent   demo-agent
 agent-toggle disable mcp     example-mcp
+agent-toggle disable all     example-tool           # skill, command, mcp... named example-tool
 agent-toggle disable skill   demo-skill --harness codex
 agent-toggle enable  mcp     example-mcp
 agent-toggle cost --type skill --json
