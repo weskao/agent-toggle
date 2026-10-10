@@ -259,6 +259,15 @@ def log(action: str, type_: str, name: str, result: str, detail: str = "", *,
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def signal_reload(rows: list[dict]) -> None:
+    """`ui` runs in a terminal of its own, so it cannot reload a Claude Code session: it leaves the claude rows it
+    changed here, and every session running the agent-toggle mod polls the file and reloads them (mod/hooks/register.tsx)."""
+    done = [r for r in rows if r["harness"] == "claude" and r["status"] == "ok" and r["action"] in ("disable", "enable")]
+    if done:
+        fs.private_dir(fs.state_dir())
+        fs.atomic_write(fs.reload_file(), json.dumps({"batch": BATCH, "results": done}, ensure_ascii=False))
+
+
 def migrate(state: dict) -> int:
     """Import ~/.claude-toggle state so existing rollbacks keep working."""
     legacy_state_dir, backup_dir = fs.legacy_state_dir(), fs.backup_dir()

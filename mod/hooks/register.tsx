@@ -133,6 +133,42 @@ async function refresh($: Engine) {
   await update($, rows, () => list)
 }
 
+// After a toggle made outside the pane: an open pane would keep drawing the old state; seq drops a refresh in flight.
+async function repaint($: Engine) {
+  seq++
+  if ((await read($, rows)).length > 0) await exclusive($, () => refresh($))
+}
+
+// `agent-toggle ui` runs in a terminal of its own and applies on Enter, so it leaves the claude rows it changed in
+// ~/.agent-toggle/reload.json (store.signal_reload). Every session polls that file's mtime, one stat a tick, and
+// reloads them. Seeded at session start: a file from before is no news. A hot reload re-seeds, harmlessly.
+const POLL_MS = 5000
+let seen: number | undefined
+
+async function poll($: Engine, file: string) {
+  const at = await $.fs.stat(file).then(s => s.mtimeMs, () => 0)
+  if (at === seen) return
+  const first = seen === undefined
+  seen = at
+  if (first || !at) return
+  try {
+    const sig = JSON.parse(await $.fs.read(file)) as { results?: Done[] }
+    $.ui.toast(`agent-toggle ui: ${reload($, sig.results ?? [])}`)
+    await repaint($)
+  } catch (err) {
+    $.ui.toast(`agent-toggle: ${file} - ${String(err)}`)
+  }
+}
+
+async function watch($: Engine) {
+  // where Python's Path.home() looks: USERPROFILE on Windows, HOME elsewhere
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (!home) return
+  const file = `${home}/.agent-toggle/reload.json`
+  await poll($, file)
+  $.clock.every(POLL_MS, () => void poll($, file))
+}
+
 // `same`: every row named like `row` that is in `row`'s state, as the curses `n` key (`disable|enable all <name>`, one batch for undo)
 async function toggle($: Engine, row: Row, same?: Row[]) {
   const moved = same ?? [row]
@@ -209,6 +245,7 @@ export const register: Register = on => {
       description: 'Toggle Claude Code resources in a pane',
       argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
     }).catch(() => {})
+    await watch($)
 
     return next(e)
   })
@@ -217,11 +254,7 @@ export const register: Register = on => {
     const words = e.args.trim().split(/\s+/)
     if (VERB.test(words[0] ?? '')) {
       const text = await runArgs($, words)
-      // a toggle: an open pane would keep drawing the old state; seq drops a pane refresh already in flight
-      if (/^(?:--)?(disable|enable|undo)$/i.test(words[0]!)) {
-        seq++
-        if ((await read($, rows)).length > 0) await exclusive($, () => refresh($))
-      }
+      if (/^(?:--)?(disable|enable|undo)$/i.test(words[0]!)) await repaint($)
       return { text }
     }
     const action = words[0].toLowerCase() || 'open'

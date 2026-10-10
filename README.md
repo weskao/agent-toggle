@@ -568,7 +568,8 @@ visible rather than silent.
   hand-rolled serializer would mangle comments — a text slice is lossless and
   much less code.
 
-MCP changes need a **new session** to take effect.
+MCP changes need a **new session** to take effect, except in a Claude Code session running the
+agent-toggle mod, which runs `/mcp disable|enable <name>` for you (see the mod section).
 
 ### Claude MCP scopes
 
@@ -816,6 +817,7 @@ bookkeeping.
 | `state.json` | current disabled list (schema v3; atomic write, mode `0600`), saved before each flag write or dir move with the op in flight under an optional `pending` key, and after each MCP / plugin item |
 | `lock` | held by `disable` / `enable` / `enable --all` / `undo` / `profile apply` / `migrate` / `ui` for the whole batch; a second run waits 5 s then exits `3` (stale after 10 min *and* its PID is gone; a live batch refreshes it per item; the error says when its PID is gone, i.e. a killed run left it) |
 | `log.jsonl` | one line per operation (mode `0600`), see below |
+| `reload.json` | the Claude rows the last `ui` Enter changed, rewritten each time; open Claude Code sessions running the mod poll it and reload them |
 | `mcp-backups/` | `<harness>__<server>.json`, or `<sha8>__<harness>__<server>.json` for a project `.mcp.json` (mode `0600` -- may hold auth headers) |
 | `companions/` | parked exclusive helper files |
 | `parked/user/<owner>/<dir>/` | user-scope items, e.g. `parked/user/claude/skills/<name>` (`<owner>` = the harness whose home holds the dir; a dir shared by several harnesses parks once, under its owner); an absolute OpenCode `skills.paths` dir parks under `parked/user/opencode/ext-<sha8>/` (`<sha8>` of its resolved path). Nothing is ever parked inside a harness home |
@@ -945,6 +947,10 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `/reload-plugins`, an MCP server `/mcp disable|enable <name>`. The toast names it, e.g.
   `⛔ [DISABLED] skill: foo (/reload-skills)`. Agents and rules have no reload and still say
   `takes effect in a new session`. If Claude refuses a queued command, a toast says so.
+- `agent-toggle ui` in another terminal applies on Enter and writes the Claude rows it changed to
+  `~/.agent-toggle/reload.json`. Every open session running the mod checks that file's mtime every
+  5 s (one `stat`) and queues the same reloads, toasting `agent-toggle ui: /reload-skills`. A file
+  older than the session is ignored.
 - Needs `agent-toggle` on `PATH`.
 - On Windows `agent-toggle` must resolve to a real executable on `PATH` (a pip or uv install
   provides `agent-toggle.exe`).

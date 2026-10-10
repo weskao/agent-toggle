@@ -44,6 +44,10 @@ def log_file() -> Path:
     return state_dir() / "log.jsonl"
 
 
+def reload_file() -> Path:
+    return state_dir() / "reload.json"
+
+
 def backup_dir() -> Path:
     return state_dir() / "mcp-backups"
 

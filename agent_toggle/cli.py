@@ -325,6 +325,7 @@ def cmd_ui(state: dict, out: Result, dry_run: bool = False, project: str | None 
     if dry_run:
         out.say("\ndry run -- nothing changed")
         return
+    store.signal_reload(out.rows)
     if any(r.type in ("mcp", "plugin") for r in changes):
         out.say("\nMCP/plugin changed -- open a NEW session for it to take effect.")
 

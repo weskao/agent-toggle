@@ -78,6 +78,7 @@ class ApplyPlanSeamTest(SandboxCase):
         self.assertEqual(plan, [ops.Op("claude", "skill", "disable", "demo-skill")])
         self.assertEqual(spy.call_args.kwargs["batch"], store.BATCH)
         self.assertFalse((self.home / "skills/demo-skill").exists())
+        self.assertFalse(fs.reload_file().exists())   # only `ui` signals: the mod reloads its own runs itself
 
     def test_cmd_ui_goes_through_apply_plan(self) -> None:
         try:
@@ -94,6 +95,10 @@ class ApplyPlanSeamTest(SandboxCase):
                          [ops.Op("claude", "skill", "disable", "demo-skill")])
         self.assertFalse((self.home / "skills/demo-skill").exists())
         self.assertIn("claude:skill:demo-skill", store.load_state()["disabled"])
+        # Enter applied it: open Claude Code sessions (the mod polls this file) reload the skill
+        sig = json.loads(fs.reload_file().read_text(encoding="utf-8"))
+        self.assertEqual([(r["type"], r["name"], r["action"], r["status"]) for r in sig["results"]],
+                         [("skill", "demo-skill", "disable", "ok")])
 
     def test_type_without_a_mechanism_is_an_unsupported_row(self) -> None:
         out = Result()

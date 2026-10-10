@@ -322,6 +322,29 @@ describe('agent-toggle pane', () => {
     expect(ran).toEqual(['mcp disable x'])
   })
 
+  test('a change `agent-toggle ui` applied on Enter is reloaded at the next poll; a file from before is not', async ($, on) => {
+    mock.env(on, { HOME: '/home/u' })
+    const clock = mock.clock(on)
+    const ran: string[] = []
+    const toasts: string[] = []
+    let mtimeMs = 1
+    on('fs.stat', (_$, e) => ({ value: { kind: 'file', size: 1, mtimeMs: e.path === '/home/u/.agent-toggle/reload.json' ? mtimeMs : 0, isLink: false } }))
+    const results = [{ harness: 'claude', type: 'skill', name: 'a', action: 'disable', status: 'ok' }, { harness: 'claude', type: 'mcp', name: 'x', action: 'enable', status: 'ok' }]
+    on('fs.read', () => ({ value: JSON.stringify({ batch: 'b', results }) }))
+    on('command.run', (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' }))
+    on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }))
+    on('tool.register', () => ({ value: { tool: 'pane' } }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+    await clock.advance(5000)
+    expect(ran).toEqual([]) // the file from before the session is no news
+    mtimeMs = 2 // Enter in the picker rewrote it
+    await clock.advance(5000)
+    await clock.advance(0)
+    expect(ran).toEqual(['reload-skills', 'mcp enable x'])
+    expect(toasts).toEqual(['agent-toggle ui: /reload-skills, /mcp enable x'])
+  })
+
   test('a failed CLI run from arguments says why; an explicit --harness is kept', async ($, on) => {
     const argvs: string[][] = []
     on('process.run', (_$, e) => {
