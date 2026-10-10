@@ -264,6 +264,11 @@ class KeysTest(ScreenCase):
         self.assertIn("○ - alpha", line)
         self.assertIn("● + beta", win.screen[win.find("beta")])
 
+    def test_the_search_separator_keeps_the_cursor(self) -> None:
+        # "a" matches every row; the cursor on beta stays there through Space and Backspace
+        out, _ = self.run_keys(["/", "a", picker.curses.KEY_DOWN, " ", "\x7f", " ", " ", "\n"])
+        self.assertEqual(self.names(out), [("beta", True)])
+
     def test_toggling_twice_unstages(self) -> None:
         out, _ = self.run_keys(["\t", "\x10", " ", "\n"])         # Tab down, Ctrl-P back up
         self.assertEqual(out, [])

@@ -499,8 +499,11 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
         elif key in (curses.KEY_LEFT, curses.KEY_RIGHT):
             v.tab(-1 if key == curses.KEY_LEFT else 1)
         elif key in BACKSPACE:
+            # a trailing Space is only the term separator: the rows, and so the cursor, stay
+            if not v.query.endswith(" "):
+                v.cur = 0
             v.query = v.query[:-1]
-            v.typing, v.cur = v.typing and bool(v.query), 0
+            v.typing = v.typing and bool(v.query)
         elif key == "\x15":                               # Ctrl-U
             v.query, v.typing, v.cur = "", False, 0
         elif key == "\x01" or key == "a" and not v.filtering:     # Ctrl-A / a
@@ -531,7 +534,9 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
                 v.cur = 0
         elif isinstance(key, str) and key.isprintable():
             v.query += key
-            v.typing, v.cur = True, 0
+            v.typing = True
+            if key != " ":                                # the separator matches the same rows
+                v.cur = 0
         # KEY_RESIZE and anything else: just redraw at the new size
 
 
