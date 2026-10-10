@@ -17,6 +17,7 @@ from .model import (
     prefs,
     profile_command,
     profile_listing,
+    toggle_same_name,
     type_label,
     visible,
 )
@@ -106,9 +107,12 @@ def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
                           f"{profile_listing()}\np <number|name>  |  p save <name>")
                          + "\n")
             redraw = bool(line)
+        elif low.startswith("n ") and (idx := _numbers(cmd[2:], len(shown))) is not None:
+            for i in idx:                                 # every type with that row's name
+                toggle_same_name(kept, shown[i])
         elif low in ("?", "help"):
             stdout.write("Numbers tick/untick rows (unticked = parked); nothing is applied "
-                         "until `a`. `p` lists profiles; `p <number|name>` stages one, "
+                         "until `a`. `n <number>` toggles every type with that row's name. `p` lists profiles; `p <number|name>` stages one, "
                          "`p save <name>` saves the live state.\n")
             redraw = False
         elif cmd and (idx := _numbers(cmd, len(shown))) is not None:

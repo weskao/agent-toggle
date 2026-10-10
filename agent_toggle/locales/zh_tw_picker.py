@@ -74,6 +74,7 @@ CATALOG: dict[str, str] = {
     "picker.help.sort": "循環切換排序：名稱 / 成本（由大到小）",
     "picker.help.profile": "設定檔：暫存一個，或儲存目前啟用的狀態",
     "picker.help.all": "切換所有可見的列",
+    "picker.help.same_name": "切換此 harness 上同名的所有類型",
     "picker.help.help": "顯示此說明",
     "picker.help.cost": "成本 = 工作階段開始時載入的約略 token 數（字元數/4）。",
     "picker.help.close": "按任意鍵關閉說明",

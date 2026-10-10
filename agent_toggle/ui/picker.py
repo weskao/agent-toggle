@@ -36,6 +36,7 @@ from .model import (
     short_path,
     strict,
     subsequence,
+    toggle_same_name,
     type_label,
     visible,
 )
@@ -44,7 +45,7 @@ DETAIL_MIN = 100            # narrower than this: list only, no detail pane
 BODY_TOP = 3                # title, tabs, filter line
 BACKSPACE = (curses.KEY_BACKSPACE, "\x7f", "\b")
 ENTER = ("\n", "\r", curses.KEY_ENTER)
-COMMANDS = ("s", "t", "h", "p", "?", "/", *"0123456789")
+COMMANDS = ("s", "t", "h", "p", "n", "?", "/", *"0123456789")
 
 
 def sort_label(sort: str) -> str:
@@ -365,6 +366,7 @@ def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
         ("s", t("picker.help.sort", "cycle sort: name / cost (biggest first)")),
         ("p", t("picker.help.profile", "profiles: stage one, or save what is live")),
         ("a  Ctrl-A", t("picker.help.all", "toggle every visible row")),
+        ("n", t("picker.help.same_name", "toggle every type with this row's name (this harness)")),
         ("?", t("picker.help.help", "this help")),
     ]
 
@@ -508,6 +510,10 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
             if key == "p":
                 v.note = profile_command(v.rows, ask_profile(win, pal, g), project, dry_run,
                                          harness)
+            elif key == "n":
+                if shown:
+                    n = toggle_same_name(v.rows, shown[v.cur])
+                    v.note = f"{shown[v.cur].name}: {n} rows"
             elif key == "s":
                 v.sort = cycle(SORTS, v.sort)
             elif key == "h":
@@ -520,7 +526,7 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
                 v.typing = True
             else:
                 v.tab(to=int(key))
-            if key != "?":
+            if key not in ("?", "n"):
                 v.cur = 0
         elif isinstance(key, str) and key.isprintable():
             v.query += key

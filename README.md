@@ -278,8 +278,9 @@ What is on screen:
 | `p` | profiles: stage a saved one, or save the live state (see below) |
 | `?` | show the key list |
 | `a` / `Ctrl-A` | toggle every visible row |
+| `n` | toggle every row on this row's harness with the same name, of any type (skill, command, MCP, ...), shown or filtered out; like `disable all <name>` |
 
-The command keys (`t`, `s`, `p`, `h`, `a`, `0`-`9`, `?`) act only while no filter is active.
+The command keys (`t`, `s`, `p`, `h`, `a`, `n`, `0`-`9`, `?`) act only while no filter is active.
 Press `/` first to type a filter that begins with one of them; once the filter is non-empty,
 every letter just types.
 
@@ -305,7 +306,8 @@ Built on stdlib `curses`, so there is nothing to install on macOS and Linux
 (on Windows, `pip install "agent-toggle[windows]"` pulls `windows-curses`).
 Without curses, `ui` falls back to a numbered menu with the same staging and the
 same result. It is grouped by type, with the same glyphs and color: type row
-numbers (`1 3 5-7`) to tick or untick, `/text` to filter (`/` alone clears it),
+numbers (`1 3 5-7`) to tick or untick, `n <number>` to toggle every type with that
+row's name, `/text` to filter (`/` alone clears it),
 `s` / `h` / `t` to sort and cycle the harness and type filters, `p` to list profiles,
 `p <number|name>` to stage one and `p save <name>` to save the live state, `a` to
 apply, `q` (or end of input) to cancel.

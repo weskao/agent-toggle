@@ -185,6 +185,16 @@ def visible(rows: list[Row], query: str = "", harness: str = "all", type_: str =
     return shown
 
 
+def toggle_same_name(rows: list[Row], cur: Row) -> int:
+    """Stage every row on `cur`'s harness named like `cur` (any type, shown or not) to
+    the opposite of `cur`'s staged tick; returns how many rows that touched."""
+    same = [r for r in rows if r.harness == cur.harness and r.name == cur.name]
+    live = not cur.staged
+    for r in same:
+        r.staged = live
+    return len(same)
+
+
 def cycle(options: tuple[str, ...] | list[str], current: str) -> str:
     """The option after `current` (wraps; an unknown current restarts at the first)."""
     return options[(options.index(current) + 1) % len(options)] if current in options \
