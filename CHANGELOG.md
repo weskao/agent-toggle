@@ -1,3 +1,57 @@
+## [0.9.0] - 2026-10-10
+
+### 🚀 Features
+
+- **mod:** Add the claude code pane mod
+- **mod:** Move the picker cursor with the mouse wheel
+- **config:** Show the masked bot token in the menu
+- **ui:** Add the agent-toggle logo to help and config
+- **config:** Colour menu headings and harness rows
+- **mod:** Show a loading spinner in the pane
+- **mod:** Close the pane with /agent-toggle close
+- **mod:** Name target and state in the toast
+- **mod:** Mark toast state with an emoji
+- **mod:** Run cli commands from /agent-toggle args
+- **mod:** Open, close and toggle the pane by command or tool
+- **mod:** Toggle every type with a name by n in the pane
+- **profiles:** Add delete and rename commands
+- **mod:** Drop toast emoji where they draw as boxes
+
+### 🐛 Bug Fixes
+
+- **ui:** Let space toggle a row after a search
+- **mod:** Drop a failed wheel tick instead of rethrowing
+- **shims:** Drop the checkout path from skill shims
+
+### 💼 Other
+
+- Add a plugin marketplace for the mod
+
+### 📚 Documentation
+
+- **mod:** Document the pane mod and its install
+- **readme:** Keep the wheel bullet out of the keys bullet
+- **readme:** Use a vX.Y.Z placeholder for pinned installs
+- **readme:** Add an at-a-glance section with screenshots
+- **shims:** Teach the claude shim the pane controls
+- **readme:** Document pane open, close and toggle
+- **shims:** Keep skill shim descriptions english-only
+- **readme:** Add pane prompt examples
+- Document the pane n key
+- **shims:** Guide profile crud with questions
+
+### ⚡ Performance
+
+- **mod:** Flip the toggled row before the cli answers
+
+### 🎨 Styling
+
+- **tests:** Replace lambda assignment with def
+
+### ⚙️ Miscellaneous Tasks
+
+- Ignore uv.lock
+- **mod:** Bump plugin version to 0.9.0
 ## [0.8.1] - 2026-10-10
 
 ### 🚀 Features
