@@ -1,3 +1,9 @@
+## [0.11.4] - 2026-10-10
+
+### ⚙️ Miscellaneous Tasks
+
+- Track uv.lock
+- Check uv.lock is up to date
 ## [0.11.3] - 2026-10-10
 
 ### 🐛 Bug Fixes
