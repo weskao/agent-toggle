@@ -1,3 +1,20 @@
+## [0.10.0] - 2026-10-10
+
+### 🚀 Features
+
+- **mod:** Reload the session after a toggle
+- **shims:** Add argument-hint to the claude shim
+- Reload claude code after ui applies on enter
+- **mod:** Show the picker's scroll position
+
+### 📚 Documentation
+
+- Link the PyPI project page
+- **mod:** Clarify reload behavior
+
+### 🧪 Testing
+
+- **mod:** Fail a skill toggle that reloads more
 ## [0.9.0] - 2026-10-10
 
 ### 🚀 Features
