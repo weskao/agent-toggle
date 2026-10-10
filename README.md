@@ -272,7 +272,7 @@ What is on screen:
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
-| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
+| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` or `mods` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `←` `→` | switch harness tab (also while typing a filter); `0` = All, `1`-`9` = that tab, `h` = next tab |
 | `t` | cycle the type filter |

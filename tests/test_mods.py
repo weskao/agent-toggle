@@ -76,8 +76,9 @@ class ModsTest(SandboxCase):
         rows = [model.Row("claude", "plugin", "pane@mk", True, mod=True),
                 model.Row("claude", "plugin", "weather@playground-mods", True, mod=True),
                 model.Row("claude", "plugin", "plain@mk", True)]
-        self.assertEqual([r.name for r in model.match(rows, "mod")],
-                         ["pane@mk", "weather@playground-mods"])
+        for query in ("mod", "mods", "Mods"):            # the heading reads "Mods"
+            self.assertEqual([r.name for r in model.match(rows, query)],
+                             ["pane@mk", "weather@playground-mods"], query)
 
 
 @unittest.skipIf(picker is None, "curses unavailable")
