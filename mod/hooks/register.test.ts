@@ -181,4 +181,22 @@ describe('agent-toggle pane', () => {
     await tickDown(40) // the Button list on vscode/mobile: the engine scrolls it
     expect({ toggles: toggles(), reached }).toEqual({ toggles: ['enable skill b'], reached: [1] })
   })
+
+  test('/agent-toggle close closes the pane without opening it or running the CLI', async ($, on) => {
+    const closed: string[] = []
+    let opened = 0
+    let runs = 0
+    on('ui.close', (_$, e) => (closed.push(e.id), { value: undefined }))
+    on('ui.open', () => ((opened += 1), { value: { isPlaced: true } }))
+    on('process.run', () => ((runs += 1), { value: done(0, COST) }))
+    const r = await $.command.run({ command: 'agent-toggle', args: '  Close mods pane', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect({ text: r.text, closed, opened, runs }).toEqual({ text: 'agent-toggle pane closed.', closed: ['agent-toggle'], opened: 0, runs: 0 })
+  })
+
+  test('other arguments still open the pane', async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('process.run', () => ({ value: done(0, COST) }))
+    const r = await $.command.run({ command: 'agent-toggle', args: 'closet', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect(r.text).toBe('agent-toggle pane opened.')
+  })
 })
