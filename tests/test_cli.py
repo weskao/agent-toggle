@@ -235,7 +235,7 @@ class UpdateCheckTest(CliCase):
             rc, out, err = self.run_cli("--version")      # runs no other subprocess
         self.assertEqual((rc, out.strip()), (0, f"agent-toggle {__version__}"))
         run.assert_called_once_with(["uv", "tool", "upgrade", "agent-toggle"], check=False,
-                                    stdout=mock.ANY, stdin=subprocess.DEVNULL)
+                                    stdout=mock.ANY, stdin=subprocess.DEVNULL, env=mock.ANY)
         self.assertIn("did not finish", run.call_args.kwargs["stdout"].getvalue())  # = stderr
         self.assertIn("upgrade did not finish — run it yourself: uv tool upgrade agent-toggle"
                       "\n  agent-toggle install-shims", err)

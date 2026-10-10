@@ -34,6 +34,18 @@ class UpgradeStepsTest(unittest.TestCase):
         self.assertEqual(self.steps(None, []), [cli, shims])
 
 
+class OfferRunTest(unittest.TestCase):
+    def test_upgrade_steps_run_with_the_update_check_off(self) -> None:
+        def offer(_started, ask, *, run, **_kw):
+            run(["agent-toggle", "install-shims"], check=False)
+            return update_check.UPDATE_NOW
+        with mock.patch.object(update_check, "offer", side_effect=offer), \
+                mock.patch.object(update_prompt.subprocess, "run") as sub, \
+                mock.patch.object(update_prompt, "cache_path", return_value="x"):
+            update_prompt.offer(mock.Mock())
+        self.assertEqual(sub.call_args.kwargs["env"]["AGENT_TOGGLE_UPDATE_CHECK"], "0")
+
+
 class CmdUpdateTest(unittest.TestCase):
     def run_update(self, latest):
         out = mock.Mock()

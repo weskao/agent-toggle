@@ -206,7 +206,9 @@ def offer(started: update_check.Started | None, *, json_mode: bool = False,
     def run(cmd, **kw):                 # their output must never reach stdout; no step may prompt
         if cmd[0] == "claude":
             cmd = [plugin_cli.claude_bin() or "claude", *cmd[1:]]
-        return subprocess.run(cmd, stdout=sys.stderr, stdin=subprocess.DEVNULL, **kw)
+        # the install-shims step is agent-toggle itself: it must not re-check and print the hint again
+        env = {**os.environ, settings.DEFAULTS["update_check"].env: "0"}
+        return subprocess.run(cmd, stdout=sys.stderr, stdin=subprocess.DEVNULL, env=env, **kw)
     steps: list[list[str]] = []
     def upgrade(_found):
         steps.extend(upgrade_steps())
