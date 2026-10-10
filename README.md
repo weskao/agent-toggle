@@ -101,6 +101,18 @@ Without the extra everything else works exactly as before. Only `config test`,
 [settings menu](#settings--config-menu) need it; bare `config` still opens, and
 those rows read `install agent-toggle[telegram]`.
 
+**Optional: the Claude Code pane mod** (the picker as a pane inside Claude Code, claude harness
+only). It is not part of the PyPI package; with `agent-toggle` already on `PATH` from one of the
+installs above, type this at the prompt of a Claude Code terminal session (2.1.275 or later):
+
+```
+/plugin install agent-toggle --marketplace weskao/agent-toggle
+```
+
+Answer `y` to add the marketplace, pick a scope (user is the default), then run `/agent-toggle`.
+
+See [Claude Code pane mod](#claude-code-pane-mod).
+
 ## Shell completion
 
 Each release publishes static completion files for bash, zsh and fish as the
@@ -838,6 +850,40 @@ deletion lines in `git status`.
 unresolved paths makes every companion look like it lives outside the harness.
 Both sides are resolved first.
 
+## Claude Code pane mod
+
+A Claude Code mod in `mod/` that shows the picker as a pane inside Claude (not to be confused
+with the [Mods](#mods) group the picker lists). It is driven by the installed `agent-toggle`
+CLI (`cost --json`, `disable|enable --json`) and works for the claude harness only; the curses
+`agent-toggle ui` stays the cross-harness UI.
+
+Install it with `/plugin install agent-toggle --marketplace weskao/agent-toggle` (see
+[Install](#install)); `claude plugin update agent-toggle@agent-toggle` picks up a new release. To
+run your own checkout instead (edits reload as you save):
+
+```sh
+claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
+```
+
+- It looks like the `ui` picker: a title with the live-token total, a search line, rows under
+  type headings with counts, green `●` live / yellow `○` parked, tokens and a bar per row (a
+  parked row shows `(N)`, what restoring it would load), the cursor row in reverse video, and a
+  key-chip footer. The list scrolls with the cursor.
+- Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
+  `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,
+  `Tab` toggles and moves on; `/` or any other letter starts a search (terms ANDed over
+  `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
+  `s` sorts by name or cost; `Ctrl-U` clears the search. A click moves the cursor.
+- A toggle applies at once (no staging, no Enter to apply); the toast says `ok`, or that the change
+  takes effect in a new session, or the error. While a toggle runs, further keys are ignored.
+- Not in the pane: harness tabs (claude only), and the `t` `p` `a` `n` keys. Where Claude draws no
+  such pane (the mobile app, VS Code) it is a plain list of buttons instead.
+- Needs `agent-toggle` on `PATH`.
+- On Windows `agent-toggle` must resolve to a real executable on `PATH` (a pip or uv install
+  provides `agent-toggle.exe`).
+
+The design is in `docs/MOD.md`.
+
 ## Design and roadmap
 
 Architecture, harness survey, cost model, known gaps and the phased roadmap
@@ -854,6 +900,13 @@ ruff check .
 
 stdlib `unittest`, no fixtures, no network. Every test runs against a
 throwaway temp `HOME` and a stubbed `claude` CLI.
+
+The pane mod has its own checks (they need the `claude` CLI, so CI does not run them):
+
+```sh
+claude plugin validate mod
+claude plugin test mod
+```
 
 `python3 tools/wheel_smoke.py` builds the wheel, installs it without extras into a
 fresh venv (what a PyPI user gets) and runs the CLI against a temp `HOME`; CI runs
@@ -897,6 +950,8 @@ prints a `::notice::` and exits 0, so it never adds a second red X.
 ## Releasing
 
 A release is a git tag `vX.Y.Z` (where `X.Y.Z` must match `agent_toggle.__version__`).
+Bump `version` in `mod/.claude-plugin/plugin.json` to the same value by hand; nothing checks it,
+and without it `claude plugin update` does not hand marketplace installs the new mod.
 Pushing the tag triggers `.github/workflows/release.yml`:
 
 1. **Build** job checks that the tag matches `__version__`, builds a wheel and
