@@ -40,6 +40,7 @@ class Row:
     confirm: Callable[[], str] | None = None    # y/n question asked before the action runs
     telegram: bool = False                      # inert without the telegram extra
     harness: str = ""                           # harness rows: the name, for the detected note
+    role: str = "title"                         # headings: each group in its own colour
 
 
 def _shims(ctx: Ctx, res: Result) -> None:
@@ -61,7 +62,7 @@ def _harness_row(name: str) -> Row:
 
 
 ROWS: tuple[Row, ...] = (
-    Row("heading", lambda: t("config.group_general", "General")),
+    Row("heading", lambda: t("config.group_general", "General"), role="accent"),
     Row("bool", lambda: t("config.update_check", "Check for updates"), key="update_check",
         help=lambda: t("config.help_update_check",
                        "On: look for a newer agent-toggle in the background.")),
@@ -78,9 +79,9 @@ ROWS: tuple[Row, ...] = (
     Row("choice", lambda: t("config.default_harness", "Default harness"), key="default_harness",
         help=lambda: t("config.help_default_harness",
                        "The harness a command acts on when --harness is not given.")),
-    Row("heading", lambda: t("config.group_harnesses", "Harnesses")),
+    Row("heading", lambda: t("config.group_harnesses", "Harnesses"), role="harness"),
     *(_harness_row(n) for n in settings.HARNESS_NAMES),
-    Row("heading", lambda: t("config.group_picker", "Picker")),
+    Row("heading", lambda: t("config.group_picker", "Picker"), role="pending"),
     Row("choice", lambda: t("config.picker_sort", "Default sort"), key="picker_sort",
         help=lambda: t("config.help_picker_sort", "The order the picker opens in: name or cost.")),
     Row("choice", lambda: t("config.picker_harness", "Default harness filter"),
@@ -88,7 +89,8 @@ ROWS: tuple[Row, ...] = (
         help=lambda: t("config.help_picker_harness", "The harness filter the picker opens with.")),
     Row("choice", lambda: t("config.picker_type", "Default type filter"), key="picker_type",
         help=lambda: t("config.help_picker_type", "The type filter the picker opens with.")),
-    Row("heading", lambda: t("config.group_notifications", "Notifications")),
+    Row("heading", lambda: t("config.group_notifications", "Notifications"),
+        role="warning"),
     Row("secret", lambda: t("config.bot_token", "Telegram bot token"), telegram=True,
         help=lambda: t("config.help_bot_token",
                        "Kept in the OS credential store, never in a file. "
@@ -97,7 +99,7 @@ ROWS: tuple[Row, ...] = (
         telegram=True,
         help=lambda: t("config.help_chat_id",
                        "A number such as -100123 or an @channel. - then Enter clears.")),
-    Row("heading", lambda: t("config.group_tools", "Tools")),
+    Row("heading", lambda: t("config.group_tools", "Tools"), role="live"),
     Row("action", lambda: t("config.doctor", "Health check (doctor)"),
         run=_doctor,
         help=lambda: t("config.help_doctor",
@@ -271,7 +273,7 @@ def value_segments(ctx: Ctx, row: Row, g: theme.Glyphs) -> list[Segment]:
     if row.telegram and ctx.tk is None:
         return [(needs_extra(), "warning")]
     if row.kind == "action":
-        return [(t("config.value_run", "run"), "muted")]
+        return [(t("config.value_run", "run"), "type")]
     if row.kind == "secret":
         if not ctx.token:
             return [(t("config.not_set", "not set"), "muted")]
@@ -279,7 +281,7 @@ def value_segments(ctx: Ctx, row: Row, g: theme.Glyphs) -> list[Segment]:
         return segs + [("  " + t("config.tag_env", "env"), "muted")] if ctx.token_env else segs
     value = ctx.values[row.key]
     if row.kind == "bool":
-        segs = [(t("config.on", "On"), "live") if value else (t("config.off", "Off"), "muted")]
+        segs = [(t("config.on", "On"), "live") if value else (t("config.off", "Off"), "parked")]
     elif row.kind == "text":
         segs = [(value, "choice") if value else (t("config.not_set", "not set"), "muted")]
     elif row.key == "language":
@@ -300,6 +302,11 @@ def _tilde(path) -> str:
         return "~/" + path.relative_to(fs.home()).as_posix()
     except ValueError:
         return str(path)
+
+
+def label_role(row: Row) -> str:
+    """A harness row's label wears that harness's colour, as in the picker."""
+    return theme.harness_role(row.harness) if row.harness else "text"
 
 
 def label_width(limit: int) -> int:
@@ -339,12 +346,12 @@ def numbered(ctx: Ctx, stdin=None, stdout=None) -> int:
         for row in ROWS:
             if row.kind == "heading":
                 say([])
-                say([(row.label(), "title")])
+                say([(row.label(), row.role)])
                 continue
             n += 1
             label = row.label()
-            say([(f"  {n:>2}. {label}{' ' * (lw - cell_width(label))}  ", "text"),
-                 *value_segments(ctx, row, g)])
+            say([(f"  {n:>2}. ", "text"), (label, label_role(row)),
+                 (f"{' ' * (lw - cell_width(label))}  ", "text"), *value_segments(ctx, row, g)])
         say([])
         say([(t("config.status.leave", "q/Ctrl+C to leave · auto-save"), "muted")])
         stdout.write(theme.encodable(t("config.prompt", "Pick a setting to change (1-%s): ",
@@ -405,10 +412,10 @@ def _rule(left: str, right: str, w: int, g: theme.Glyphs, note: str = "") -> lis
 def _row_segments(ctx: Ctx, row: Row, selected: bool, lw: int, g: theme.Glyphs,
                   editing: str | None) -> list[Segment]:
     if row.kind == "heading":
-        return [(" ", "text"), (row.label(), "title"), (" ", "text"), (g.h * 500, "muted")]
+        return [(" ", "text"), (row.label(), row.role), (" ", "text"), (g.h * 500, "muted")]
     label = row.label()
     segs = [(f" {g.pointer} " if selected else "   ", "accent" if selected else "text"),
-            (label + " " * max(0, lw - cell_width(label)), "cursor" if selected else "text"),
+            (label + " " * max(0, lw - cell_width(label)), "cursor" if selected else label_role(row)),
             ("  ", "text")]
     if editing is None:
         return segs + value_segments(ctx, row, g)
