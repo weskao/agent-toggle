@@ -12,6 +12,7 @@ CATALOG: dict[str, str] = {
     "picker.type.command": "指令",
     "picker.type.rule": "規則",
     "picker.type.plugin": "外掛",
+    "picker.type.mod": "Mods",
     "picker.type.mcp": "MCP",
     "picker.sort.name": "名稱",
     "picker.sort.cost": "成本",

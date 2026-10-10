@@ -41,7 +41,7 @@ DEFAULTS: dict[str, Spec] = {
     **{f"harness.{n}": Spec("bool", True) for n in HARNESS_NAMES},
     "picker_sort": Spec("choice", "name", ("name", "cost")),
     "picker_harness": Spec("choice", "all", ("all", *HARNESS_NAMES)),
-    "picker_type": Spec("choice", "all", ("all", *harnesses.TYPES)),
+    "picker_type": Spec("choice", "all", ("all", *harnesses.TYPES, "mod")),
     "language": Spec("choice", "en", ("en", "zh-TW"), "AGENT_TOGGLE_LANG"),
     "telegram_chat_id": Spec("chat_id"),
 }

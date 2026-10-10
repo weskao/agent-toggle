@@ -13,16 +13,18 @@ from ..mechanisms import resolve_item
 from ..output import CliError, Result
 
 SORTS = ("name", "cost")
+# picker groups: the types, with Mods (plugins that draw UI) right after Plugins
+GROUPS = (*TYPES[:TYPES.index("plugin") + 1], "mod", *TYPES[TYPES.index("plugin") + 1:])
 
 
 class Row:
     __slots__ = ("harness", "type", "name", "enabled", "staged", "tokens", "would_save",
-                 "shared", "path", "since", "mechanism", "basis", "description")
+                 "shared", "path", "since", "mechanism", "basis", "description", "mod")
 
     def __init__(self, harness: str, type_: str, name: str, enabled: bool,
                  tokens: int = 0, would_save: int = 0, shared: tuple[str, ...] = (),
                  path: str = "", since: str = "", mechanism: str = "", basis: str = "",
-                 description: str = ""):
+                 description: str = "", mod: bool = False):
         self.harness, self.type, self.name = harness, type_, name
         self.enabled = enabled
         self.staged = enabled          # what the user has ticked so far
@@ -30,6 +32,12 @@ class Row:
         # detail-pane facts; "" = unknown (a plugin has no path, a live row no `since`)
         self.path, self.since, self.mechanism, self.basis = path, since, mechanism, basis
         self.description = description
+        self.mod = mod                 # still type plugin: it toggles (and profiles) as one
+
+    @property
+    def group(self) -> str:
+        """The picker group: `mod` for a mod plugin, else the type."""
+        return "mod" if self.mod else self.type
 
     @property
     def changed(self) -> bool:
@@ -71,7 +79,7 @@ def collect(state: dict, harnesses: dict, warn=lambda m: None,
             path = e.get("parked_at") or e.get("backup") or ""
         rows.append(Row(i.harness, i.type, i.name, i.enabled, i.tokens, i.would_save,
                         i.shared_with, str(path), str(e.get("at") or ""), str(mech), i.basis,
-                        i.description))
+                        i.description, i.mod))
     rows.sort(key=lambda r: (r.harness, r.type, r.name))
     return rows
 
@@ -99,12 +107,12 @@ def prefs(rows: list[Row], harness: str | None = None
 
 
 def grouped(rows: list[Row]) -> list[tuple[str, list[Row]]]:
-    """`rows` split by type, in the canonical type order (skill ... mcp); the order
+    """`rows` split by group, in GROUPS order (skill ... plugin, mod, mcp); the order
     inside a group is kept, so a sort still holds under each heading."""
     groups: dict[str, list[Row]] = {}
     for r in rows:
-        groups.setdefault(r.type, []).append(r)
-    order = {t: n for n, t in enumerate(TYPES)}
+        groups.setdefault(r.group, []).append(r)
+    order = {t: n for n, t in enumerate(GROUPS)}
     return sorted(groups.items(), key=lambda g: (order.get(g[0], len(order)), g[0]))
 
 
@@ -114,6 +122,7 @@ def type_label(type_: str) -> str:
             "agent": t("picker.type.agent", "Agents"),
             "command": t("picker.type.command", "Commands"),
             "rule": t("picker.type.rule", "Rules"), "plugin": t("picker.type.plugin", "Plugins"),
+            "mod": t("picker.type.mod", "Mods"),
             "mcp": t("picker.type.mcp", "MCP")}.get(type_, type_)
 
 
@@ -169,7 +178,7 @@ def visible(rows: list[Row], query: str = "", harness: str = "all", type_: str =
     """The rows on screen: filter chips, then the text query, then the sort."""
     shown = [r for r in rows
              if (harness == "all" or harness in (r.harness, *r.shared))
-             and (type_ == "all" or r.type == type_)]
+             and (type_ == "all" or r.group == type_)]
     shown = match(shown, query)
     if sort == "cost":
         shown = sorted(shown, key=lambda r: (-r.tokens, -r.would_save, r.harness, r.type, r.name))

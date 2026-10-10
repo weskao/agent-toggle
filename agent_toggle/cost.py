@@ -71,6 +71,7 @@ class Item:
     basis: str
     shared_with: tuple[str, ...] = ()
     description: str = ""             # frontmatter description, when the file has one
+    mod: bool = False                 # a plugin that loads UI modules (see is_mod)
 
 
 def tokens_of(chars: int) -> int:
@@ -206,6 +207,16 @@ def backup_tools(entry: dict) -> int | None:
     return _entry_tools(raw)
 
 
+def is_mod(root: Path) -> bool:
+    """A mod is a plugin whose hooks/hooks.json has a top-level `modules` key: it loads
+    .mjs/.tsx code that draws UI; plain `hooks` (shell commands) do not make one."""
+    try:
+        data = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and "modules" in data
+
+
 def plugin_estimate(root: Path) -> Estimate:
     """A plugin bundle: sum of what it ships, read from its install path."""
     parts = [("skill", d.name, d / "SKILL.md") for d in sorted((root / "skills").glob("*"))
@@ -254,12 +265,12 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                   else None)
     deferred: list[tuple[Item, Callable[[], Estimate]]] = []   # file reads, run in parallel below
 
-    def add(h: str, t: str, n: str, enabled: bool, est, shared=()) -> None:
+    def add(h: str, t: str, n: str, enabled: bool, est, shared=(), mod: bool = False) -> None:
         """`est` is an Estimate, or a no-arg callable returning one (read later, in a pool)."""
         enabled = enabled and (h, t, n) not in flagged
         if (h, t, n) not in seen:
             seen.add((h, t, n))
-            item = Item(h, t, n, enabled, 0, 0, None, "", tuple(shared))
+            item = Item(h, t, n, enabled, 0, 0, None, "", tuple(shared), mod=mod)
             items.append(item)
             if callable(est):
                 deferred.append((item, est))
@@ -300,7 +311,8 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
             root = p.get("installPath")
             add("claude", "plugin", p["id"], p.get("enabled", True) is not False,
                 (lambda r=root: plugin_estimate(Path(r))) if isinstance(root, str)
-                else (0, None, "no installPath"))
+                else (0, None, "no installPath"),
+                mod=isinstance(root, str) and is_mod(Path(root)))
 
     for e in state.get("disabled", {}).values():
         h, t, n = e.get("harness", "claude"), e.get("type"), e.get("name")

@@ -249,6 +249,10 @@ What is on screen:
 - **Cost column**: estimated startup tokens (chars / 4, about +-25 %) with a colored bar. A parked
   row shows `(N)` in brackets, what restoring it would load. Plugins appear as rows too (via
   `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
+  A plugin whose `hooks/hooks.json` has a top-level `modules` key is a **mod** (it loads
+  `.mjs`/`.tsx` code that draws UI) and is listed under its own **Mods** heading, right
+  after Plugins; `t` and the `picker_type` setting take `mod` too. It still toggles as a
+  plugin, and profiles store it as one.
 - **Detail pane** at 100 columns or wider: the file's frontmatter `description` (skills,
   agents, commands, rules), then harness, type, state, staged, path, cost, since,
   mechanism, and what it is shared with.
