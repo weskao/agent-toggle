@@ -920,7 +920,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 - It looks like the `ui` picker: a title with the live-token total, a search line, rows under
   type headings with counts, green `●` live / yellow `○` parked, tokens and a bar per row (a
   parked row shows `(N)`, what restoring it would load), the cursor row in reverse video, and a
-  key-chip footer. The list scrolls with the cursor.
+  key-chip footer. The list scrolls with the cursor; the status line shows its position (`7/23`),
+  and the first and last list lines count the rows out of view (`↑ 4`, `↓ 12`).
 - The mouse wheel over the list moves the cursor, as in the terminal picker; no click needed.
 - Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
   `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,

@@ -121,13 +121,23 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
   const summary = `${props.rows.length} resources · ~${tok(live)} tok live`
   const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], ['s', 'sort'], ['n', 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
 
-  const line = (it: Item, i: number) => {
+  // rows scrolled out of view, counted on the first and last list lines: the pane draws no scrollbar
+  const shown = items.slice(top, top + body)
+  const hidden = (its: Item[]) => its.filter(it => 'row' in it).length
+  const above = hidden(items.slice(0, top))
+  const below = hidden(items.slice(top + body))
+  const markOf = (j: number) => (j === 0 && above ? ` ↑ ${above}` : j === shown.length - 1 && below ? ` ↓ ${below}` : '')
+
+  const line = (it: Item, i: number, mark: string) => {
+    const m = mark.length
+    const tail = m ? <Text dimColor>{mark}</Text> : null
     if ('head' in it) {
       const label = ` ${LABEL[it.head] ?? it.head} `
       return (
         <Text key={`h:${it.head}`} wrap="truncate">
           <Text bold>{label}</Text>
-          <Text dimColor>{it.count} {'─'.repeat(Math.max(0, w - label.length - String(it.count).length - 1))}</Text>
+          <Text dimColor>{it.count} {'─'.repeat(Math.max(0, w - label.length - String(it.count).length - 1 - m))}</Text>
+          {tail}
         </Text>
       )
     }
@@ -135,9 +145,15 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     const cur = rows.indexOf(r) === cursor
     const cost = (r.enabled ? tok(r.tokens) : `(${tok(r.save)})`).padStart(8)
     const b = bar(r.enabled ? r.tokens : r.save, topCost, 5)
-    const name = cut(r.name, Math.max(4, w - 6 - 8 - 6))
+    const name = cut(r.name, Math.max(4, w - 6 - 8 - 6 - m))
     const key = `r:${r.type}/${r.name}/${i}`
-    if (cur) return <Text key={key} wrap="truncate" bold inverse>{`› ${r.enabled ? '●' : '○'}   ${name}${cost} ${b}`.padEnd(w)}</Text>
+    if (cur)
+      return (
+        <Text key={key} wrap="truncate">
+          <Text bold inverse>{`› ${r.enabled ? '●' : '○'}   ${name}${cost} ${b}`.padEnd(w - m)}</Text>
+          {tail}
+        </Text>
+      )
     return (
       <Text key={key} wrap="truncate">
         {'  '}
@@ -147,6 +163,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
         <Text dimColor={!r.enabled}>{cost}</Text>
         {' '}
         <Text bold={r.enabled} dimColor={!r.enabled} color={r.enabled ? 'blue' : undefined}>{b}</Text>
+        {tail}
       </Text>
     )
   }
@@ -163,7 +180,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
         {s.typing && <Text dimColor>▏</Text>}
         <Text dimColor>{`sort: ${s.sort}`.padStart(Math.max(0, w - 2 - (s.query || 'Type to search (name, group, fuzzy)').length - (s.typing ? 1 : 0)))}</Text>
       </Text>
-      {items.slice(top, top + body).map((it, i) => line(it, top + i))}
+      {shown.map((it, j) => line(it, top + j, markOf(j)))}
       {loading && (
         <Text key="loading" wrap="truncate">
           <Text color="cyan"> {spin}</Text> Loading resources…
@@ -172,6 +189,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
       {props.error !== '' && <Text key="err" color="red" bold wrap="truncate">{props.error}  (run `agent-toggle doctor`)</Text>}
       <Text key="status" dimColor wrap="truncate">
         {` ${rows.length} of ${props.rows.length} shown`}
+        {rows.length ? ` · ${cursor + 1}/${rows.length}` : ''}
         {fuzzy ? '  ≈ fuzzy match' : ''}
         {props.busy ? `  ${spin} working…` : ''}
       </Text>
