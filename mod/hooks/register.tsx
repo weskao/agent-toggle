@@ -104,9 +104,41 @@ async function toggle($: Engine, row: Row) {
   }
 }
 
+// `/agent-toggle <verb> ...` runs the CLI instead of opening the pane; any other argument still opens it.
+// `--` spellings too: the CLI accepts both (CLAUDE.md "Every command has two spellings").
+const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor)$/i
+
+// Runs `/agent-toggle <args>` as the CLI (argv, no shell) and answers with one line per result row.
+async function runArgs($: Engine, words: string[]): Promise<string> {
+  const argv = ['agent-toggle', ...words, '--json']
+  // like the pane: without --harness the CLI falls back to the user's settings default_harness
+  if (!words.some(w => w === '--harness' || w.startsWith('--harness='))) argv.push('--harness', 'claude')
+  try {
+    const run = await $.process.run(argv)
+    let out: (Result & { warnings?: unknown[] }) | null = null
+    try {
+      out = JSON.parse(run.stdout)
+    } catch {}
+    if (!out) return `❌ agent-toggle exited ${run.exitCode}: ${run.stderr.trim() || run.stdout.trim() || 'no output'}`
+    const lines = (out.results ?? [])
+      .filter(r => r.type != null || r.name != null) // cost/list end with a summary row
+      .map(r => [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '))
+    for (const w of out.warnings ?? []) lines.push(`⚠️ ${typeof w === 'string' ? w : JSON.stringify(w)}`)
+    if (out.needs_new_session) lines.push('Takes effect in a new session.')
+    if (run.exitCode !== 0) lines.unshift(`❌ agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
+    return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
+  } catch (err) {
+    return `❌ ${String(err)}`
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'agent-toggle', description: 'Toggle Claude Code resources in a pane' })
+    await $.command.register({
+      name: 'agent-toggle',
+      description: 'Toggle Claude Code resources in a pane',
+      argumentHint: '[close | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
+    })
 
     return next(e)
   })
@@ -115,6 +147,16 @@ export const register: Register = on => {
     if (/^close\b/i.test(e.args.trim())) {
       await $.ui.close({ id: PANE })
       return { text: 'agent-toggle pane closed.' }
+    }
+    const words = e.args.trim().split(/\s+/)
+    if (VERB.test(words[0] ?? '')) {
+      const text = await runArgs($, words)
+      // a toggle: an open pane would keep drawing the old state; seq drops a pane refresh already in flight
+      if (/^(?:--)?(disable|enable|undo)$/i.test(words[0]!)) {
+        seq++
+        if ((await read($, rows)).length > 0) await exclusive($, () => refresh($))
+      }
+      return { text }
     }
     await update($, rows, () => [])
     const opened = await $.ui.open({ id: PANE, title: 'agent-toggle' })

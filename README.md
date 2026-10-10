@@ -916,6 +916,10 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   until the list arrives, and a spinner beside `working…` while a toggle runs.
 - Not in the pane: harness tabs (claude only), and the `t` `p` `a` `n` keys. Where Claude draws no
   such pane (the mobile app, VS Code) it is a plain list of buttons instead.
+- `/agent-toggle close` closes the pane. `/agent-toggle <command> ...` with `disable`, `enable`,
+  `undo`, `list`, `status`, `cost` or `doctor` runs the CLI instead of opening the pane and prints
+  one line per result row: `/agent-toggle disable skill foo bar` (it adds `--json`, and
+  `--harness claude` unless you pass `--harness`). A toggle reloads an open pane.
 - Needs `agent-toggle` on `PATH`.
 - On Windows `agent-toggle` must resolve to a real executable on `PATH` (a pip or uv install
   provides `agent-toggle.exe`).

@@ -207,4 +207,41 @@ describe('agent-toggle pane', () => {
     const r = await $.command.run({ command: 'agent-toggle', args: 'closet', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     expect(r.text).toBe('agent-toggle pane opened.')
   })
+
+  test('/agent-toggle disable runs the CLI with every name and reports each row, without opening the pane', async ($, on) => {
+    const argvs: string[][] = []
+    let opened = 0
+    on('ui.open', () => ((opened += 1), { value: { isPlaced: true } }))
+    on('process.run', (_$, e) => {
+      argvs.push([...e.argv])
+      return { value: done(0, JSON.stringify({ ok: true, results: [{ type: 'skill', name: 'a', status: 'disabled' }, { type: 'skill', name: 'b', status: 'disabled' }] })) }
+    })
+    const r = await $.command.run({ command: 'agent-toggle', args: ' disable skill a  b ', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect({ argvs, opened, text: r.text }).toEqual({
+      argvs: [['agent-toggle', 'disable', 'skill', 'a', 'b', '--json', '--harness', 'claude']],
+      opened: 0,
+      text: 'disabled skill a\ndisabled skill b',
+    })
+  })
+
+  test('a failed CLI run from arguments says why; an explicit --harness is kept', async ($, on) => {
+    const argvs: string[][] = []
+    on('process.run', (_$, e) => {
+      argvs.push([...e.argv])
+      return { value: done(1, JSON.stringify({ ok: false, results: [{ type: 'skill', name: 'x', status: 'error', detail: 'not found' }] })) }
+    })
+    const r = await $.command.run({ command: 'agent-toggle', args: '--enable skill x --harness codex', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect({ argvs, text: r.text }).toEqual({
+      argvs: [['agent-toggle', '--enable', 'skill', 'x', '--harness', 'codex', '--json']],
+      text: '❌ agent-toggle exited 1\nerror skill x - not found',
+    })
+  })
+
+  test('a toggle from arguments refreshes an open pane', async ($, on) => {
+    const { argvs, tick } = await open($, on)
+    await tick()
+    await $.command.run({ command: 'agent-toggle', args: 'disable skill a', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await tick()
+    expect(argvs.map(a => a[1])).toEqual(['cost', 'disable', 'cost'])
+  })
 })
