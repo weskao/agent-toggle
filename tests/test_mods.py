@@ -67,6 +67,17 @@ class ModsTest(SandboxCase):
             "harness": "claude", "type": "plugin", "name": "weather@mk", "mechanism": "cli"}}}
         self.assertEqual(self.plugin_groups([], state), {"weather@mk": "mod"})
 
+    def test_cost_json_marks_the_mods(self) -> None:
+        """The /agent-toggle skill finds mods through `cost --type plugin --json`."""
+        listing = [self.plugin("pane", {"modules": ["./register.tsx"]}), self.plugin("bare", None)]
+        plugin_cli.runner = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps(listing), stderr="")
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(cli.main(["cost", "--type", "plugin", "--json"]), 0)
+        rows = json.loads(out.getvalue())["results"]
+        self.assertEqual({r["name"]: r["mod"] for r in rows if r["name"]},
+                         {"pane@mk": True, "bare@mk": False})
+
     def test_mods_group_after_plugins_and_filter_by_type(self) -> None:
         rows = [model.Row("claude", "mcp", "m", True), model.Row("claude", "plugin", "p", True),
                 model.Row("claude", "plugin", "x", True, mod=True)]

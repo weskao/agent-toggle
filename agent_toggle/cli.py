@@ -286,7 +286,7 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
                 + (tail if i.enabled else out.paint(tail, "dim")))
         out.row(i.harness, i.type, i.name, "cost", "ok", i.basis, show=False,
                 enabled=i.enabled, tokens=i.tokens, would_save=i.would_save,
-                chars=i.chars, shared_with=list(i.shared_with))
+                chars=i.chars, shared_with=list(i.shared_with), mod=i.mod)
     live = sum(i.tokens for i in items)
     saved = sum(i.would_save for i in items)
     out.say(f"\n{len(items)} item(s): ~{live} tok loaded at startup; "
