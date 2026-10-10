@@ -907,7 +907,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
   `s` sorts by name or cost; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast says `ok`, or that the change
-  takes effect in a new session, or the error. While a toggle runs, further keys are ignored.
+  takes effect in a new session, or the error. The row flips the moment you press (and flips back
+  if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
 - Not in the pane: harness tabs (claude only), and the `t` `p` `a` `n` keys. Where Claude draws no
   such pane (the mobile app, VS Code) it is a plain list of buttons instead.
 - Needs `agent-toggle` on `PATH`.

@@ -130,6 +130,27 @@ describe('agent-toggle pane', () => {
     expect(((await ui.drawn()) as any).props.props.error).toBe('not found')
   })
 
+  test('a toggled row flips before the CLI answers, and back when it fails', async ($, on) => {
+    let release = () => {}
+    const gate = new Promise<void>(r => (release = r))
+    on('process.run', async (_$, e) => {
+      if (e.argv[1] === 'cost') return { value: done(0, COST) }
+      await gate // the disable is in flight until the test lets it answer
+      return { value: done(1, JSON.stringify({ ok: false, results: [{ status: 'error', detail: 'not found' }] })) }
+    })
+    on('ui.toast', () => ({ value: undefined }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
+    const first = async () => ((await ui.drawn()) as any).props.props.rows[0]
+    const pressed = ui.key({ key: ' ' })
+    for (let i = 0; i < 500; i++) await Promise.resolve() // the toggle reaches the CLI
+    const mid = await first()
+    release()
+    await pressed
+    expect({ mid: [mid.enabled, mid.save], end: (await first()).enabled }).toEqual({ mid: [false, 100], end: true })
+  })
+
   test('a surface with no Client draws one Button per row', async ($, on) => {
     const { argvs, tick } = await open($, on)
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'vscode', component: 'Pane', requestId: 'agent-toggle', props: PANE })

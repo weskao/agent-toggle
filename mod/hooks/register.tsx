@@ -52,9 +52,18 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
   }
 }
 
+// Bumped by each toggle: a refresh that started before one would draw that row's old state.
+// A module variable, not an atom: every read of one dispatch sees one moment. A hot reload resets it, harmlessly.
+let seq = 0
+
+// The row moves as cost --json reports it: a parked row costs 0 and would save what it cost. Applied twice it undoes itself.
+const flip = (row: Row) => (list: Row[]) =>
+  list.map(r => (r.type === row.type && r.name === row.name && r.mod === row.mod ? { ...r, enabled: !r.enabled, tokens: r.save, save: r.tokens } : r))
+
 async function refresh($: Engine) {
+  const at = seq
   const out = await cli($, ['agent-toggle', 'cost', '--json', '--harness', 'claude'])
-  if (!out) return
+  if (!out || at !== seq) return
   // cost --json ends with a summary row (type/name null): not a resource
   const list: Row[] = (out.results ?? []).filter(r => r.type != null && r.name != null).map(r => ({
     type: String(r.type),
@@ -69,13 +78,19 @@ async function refresh($: Engine) {
 
 async function toggle($: Engine, row: Row) {
   try {
+    let ran = false
     await exclusive($, async () => {
+      ran = true
+      seq++
       await update($, error, () => '')
+      await update($, rows, flip(row)) // drawn now, not after the CLI and the refresh
       // --harness: disable/enable otherwise fall back to the user's settings default_harness
       const out = await cli($, ['agent-toggle', row.enabled ? 'disable' : 'enable', row.type, row.name, '--json', '--harness', 'claude'])
+      if (!out) await update($, rows, flip(row))
       $.ui.toast(out ? (out.needs_new_session ? 'ok — takes effect in a new session' : 'ok') : await read($, error))
-      await refresh($)
     })
+    // outside busy: the next press need not wait ~1s for `claude plugin list`; seq drops this refresh if a toggle lands
+    if (ran) await refresh($)
   } catch (err) {
     $.ui.toast(String(err))
   }
