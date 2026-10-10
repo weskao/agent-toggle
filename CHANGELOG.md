@@ -1,3 +1,8 @@
+## [0.11.3] - 2026-10-10
+
+### 🐛 Bug Fixes
+
+- Stop upgrade steps re-printing the update hint
 ## [0.11.2] - 2026-10-10
 
 ### 🧪 Testing
