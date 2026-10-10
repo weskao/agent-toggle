@@ -897,7 +897,7 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 ```
 
 - `/agent-toggle` or `/agent-toggle open` opens the pane, `/agent-toggle close` closes it,
-  `/agent-toggle toggle` does whichever applies; any other argument prints the usage. Ctrl-X X
+  `/agent-toggle toggle` does whichever applies; any other argument that is not a CLI command (below) prints the usage. Ctrl-X X
   also closes it. Claude can do the same when you ask it to open or close agent-toggle: the mod
   registers a `pane` tool (`mcp__agent-toggle__pane`, `action`: `open` | `close` | `toggle`),
   e.g. "open agent-toggle", "close the agent-toggle pane", "toggle the agent-toggle pane".
@@ -912,18 +912,19 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,
   `Tab` toggles and moves on; `/` or any other letter starts a search (terms ANDed over
   `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
-  `s` sorts by name or cost; `Ctrl-U` clears the search. A click moves the cursor.
+  `s` sorts by name or cost; `n` toggles every type with this row's name (skill, command, MCP,
+  ...), like `disable all <name>`; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state
   with an emoji and a bracketed tag (no colour codes, so nothing garbles; the tag still reads where the
   emoji draws as a box): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (takes effect in a new
-  session)`, or `❌ [FAILED] disable skill: foo - <error>`.
+  session)`, `⛔ [DISABLED] all: foo` after `n`, or `❌ [FAILED] disable skill: foo - <error>`.
   The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
 - Opening the pane shows the same braille spinner and `Loading resources…` as `agent-toggle ui`
   until the list arrives, and a spinner beside `working…` while a toggle runs.
-- Not in the pane: harness tabs (claude only), and the `t` `p` `a` `n` keys. Where Claude draws no
+- Not in the pane: harness tabs (claude only), and the `t` `p` `a` keys. Where Claude draws no
   such pane (the mobile app, VS Code) it is a plain list of buttons instead.
-- `/agent-toggle close` closes the pane. `/agent-toggle <command> ...` with `disable`, `enable`,
+- `/agent-toggle <command> ...` with `disable`, `enable`,
   `undo`, `list`, `status`, `cost` or `doctor` runs the CLI instead of opening the pane and prints
   one line per result row: `/agent-toggle disable skill foo bar` (it adds `--json`, and
   `--harness claude` unless you pass `--harness`). A toggle reloads an open pane.

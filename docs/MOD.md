@@ -45,13 +45,13 @@ so a schema change and the mod's fix land in one PR and one CI run; the mod is
 |---|---|
 | `/agent-toggle` | opens the pane titled `agent-toggle`; a pane the person asked for is placed at any width, and if no surface can place it a toast says so (`isPlaced` false) |
 | pane opens | runs `agent-toggle cost --json --harness claude`, draws the curses picker's look: bold title with the live-token total, a search line with the sort label, rows grouped by type (`model.py` GROUPS order, a heading with count and rule per group), green `●` live / yellow `○` parked, tokens (`(N)` for a parked row) and a bar, the cursor row in reverse video, a key-chip footer |
-| keys (after a click on the list) | `↑ ↓ PgUp PgDn Home End Ctrl-P Ctrl-N` move; `Space`/`Enter` toggle; `Tab` toggles and advances; `/` or a letter starts a search; `s` cycles sort (name, cost); `Backspace`, `Ctrl-U` edit; a click moves the cursor |
+| keys (after a click on the list) | `↑ ↓ PgUp PgDn Home End Ctrl-P Ctrl-N` move; `Space`/`Enter` toggle; `Tab` toggles and advances; `/` or a letter starts a search; `s` cycles sort (name, cost); `n` toggles every type with the row's name (`<disable\|enable> all <name>`, one batch; only rows in the cursor row's state move); `Backspace`, `Ctrl-U` edit; a click moves the cursor |
 | mouse wheel over the list (no click needed) | moves the cursor a row per tick, as the wheel sends Up/Down to the curses picker |
 | toggle a row | runs `agent-toggle <disable\|enable> <type> <name> --json --harness claude`, then re-runs `cost --json` and redraws; a toast carries `ok` or the error line. It applies at once: no staging, no Enter-to-apply |
-| search | terms ANDed over `type/name` and the group (`mod`, `mods`); with no hit, letters-in-order on the name (`ctxmd` finds `context-md`, status line says `≈ fuzzy match`); a second `Space` toggles. Command letters (`s`) act only while the query is empty |
+| search | terms ANDed over `type/name` and the group (`mod`, `mods`); with no hit, letters-in-order on the name (`ctxmd` finds `context-md`, status line says `≈ fuzzy match`); a second `Space` toggles. Command letters (`s`, `n`) act only while the query is empty |
 | `/agent-toggle` again | refreshes the list (re-open is idempotent) |
 
-Out of scope for v1, by decision: harness tabs, the `t` `p` `a` `n` keys, staging,
+Out of scope for v1, by decision: harness tabs, the `t` `p` `a` keys, staging,
 `--project` scope, undo, dry-run preview. Each maps to CLI calls and a key in
 `picker.tsx` without changing the shape below. `mobile` and `vscode` draw no
 `Client`: there the pane is one `Button` per row and the surface scrolls it.
