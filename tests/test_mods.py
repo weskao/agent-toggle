@@ -37,6 +37,33 @@ class ModsTest(SandboxCase):
         self.assertEqual(groups, {"pane@mk": ("plugin", "mod"), "hooky@mk": ("plugin", "plugin"),
                                   "bare@mk": ("plugin", "plugin")})
 
+    def cached(self, pid: str, version: str = "1.0.0") -> None:
+        """A mod in the plugin cache: ~/.claude/plugins/cache/<marketplace>/<name>/<version>."""
+        name, _, market = pid.partition("@")
+        hooks = self.home / "plugins" / "cache" / market / name / version / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / "hooks.json").write_text('{ "modules": ["./register.tsx"] }', encoding="utf-8")
+
+    def plugin_groups(self, listing: list, state: dict | None = None) -> dict:
+        plugin_cli.runner = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps(listing), stderr="")
+        rows = model.collect(state or {"version": 3, "disabled": {}},
+                             {"claude": build(self.tmp)["claude"]})
+        return {r.name: r.group for r in rows if r.type == "plugin"}
+
+    def test_a_mod_in_the_cache_counts_even_when_installPath_points_elsewhere(self) -> None:
+        self.cached("flow@mk")
+        listing = [{"id": "flow@mk", "enabled": True,
+                    "installPath": str(self.tmp / "elsewhere")},     # no hooks.json there
+                   {"id": "plain@mk", "enabled": True}]               # no installPath at all
+        self.assertEqual(self.plugin_groups(listing), {"flow@mk": "mod", "plain@mk": "plugin"})
+
+    def test_a_parked_mod_missing_from_the_listing_is_still_a_mod(self) -> None:
+        self.cached("weather@mk")
+        state = {"version": 3, "disabled": {"claude:plugin:weather@mk": {
+            "harness": "claude", "type": "plugin", "name": "weather@mk", "mechanism": "cli"}}}
+        self.assertEqual(self.plugin_groups([], state), {"weather@mk": "mod"})
+
     def test_mods_group_after_plugins_and_filter_by_type(self) -> None:
         rows = [model.Row("claude", "mcp", "m", True), model.Row("claude", "plugin", "p", True),
                 model.Row("claude", "plugin", "x", True, mod=True)]
@@ -44,6 +71,13 @@ class ModsTest(SandboxCase):
         self.assertEqual([r.name for r in model.visible(rows, type_="mod")], ["x"])
         self.assertEqual([r.name for r in model.visible(rows, type_="plugin")], ["p"])
         self.assertEqual(model.type_label("mod"), "Mods")
+
+    def test_typing_mod_finds_every_mod_not_just_names_with_mod(self) -> None:
+        rows = [model.Row("claude", "plugin", "pane@mk", True, mod=True),
+                model.Row("claude", "plugin", "weather@playground-mods", True, mod=True),
+                model.Row("claude", "plugin", "plain@mk", True)]
+        self.assertEqual([r.name for r in model.match(rows, "mod")],
+                         ["pane@mk", "weather@playground-mods"])
 
 
 @unittest.skipIf(picker is None, "curses unavailable")

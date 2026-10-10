@@ -217,6 +217,16 @@ def is_mod(root: Path) -> bool:
     return isinstance(data, dict) and "modules" in data
 
 
+def plugin_is_mod(cache: Path | None, pid: str, root: object = None) -> bool:
+    """`pid` (`name@marketplace`) is a mod at its reported install path, or in any cached
+    version under `cache/<marketplace>/<name>/`: the CLI's path can differ, and a parked
+    plugin has none."""
+    if isinstance(root, str) and is_mod(Path(root)):
+        return True
+    name, _, market = pid.partition("@")
+    return bool(cache and name and market) and any(is_mod(d) for d in (cache / market / name).glob("*"))
+
+
 def plugin_estimate(root: Path) -> Estimate:
     """A plugin bundle: sum of what it ships, read from its install path."""
     parts = [("skill", d.name, d / "SKILL.md") for d in sorted((root / "skills").glob("*"))
@@ -264,6 +274,7 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                   if plugins and claude and claude.home.is_dir() and "plugin" in claude.types
                   else None)
     deferred: list[tuple[Item, Callable[[], Estimate]]] = []   # file reads, run in parallel below
+    cache = claude.home / "plugins" / "cache" if claude else None
 
     def add(h: str, t: str, n: str, enabled: bool, est, shared=(), mod: bool = False) -> None:
         """`est` is an Estimate, or a no-arg callable returning one (read later, in a pool)."""
@@ -312,7 +323,7 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
             add("claude", "plugin", p["id"], p.get("enabled", True) is not False,
                 (lambda r=root: plugin_estimate(Path(r))) if isinstance(root, str)
                 else (0, None, "no installPath"),
-                mod=isinstance(root, str) and is_mod(Path(root)))
+                mod=plugin_is_mod(cache, p["id"], root))
 
     for e in state.get("disabled", {}).values():
         h, t, n = e.get("harness", "claude"), e.get("type"), e.get("name")
@@ -331,7 +342,8 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                 return file_estimate(t, n, Path(p) if isinstance(p, str) and p else None)
         shared = e.get("shared_with")
         add(h, t, n, False, est,
-            [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else ())
+            [x for x in shared if isinstance(x, str)] if isinstance(shared, list) else (),
+            mod=t == "plugin" and h == "claude" and plugin_is_mod(cache, n))
     with pool:
         for (item, _), est in zip(deferred, pool.map(lambda d: d[1](), deferred)):
             _fill(item, est)

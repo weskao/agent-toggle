@@ -141,7 +141,7 @@ def short_path(path: str) -> str:
 
 
 def _hay(r: Row) -> str:
-    return f"{r.label} {r.path}".lower()
+    return f"{r.label} {r.group} {r.path}".lower()     # group: a mod's type is still plugin
 
 
 def strict(r: Row, terms: list[str]) -> bool:

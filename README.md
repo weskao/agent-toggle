@@ -249,7 +249,9 @@ What is on screen:
 - **Cost column**: estimated startup tokens (chars / 4, about +-25 %) with a colored bar. A parked
   row shows `(N)` in brackets, what restoring it would load. Plugins appear as rows too (via
   `claude plugin list --json`; skipped under `ui --dry-run`, which never shells out).
-  A plugin whose `hooks/hooks.json` has a top-level `modules` key is a **mod** (it loads
+  A plugin whose `hooks/hooks.json` has a top-level `modules` key is a **mod** (checked in
+  its install path and in every cached copy under `~/.claude/plugins/cache/<marketplace>/<name>/`,
+  so a parked mod still counts; it loads
   `.mjs`/`.tsx` code that draws UI) and is listed under its own **Mods** heading, right
   after Plugins; `t` and the `picker_type` setting take `mod` too. It still toggles as a
   plugin, and profiles store it as one.
@@ -270,7 +272,7 @@ What is on screen:
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
-| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
+| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
 | `←` `→` | switch harness tab (also while typing a filter); `0` = All, `1`-`9` = that tab, `h` = next tab |
 | `t` | cycle the type filter |
