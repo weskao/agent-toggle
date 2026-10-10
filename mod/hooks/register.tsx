@@ -39,6 +39,18 @@ async function cli($: Engine, argv: string[]): Promise<Result | null> {
   }
 }
 
+// Emoji draw as boxes on the Linux console and the legacy Windows console (conhost; Windows Terminal and VS Code
+// draw them), as agent_toggle/ui/theme.py emoji_ok. The engine names no platform; Windows always sets OS.
+async function emojiOk($: Engine): Promise<boolean> {
+  try {
+    if ((await $.env.get('TERM')) === 'linux') return false
+    if ((await $.env.get('OS')) !== 'Windows_NT') return true
+    return Boolean(await $.env.get('WT_SESSION')) || (await $.env.get('TERM_PROGRAM')) === 'vscode'
+  } catch {
+    return true // an unreadable environment must not cost the toast, the flip back or the CLI answer
+  }
+}
+
 // Holds `busy` for the whole of fn (toggle + refresh); a call while busy is dropped.
 // The claim is made inside update's ifVersion retry loop, so simultaneous presses cannot both get it.
 async function exclusive($: Engine, fn: () => Promise<void>) {
@@ -111,14 +123,16 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
       // --harness: disable/enable otherwise fall back to the user's settings default_harness
       const out = await cli($, ['agent-toggle', row.enabled ? 'disable' : 'enable', same ? 'all' : row.type, row.name, '--json', '--harness', 'claude'])
       const type = same ? 'all' : row.mod ? 'mod' : row.type
+      // a toast is plain text (no colour option, ANSI codes show as garbage): an emoji and an ASCII tag mark the state,
+      // the tag alone where the emoji would draw as a box
+      const emoji = await emojiOk($)
+      const tag = (glyph: string, text: string) => (emoji ? `${glyph} ${text}` : text)
       if (out) {
         const note = out.needs_new_session ? 'takes effect in a new session' : ''
-        // a toast is plain text (no colour option, ANSI codes show as garbage): an emoji and an ASCII tag mark the state;
-        // the tag still reads where the emoji draws as a box (old Windows consoles)
-        $.ui.toast(`${row.enabled ? '⛔ [DISABLED]' : '✅ [ENABLED]'} ${type}: ${row.name}${note && ` (${note})`}`)
+        $.ui.toast(`${row.enabled ? tag('⛔', '[DISABLED]') : tag('✅', '[ENABLED]')} ${type}: ${row.name}${note && ` (${note})`}`)
       } else {
         await update($, rows, flip(moved))
-        $.ui.toast(`❌ [FAILED] ${row.enabled ? 'disable' : 'enable'} ${type}: ${row.name} - ${await read($, error)}`)
+        $.ui.toast(`${tag('❌', '[FAILED]')} ${row.enabled ? 'disable' : 'enable'} ${type}: ${row.name} - ${await read($, error)}`)
       }
     })
     // outside busy: the next press need not wait ~1s for `claude plugin list`; seq drops this refresh if a toggle lands
@@ -137,22 +151,24 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
   const argv = ['agent-toggle', ...words, '--json']
   // like the pane: without --harness the CLI falls back to the user's settings default_harness
   if (!words.some(w => w === '--harness' || w.startsWith('--harness='))) argv.push('--harness', 'claude')
+  const emoji = await emojiOk($)
+  const bad = emoji ? '❌' : '[FAILED]'
   try {
     const run = await $.process.run(argv)
     let out: (Result & { warnings?: unknown[] }) | null = null
     try {
       out = JSON.parse(run.stdout)
     } catch {}
-    if (!out) return `❌ agent-toggle exited ${run.exitCode}: ${run.stderr.trim() || run.stdout.trim() || 'no output'}`
+    if (!out) return `${bad} agent-toggle exited ${run.exitCode}: ${run.stderr.trim() || run.stdout.trim() || 'no output'}`
     const lines = (out.results ?? [])
       .filter(r => r.type != null || r.name != null) // cost/list end with a summary row
       .map(r => [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '))
-    for (const w of out.warnings ?? []) lines.push(`⚠️ ${typeof w === 'string' ? w : JSON.stringify(w)}`)
+    for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
     if (out.needs_new_session) lines.push('Takes effect in a new session.')
-    if (run.exitCode !== 0) lines.unshift(`❌ agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
+    if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
     return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
   } catch (err) {
-    return `❌ ${String(err)}`
+    return `${bad} ${String(err)}`
   }
 }
 

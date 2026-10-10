@@ -925,8 +925,8 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `s` sorts by name or cost; `n` toggles every type with this row's name (skill, command, MCP,
   ...), like `disable all <name>`; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state
-  with an emoji and a bracketed tag (no colour codes, so nothing garbles; the tag still reads where the
-  emoji draws as a box): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (takes effect in a new
+  with an emoji and a bracketed tag (no colour codes, so nothing garbles; on the Linux console and the
+  legacy Windows console, where emoji draw as boxes, the tag alone): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (takes effect in a new
   session)`, `⛔ [DISABLED] all: foo` after `n`, or `❌ [FAILED] disable skill: foo - <error>`.
   The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.

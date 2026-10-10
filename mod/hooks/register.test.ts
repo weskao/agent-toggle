@@ -1,5 +1,5 @@
 import type { TestBody } from 'claude-code/testing'
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 
 type T = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
@@ -12,7 +12,8 @@ const OK = done(0, JSON.stringify({ ok: true, results: [{ status: 'ok' }] }))
 const PANE = { title: 'agent-toggle', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 20 }, view: {} } as const
 
 // Opens the pane against a faked CLI: every run answers `list` except a disable/enable, which answers `toggle`.
-async function open($: T, on: On, list = COST, toggle = OK) {
+async function open($: T, on: On, list = COST, toggle = OK, env: Record<string, string> = {}) {
+  mock.env(on, env) // not the host's: TERM and OS decide whether toasts carry emoji
   const argvs: string[][] = []
   const toasts: string[] = []
   on('process.run', async (_$, e) => {
@@ -191,6 +192,27 @@ describe('agent-toggle pane', () => {
     expect(await text()).toMatch(/⠙ Loading resources…/)
   })
 
+  test('a legacy Windows console toasts the tag alone, no emoji', async ($, on) => {
+    const { toasts, ui, tick } = await open($, on, COST, OK, { OS: 'Windows_NT' })
+    await ui.key({ key: ' ' })
+    await tick()
+    expect(toasts).toEqual(['[DISABLED] skill: a'])
+  })
+
+  test('Windows Terminal keeps the emoji', async ($, on) => {
+    const { toasts, ui, tick } = await open($, on, COST, OK, { OS: 'Windows_NT', WT_SESSION: 'test-session' })
+    await ui.key({ key: ' ' })
+    await tick()
+    expect(toasts).toEqual(['⛔ [DISABLED] skill: a'])
+  })
+
+  test('the Linux console gets [FAILED] in place of the emoji in CLI output', async ($, on) => {
+    mock.env(on, { TERM: 'linux' })
+    on('process.run', () => ({ value: done(1, JSON.stringify({ ok: false, results: [{ type: 'skill', name: 'x', status: 'error', detail: 'not found' }] })) }))
+    const r = await $.command.run({ command: 'agent-toggle', args: 'enable skill x', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect(r.text).toBe('[FAILED] agent-toggle exited 1\nerror skill x - not found')
+  })
+
   test('a toast names a mod as a mod, with no escape codes', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, cost(row('plugin', 'm', false, 7, true)))
     await ui.key({ key: ' ' })
@@ -283,6 +305,7 @@ describe('agent-toggle pane', () => {
       argvs.push([...e.argv])
       return { value: done(1, JSON.stringify({ ok: false, results: [{ type: 'skill', name: 'x', status: 'error', detail: 'not found' }] })) }
     })
+    mock.env(on, {})
     const r = await $.command.run({ command: 'agent-toggle', args: '--enable skill x --harness codex', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     expect({ argvs, text: r.text }).toEqual({
       argvs: [['agent-toggle', '--enable', 'skill', 'x', '--harness', 'codex', '--json']],
