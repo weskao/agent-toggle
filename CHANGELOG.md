@@ -1,3 +1,9 @@
+## [0.11.1] - 2026-10-10
+
+### 🐛 Bug Fixes
+
+- **ui:** Keep the cursor on the search separator
+- Preserve picker cursor on term separator
 ## [0.11.0] - 2026-10-10
 
 ### 🚀 Features
