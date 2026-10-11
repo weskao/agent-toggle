@@ -26,7 +26,8 @@ classifiers = [
     "Topic :: Utilities",
 ]
 requires-python = ">=3.10"
-dependencies = []
+# telegram-kit is core (stdlib-only) so a plain reinstall can't drop the Telegram settings
+dependencies = ["telegram-kit>=0.2.2,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/weskao/agent-toggle"
@@ -36,6 +37,7 @@ Changelog = "https://github.com/weskao/agent-toggle/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 windows = ["windows-curses; sys_platform == 'win32'"]
+# kept so existing `agent-toggle[telegram]` install commands resolve without a warning
 telegram = ["telegram-kit>=0.2.2,<0.3"]
 
 [project.scripts]

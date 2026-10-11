@@ -260,7 +260,7 @@ class CursesMenuTest(MenuCase):
     def test_without_telegram_kit_the_rows_are_inert(self) -> None:
         win, rc = self.menu([*to("Telegram chat"), "\n", "r", "q"], telegram=False)
         self.assertEqual(rc, 0)
-        self.assertIn("install agent-toggle[telegram]", win.text())
+        self.assertIn("reinstall agent-toggle", win.text())
         self.assertFalse(settings.config_file().exists())
 
     def test_tools_run_with_a_fresh_result_in_a_pager(self) -> None:
@@ -394,7 +394,7 @@ class NumberedTest(MenuCase):
     def test_without_telegram_kit_rows_are_degraded(self) -> None:
         rc, out = self.run_numbered(f"{number('Telegram chat')}\nq\n", telegram=False)
         self.assertEqual(rc, 0)
-        self.assertIn("install agent-toggle[telegram]", out)
+        self.assertIn("reinstall agent-toggle", out)
         self.assertFalse(settings.config_file().exists())
 
     def test_actions_confirm_and_print_their_output(self) -> None:
@@ -431,7 +431,7 @@ class CliConfigMenuTest(CliCase):
                 mock.patch.object(sys, "stdin", io.StringIO("1\n")):
             rc, out, err = self.run_cli("config")
         self.assertEqual(rc, 0, err)
-        self.assertIn("install agent-toggle[telegram]", out)
+        self.assertIn("reinstall agent-toggle", out)
         self.assertIs(settings.get("update_check"), False)
         with mock.patch.dict(sys.modules, {"telegram_kit": None}):
             rc, env = self.run_json("config")

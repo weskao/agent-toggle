@@ -163,13 +163,13 @@ class ConfigTest(CliCase):
         self.assertEqual(self.run_cli("config", "sync-ci", "--dry-run", "--repo", "o/r")[0], 0)
         self.assertEqual(self.gh_calls, [])
 
-    def test_missing_extra_is_a_clear_exit_4_for_test_and_sync_ci_only(self) -> None:
+    def test_missing_kit_is_a_clear_exit_4_for_test_and_sync_ci_only(self) -> None:
         mock.patch.stopall()
         with mock.patch.dict(sys.modules, {"telegram_kit": None}):
             for action in ("test", "sync-ci"):
                 rc, _, err = self.run_cli("config", action)
                 self.assertEqual(rc, 4)
-                self.assertIn("agent-toggle[telegram]", err)
+                self.assertIn("reinstall agent-toggle", err)
             with mock.patch.object(sys, "stdin", io.StringIO("")):   # never the real TTY
                 self.assertEqual(self.run_cli("config")[0], 0)  # the menu degrades instead
 

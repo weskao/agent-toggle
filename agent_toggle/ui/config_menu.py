@@ -38,7 +38,7 @@ class Row:
     key: str = ""                               # the settings key (bool / choice / text)
     run: Callable[[Ctx, Result], None] | None = None     # action rows
     confirm: Callable[[], str] | None = None    # y/n question asked before the action runs
-    telegram: bool = False                      # inert without the telegram extra
+    telegram: bool = False                      # inert when telegram-kit is missing
     harness: str = ""                           # harness rows: the name, for the detected note
     role: str = "title"                         # headings: each group in its own colour
 
@@ -265,7 +265,7 @@ def capture(fn: Callable[[Result], None]) -> list[Segment]:
 
 
 def needs_extra() -> str:
-    return t("config.needs_extra", "install agent-toggle[telegram]")
+    return t("config.needs_extra", "telegram-kit missing: reinstall agent-toggle")
 
 
 def value_segments(ctx: Ctx, row: Row, g: theme.Glyphs) -> list[Segment]:

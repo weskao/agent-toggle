@@ -5,8 +5,8 @@ numbered list otherwise; `--json` prints every setting). Same shape as aicp's `-
 the bot token lives only in the OS credential store (Keychain / Secret Service / DPAPI,
 through telegram-kit, never in a file or an argument vector); the chat id and every other
 setting are ordinary configuration in ~/.agent-toggle/config.json (`settings`).
-telegram-kit is the optional `agent-toggle[telegram]` extra, imported only here: `test`
-and `sync-ci` need it, the menu works without it (its Telegram rows say so).
+telegram-kit is a dependency, imported only here: `test` and `sync-ci` need it, and the menu
+still works if a broken install lacks it (its Telegram rows say so).
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ SERVICE = "agent-toggle"
 CHAT_KEY = "telegram_chat_id"
 SECRETS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 CHAT_ID_RE = settings.CHAT_ID_RE
-INSTALL_HINT = "install the extra: uv tool install 'agent-toggle[telegram]'"
+INSTALL_HINT = "reinstall agent-toggle: uv tool install --reinstall agent-toggle"
 
 
 config_file = settings.config_file
@@ -43,7 +43,7 @@ def kit():
 
 
 def optional_kit():
-    """telegram-kit, or None without the extra (the menu degrades instead of exiting 4)."""
+    """telegram-kit, or None when it is missing (the menu degrades instead of exiting 4)."""
     try:
         return kit()
     except CliError:

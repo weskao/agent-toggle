@@ -696,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("update", parents=[common],
                    help="check for a newer release; show the commands that update everything")
     cf = sub.add_parser("config", parents=[common],
-                        help="Telegram settings for the CI failure alerts (needs the telegram extra)")
+                        help="Telegram settings for the CI failure alerts")
     cf.add_argument("action", nargs="?", choices=("test", "sync-ci"),
                     help="test: send one message | sync-ci: set the GitHub repo secrets")
     cf.add_argument("--repo", metavar="OWNER/REPO", help="sync-ci: repository (default: this one)")

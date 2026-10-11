@@ -54,7 +54,7 @@ CATALOG: dict[str, str] = {
     "config.language": "語言 / Language",
     "config.logo": "標誌",
     "config.more": "還有 %s 項",
-    "config.needs_extra": "請安裝 agent-toggle[telegram]",
+    "config.needs_extra": "缺少 telegram-kit：請重新安裝 agent-toggle",
     "config.no_hidden": "此終端機無法隱藏輸入；請改在環境變數設定 TG_BOT_TOKEN",
     "config.no_output": "（沒有輸出）",
     "config.no_store": "這裡沒有作業系統憑證儲存區，權杖未儲存；請改設定 TG_BOT_TOKEN",

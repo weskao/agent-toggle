@@ -5,6 +5,9 @@ requires-python = ">=3.10"
 [[package]]
 name = "agent-toggle"
 source = { editable = "." }
+dependencies = [
+    { name = "telegram-kit" },
+]
 
 [package.optional-dependencies]
 telegram = [
@@ -16,6 +19,7 @@ windows = [
 
 [package.metadata]
 requires-dist = [
+    { name = "telegram-kit", specifier = ">=0.2.2,<0.3" },
     { name = "telegram-kit", marker = "extra == 'telegram'", specifier = ">=0.2.2,<0.3" },
     { name = "windows-curses", marker = "sys_platform == 'win32' and extra == 'windows'" },
 ]

@@ -110,21 +110,20 @@ exits `1`. A shim written by a version before the marker counts as foreign;
 delete it and re-run. `--dry-run` shows the same plan, refusals included. The
 tool itself stays in one place.
 
-**Optional: Telegram alerts for CI** (for maintainers of a fork or clone). Install
-with the `telegram` extra, which adds [telegram-kit](https://pypi.org/project/telegram-kit/)
-(itself stdlib-only), then run the setup once; see [CI notifications](#ci-notifications):
+**Optional: Telegram alerts for CI** (for maintainers of a fork or clone). The
+Telegram support comes from [telegram-kit](https://pypi.org/project/telegram-kit/)
+(itself stdlib-only), which every install includes, so a reinstall or upgrade keeps
+your settings. Run the setup once; see [CI notifications](#ci-notifications):
 
 ```sh
-uv tool install "agent-toggle[telegram]"     # or: pipx install "agent-toggle[telegram]"
-pip install -e ".[telegram]"                 # from a checkout
 agent-toggle config                          # settings menu: bot token + chat id live under Notifications
 agent-toggle config sync-ci                  # set the two GitHub repository secrets
 ```
 
-Without the extra everything else works exactly as before. Only `config test`,
-`config sync-ci` (both exit `4` without it) and the Telegram rows of the
-[settings menu](#settings--config-menu) need it; bare `config` still opens, and
-those rows read `install agent-toggle[telegram]`.
+The old `agent-toggle[telegram]` extra still resolves and is now a no-op. If
+telegram-kit is missing from a broken install, `config test` and `config sync-ci`
+exit `4`, bare `config` still opens, and the Telegram rows read
+`telegram-kit missing: reinstall agent-toggle`.
 
 **Optional: the Claude Code pane mod** (the picker as a pane inside Claude Code, claude harness
 only). It is not part of the PyPI package; with `agent-toggle` already on `PATH` from one of the
@@ -172,7 +171,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list\|delete\|rename` | named sets of live items; see [Profiles](#profiles) |
 | `config` | settings menu (curses, else a numbered list); `config --json` lists every setting and the package version; see [Settings & config menu](#settings--config-menu) |
-| `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; needs the `[telegram]` extra; see [CI notifications](#ci-notifications) |
+| `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
 | `doctor` | check each harness layout and `state.json` against disk; exit `1` only on an `error` row; on a terminal, asks y/n per fix it can run itself |
 | `migrate` | import an older `~/.claude-toggle/` state, and move legacy `<home>/<dir>-disabled/` park dirs into `~/.agent-toggle/parked/user/` (see [Upgrading the park layout](#upgrading-the-park-layout)); safe to re-run |
@@ -431,8 +430,8 @@ invalid value in either is ignored with one warning on stderr.
   harness is switched off (with one warning on stderr);
   `disable` / `enable --project` without `--harness` still default to `claude`.
 - `language` translates the config menu, help, update prompt and picker chrome; command output stays English.
-- Bare `config` works without the `[telegram]` extra; `config test` and `config sync-ci` are
-  unchanged and need it (exit `4` without it).
+- telegram-kit is a regular dependency now, so reinstalling keeps the Telegram settings working;
+  `agent-toggle[telegram]` still resolves.
 
 ## Update check
 
@@ -1009,7 +1008,7 @@ agent-toggle config sync-ci    # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on 
 
 In the [settings menu](#settings--config-menu) an inline field commits on `Enter`, cancels on
 `Esc`, and clears on `-` then `Enter`; the Tools group also has Send test message and Sync CI
-secrets (the same as `config test` / `config sync-ci`, and they need the extra). The bot token
+secrets (the same as `config test` / `config sync-ci`). The bot token
 is kept only in the OS credential store (macOS Keychain, Linux Secret Service, Windows DPAPI)
 through telegram-kit, never in a file or on a command line, and is shown masked. With no
 credential store it refuses to store the token; set `TG_BOT_TOKEN` in the environment instead
