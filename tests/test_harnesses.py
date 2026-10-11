@@ -17,7 +17,8 @@ TODAY = {
 } | {("opencode", "skill"), ("opencode", "command"),
      ("grok", "skill"), ("grok", "mcp"), ("openclaw", "skill"), ("openclaw", "agent"),
      ("openclaw", "plugin"), ("opencode", "mcp"), ("vibe", "skill"),
-     ("copilot", "skill"), ("copilot", "agent"), ("copilot", "mcp")}
+     ("copilot", "skill"), ("copilot", "agent"), ("copilot", "mcp"),
+     ("agy", "skill"), ("agy", "mcp")}
 
 
 class HarnessTableTest(SandboxCase):
@@ -62,6 +63,10 @@ class HarnessTableTest(SandboxCase):
         self.assertEqual(t["copilot"].backend, "json")
         self.assertEqual(t["copilot"].mcp.file, self.tmp / ".copilot" / "mcp-config.json")
         self.assertEqual(t["copilot"].editable, {"mcp-config.json"})
+        self.assertEqual(t["agy"].home, self.tmp / ".gemini" / "config")
+        self.assertEqual(t["agy"].backend, "json")
+        self.assertEqual(t["agy"].mcp.file, self.tmp / ".gemini" / "config" / "mcp_config.json")
+        self.assertEqual(t["agy"].editable, {"mcp_config.json"})
 
     def test_flag_pairs_are_declared_and_editable(self) -> None:
         for n, h in build(self.tmp).items():

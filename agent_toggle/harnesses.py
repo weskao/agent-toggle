@@ -173,9 +173,14 @@ def build(home: Path) -> dict[str, Harness]:
         # explicit not-applicable row: no dirs, no mechanisms, so every type
         # exits 4 through the ops dispatch.
         Harness("devin", home / ".devin", dirs={}, mechanisms={}),
-        # DESIGN s11 q1: skills layout unobserved, so types=() and NO adapter yet
-        # (`status` lists it as "found, nothing supported yet").
-        Harness("agy", home / ".antigravity", dirs={}, mechanisms={}),
+        # DESIGN s11 q1 (answered on 1.3.3): global root `~/.gemini/config/` holds
+        # `skills/<name>/SKILL.md` and strict-JSON `mcp_config.json -> mcpServers`.
+        Harness("agy", home / ".gemini" / "config",
+                dirs={"skill": ("skills",)},
+                mechanisms={"skill": "move", "mcp": "remove_backup"},
+                mcp=McpSpec("json", home / ".gemini" / "config" / "mcp_config.json",
+                            ("mcpServers",)),
+                editable=frozenset({"mcp_config.json"}), verified="1.3.3"),
     )}
 
 

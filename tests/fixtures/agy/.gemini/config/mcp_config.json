@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "other-mcp": {
+      "command": "other"
+    },
+    "example-mcp": {
+      "url": "https://example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer test-token-000"
+      }
+    }
+  }
+}

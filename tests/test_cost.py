@@ -189,6 +189,16 @@ class CostCommandTest(CliCase):
         self.assertTrue(any("plugin list" in w for w in env["warnings"]))
 
 
+class AgyCostTest(CliCase):
+    def test_live_skill_and_mcp_servers_are_listed(self) -> None:
+        shutil.copytree(FIXTURES / "agy", self.tmp, dirs_exist_ok=True)
+        rc, env = self.run_json("cost", "--harness", "agy")
+        self.assertEqual(rc, 0, env)
+        live = {(r["type"], r["name"]) for r in env["results"] if r["name"] and r["enabled"]}
+        self.assertEqual(live, {("skill", "demo-skill"), ("mcp", "example-mcp"),
+                                ("mcp", "other-mcp")})
+
+
 class FlagCostTest(CliCase):
     def setUp(self) -> None:
         super().setUp()
