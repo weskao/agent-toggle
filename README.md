@@ -358,6 +358,8 @@ a band above the prompt, buttons) and change Claude Code's behaviour. A plugin w
 `hooks.json`, or with only ordinary hooks (shell commands such as `PreToolUse`), is a plain
 plugin: it ships skills, commands, agents, MCP servers or hooks and draws nothing.
 
+![Claude Mods: toggling mods from the picker](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/claude-mods-demo.gif)
+
 - The check reads the install path `claude plugin list` reports and every cached version
   under `~/.claude/plugins/cache/<marketplace>/<name>/`, so a parked mod is still a mod.
   To list the installed mods by hand:
