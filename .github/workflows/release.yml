@@ -100,3 +100,15 @@ jobs:
           agent-toggle enable skill demo-skill
           test -f "$HOME/.claude/skills/demo-skill/SKILL.md"
           test ! -e "$HOME/.agent-toggle/parked/user/claude/skills/demo-skill"
+
+  # A failed build, PyPI publish or post-publish smoke test pages the same chat
+  # as CI, through the same repository secrets.
+  notify-telegram:
+    needs: [build, publish, smoke]
+    if: ${{ failure() }}
+    uses: ./.github/workflows/notify-telegram.yml
+    with:
+      title: Release failed
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

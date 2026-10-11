@@ -1,0 +1,60 @@
+name: Notify Telegram
+
+# One home for the failure pager: ci.yml and release.yml call it when they fail,
+# and `gh workflow run notify-telegram.yml` sends a test message through the same
+# repository secrets. Credentials live in repo secrets, never in this file; see
+# README "CI notifications".
+on:
+  workflow_call:
+    inputs:
+      title:
+        type: string
+        required: true
+    secrets:
+      TELEGRAM_BOT_TOKEN:
+        required: false
+      TELEGRAM_CHAT_ID:
+        required: false
+  workflow_dispatch:
+    inputs:
+      title:
+        type: string
+        default: Test message
+
+permissions: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notify Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          # Unset secrets are a valid state (a fork, or an owner who never set
+          # them). Skip instead of adding a second, misleading red X.
+          if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "::notice::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set, skipping notification"
+            exit 0
+          fi
+          # parse_mode=HTML: an unescaped < & > in a ref name makes Telegram
+          # answer 400. Escape & first so the later entities are not re-escaped.
+          esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          # In a called workflow these name the caller's run, tag or branch.
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          message="🚨 <b>$(esc "$TITLE")</b>
+
+          <b>Repository:</b> <code>$(esc "$GITHUB_REPOSITORY")</code>
+          <b>Ref:</b> <code>$(esc "$GITHUB_REF_NAME")</code>
+          <b>Commit:</b> <code>$(esc "${GITHUB_SHA::7}")</code>
+
+          <a href=\"$run_url\">Open the run</a>"
+          curl --fail --silent --show-error --max-time 30 \
+            --data-urlencode "chat_id=$CHAT_ID" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=$message" \
+            "https://api.telegram.org/bot$TOKEN/sendMessage"

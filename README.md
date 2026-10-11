@@ -989,9 +989,11 @@ it on macOS, Linux and Windows.
 
 ## CI notifications
 
-`.github/workflows/ci.yml` can send a Telegram message when the test matrix fails on a
-push (a lint-only failure does not page). Alerts never fire for pull requests or green
-runs. The message names the repository, branch, 7-character commit and a link to the run.
+CI and the Release workflow can send a Telegram message when they fail: `ci.yml` when the
+test matrix fails on a push (a lint-only failure does not page), `release.yml` when the
+build, PyPI publish or post-publish smoke test fails. Alerts never fire for pull requests or
+green runs. Both call `.github/workflows/notify-telegram.yml`, and the message names the
+failure, repository, tag or branch, 7-character commit and a link to the run.
 
 The [settings menu](#settings--config-menu) hides its Telegram rows (bot token, chat ID,
 Send test message, Sync CI secrets) for now; `SHOW_TELEGRAM` in `agent_toggle/ui/config_menu.py`
@@ -1018,6 +1020,12 @@ To skip the tool, set the secrets by hand (each command prompts for the value):
 ```sh
 gh secret set TELEGRAM_BOT_TOKEN
 gh secret set TELEGRAM_CHAT_ID
+```
+
+To check the repository secrets themselves, send a test message through the same workflow:
+
+```sh
+gh workflow run notify-telegram.yml    # optional: -f title="..."
 ```
 
 With either secret unset (a fork, or a clone you have not configured) the notify job
