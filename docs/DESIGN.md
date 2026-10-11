@@ -275,19 +275,29 @@ inside, stale after 10 min) for the whole batch. Two concurrent runs: the
 second waits up to 5 s then fails loudly (saying so when the holder's PID is
 gone, i.e. a killed run left the lock).
 
-State is saved per item, not once per batch (G13). A flag write or a dir move
-is write-ahead: `store.begin` saves the full entry under `pending` (atomic
+State is saved per item, not once per batch (G13). A flag write, a dir move, an
+MCP edit (user-scope json, claude-json, toml, project `.mcp.json`) and a claude CLI
+plugin op are write-ahead: `store.begin` saves the full entry under `pending` (atomic
 state write) BEFORE touching disk, and the item's outcome moves it to
 `disabled` (or drops it) in memory; that next save -- the following item's
-`begin`, or `apply_plan`'s final save -- persists it. MCP and plugin items get a
-per-item checkpoint save instead (only when the item changed state). A killed
+`begin`, or `apply_plan`'s final save -- persists it. Only a `claude.ai` connector
+toggle gets a per-item checkpoint save instead (only when the item changed state;
+§8.2). A killed
 run therefore loses at most the item in flight. Under the lock, before the plan,
 `mechanisms.recover` settles each leftover `pending` entry from disk:
 `done` (the flag holds the new value / the item sits at the target: record it),
 `undone` (it does not: drop the record and any half copy) or `stuck` (kept,
 reported with the exact fix: an unreadable flag file, a tampered entry, or a
-cross-fs move killed between its two renames). It never guesses: a flag's prior
-value is the `was` saved before the write. A failed item settles the same way.
+cross-fs move killed between its two renames). An MCP op is settled by asking
+whether the server is in the config file (read strictly; a disable whose backup is
+gone is stuck, not recorded). A plugin op is settled by one read-only
+`claude plugin list --json` (30 s, `AGENT_TOGGLE_CLI_TIMEOUT` overrides); a missing
+CLI, a timeout, a failure or an ambiguous listing is `stuck` too -- so a dry run,
+`status` or `doctor` that meets a pending plugin op runs that one call. It never guesses,
+bar one documented guess: a flag's prior value is the `was` saved before the write, but a
+plugin has no `was`, so the plugin branch reads an unlisted plugin as "neither op landed"
+and a listed plugin already in the target state as landed (open item, §8.2). A failed
+item settles the same way.
 A parked item's companions are added to its `pending` entry (one more save) before
 each companion moves, so recovery records the ones that moved. A tampered entry
 is refused (same checks as a replay, companions only under their own
@@ -480,7 +490,7 @@ help. Picker additions, all within stdlib curses:
 - cost column and `s` to sort by cost; harness and type filter chips
   (`h`/`t` cycle);
 - plugin rows from `claude plugin list --json` (landed in phase 1; `ui --dry-run`
-  skips them, it never shells out). Flag-mechanism items (phase 2: openclaw
+  skips them -- it shells out only to settle a pending plugin op, §5.4). Flag-mechanism items (phase 2: openclaw
   plugins and flagged skills, opencode mcp) are listed live from the config file (entries with a boolean `enabled` only) and
   parked from state; a flag-disabled skill shows as disabled;
 - `/` starts typing a text filter; `s`, `h`, `t`, `p`, `?` are commands only while
@@ -530,7 +540,7 @@ and should be proven early.
 
 | topic | recommendation |
 |---|---|
-| **Secrets in backups** | MCP entries carry auth headers. A project `.mcp.json` backup holds only the toggled server's entry (the entry, its exact text and its neighbours' names, not the whole file -- §8.2); the user-scope JSON MCP backend (copilot, agy) still backs up the whole file, so its backup can include other servers' headers. Write backups and `state.json` with mode `0600`; `log.jsonl` never includes payloads; `SECURITY.md` states what is stored and where; `status` warns if the directory is group/world readable. |
+| **Secrets in backups** | MCP entries carry auth headers. A project `.mcp.json` backup holds only the toggled server's entry (the entry, its exact text and its neighbours' names, not the whole file -- §8.2); the user-scope JSON MCP backend (copilot, agy) now does the same (an old whole-file backup can still hold other servers' headers; §8.2). Write backups and `state.json` with mode `0600`; `log.jsonl` never includes payloads; `SECURITY.md` states what is stored and where; `status` warns if the directory is group/world readable. |
 | **Concurrency** | Lock file as in §5.4. Agents and humans do run the tool simultaneously. |
 | **Sync jobs** | Detect `.synced-from-*` markers in a live dir and warn that a sync may re-create parked items; recommend parking in the *source* harness. |
 | **Harness drift** | Harness config formats change between versions. Each table row records the harness version it was verified against; `doctor` compares the live layout against the row (expected dirs/keys present) and reports "layout changed" instead of failing deep inside an operation. Fixture homes in tests freeze the verified layout. Phase 2 ships it read-only (no lock, no state write, no CLI): a missing dir, file or key is an informational `absent`; only a present-but-unparseable or unsupported file is `error: layout changed`; JSONC is a `note`. |
@@ -563,7 +573,7 @@ directories, and the promise that a disable never loses data.
 |---|---|---|---|
 | 1 | **Path traversal via names**: `disable skill ../../x`, an absolute name, or an agent or profile supplying one | one `validate_name()` at the CLI boundary rejects empty parts, `..`, absolute paths and a leading `-`; after resolving, the item must sit inside its harness dir (`is_relative_to`); a symlink item is moved as a link, never followed | done: `validate_name()` runs for every name on `disable`/`enable` (exit 2); `resolve_item` also requires the item's parent to resolve inside the harness dir (`tests/test_containment.py`) |
 | 2 | **Tampered `state.json` or imported profile steers a move**: `enable` replays `origin` and `parked_at` | `enable` refuses an entry whose `origin` is outside its harness home or project, or whose `parked_at` is outside its own park dir (`parked/<sha8>` for a project, `parked/user/<harness>/<declared dir>` for user scope; a symlinked parent is refused); profiles carry only `(harness, type, name)`, never paths; malformed files fail loudly | done: `store.check_entry` runs before every `enable` replay (`refused: <reason>`, nothing moved; also covers flag files and backups); profiles are validated, `..` and out-of-root paths exit 2 |
-| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; a project `.mcp.json` backup holds only the toggled server's entry (the copilot and agy user-scope JSON backend still backs up the whole file); `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`; disabling one project `.mcp.json` server leaves no trace of another server's token under `~/.agent-toggle/`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs. A project backup written before the G15 fix still holds the whole file text until that server is disabled again |
+| 3 | **Secret exposure** | backups `0600`, directories `0700`, `status` warns on loose modes; a project `.mcp.json` backup holds only the toggled server's entry (the copilot and agy user-scope JSON backend does too; their old whole-file backups may remain); `log.jsonl`, `--json`, `-v`, `--dry-run` and tracebacks show names and paths, never backed-up values; profiles hold no secrets by construction | done: modes and warning; output audit `tests/test_secret_audit.py` (claude CLI error text is redacted with `mechanisms.redact`; disabling one project `.mcp.json` server leaves no trace of another server's token under `~/.agent-toggle/`). Not output: `claude mcp add-json` still takes the config as an argument, visible in `ps` while it runs. A project backup written before the G15 fix still holds the whole file text until that server is disabled again |
 | 4 | **Prompt injection through the AI interface**: text inside a skill description or tool output tells the agent to disable a guardrail | the shim tells the agent to act only on the user's request; no command deletes, installs or fetches; every change is logged and reversible; bulk operations (`--all`, `profile apply`) are previewed with `--dry-run`; disabling a `rule` warns that rules may carry safety constraints; the tool never edits hooks or `settings.json` | done: both shim templates carry a Safety section; `ops` warns when a plan disables a `rule` |
 | 5 | **Command injection via subprocess** | argv lists only, never `shell=True`; plugin ids validated against `[A-Za-z0-9._@:/-]+` before use, because on Windows `claude.cmd` runs through `cmd.exe` where `&` in a name would inject | done: argv form, and `mechanisms.valid_plugin_id` refuses any other id before `claude plugin ...` runs (`tests/test_platform.py`) |
 | 6 | **Hostile or malformed files parsed**: oversized, binary or odd frontmatter; broken harness config | stdlib line parser for frontmatter with reads capped at 64 KiB, never evaluated; every JSON or TOML edit is verified after writing (file still parses, only the target key or block changed) and rolled back from the backup on failure | done for JSON and TOML config edits: `fs.checked_write` re-reads, verifies and restores bytes and mode on any failure; frontmatter caps unchanged. Python 3.10 has no `tomllib`, so the parse check there is the structural validator in `toml_check.py` (see §8.2) |
@@ -675,8 +685,8 @@ runs this pattern in production:
   also clears the state entry recorded under the bare `name`, by the same
   single-unambiguous-match rule (`plugin_cli.full_plugin_id`; one extra
   `plugin list` call, only when such an entry exists). The clear has no write-ahead
-  entry, like every plugin op: a kill before the per-item save leaves the stale
-  bare entry, which `enable name` removes.
+  entry (the plugin op itself has one, §5.4): a kill before the per-item save leaves
+  the stale bare entry, which `enable name` removes.
 - [x] Fixed: picker typing mode (after `/`) now shows `filter: /text█` plus a hint on the
   top line (§5.10).
 - [x] Fixed: `disable` warns "NOT gitignored" once per run, and only when the central
@@ -697,14 +707,22 @@ runs this pattern in production:
   differing shims OpenCode loads first is still unchecked.
 - [x] Fixed: the `.synced-from-*` warning (`status`, `disable`) is shown once per real
   directory, naming every harness that views it.
-- [ ] Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
+- [x] Grok's MCP location (`~/.grok/config.toml`, `[mcp_servers.<name>]` plus a
   `.headers` sub-table) was confirmed on a live install; OpenCode's
   skill dirs are `skills.paths` (additive) plus `skills/`, `skill/`,
   `~/.claude/skills`, `~/.agents/skills` (§11 q2, answered on opencode 2.0.22;
-  `opencode_skill_dirs()` follows it). Only a *relative* `skills.paths` entry is
-  not followed: OpenCode resolves it against the session cwd, which the
-  home-based table does not have, so it is skipped. `opencode.json` wins over
-  `opencode.jsonc` when both exist (OpenCode's own precedence is unchecked).
+  `opencode_skill_dirs()` follows it). Fixed: `opencode.json` and `opencode.jsonc`
+  both load and merge (`.jsonc` after `.json`, so it wins on a key conflict; probed
+  with `opencode debug agents` on 2.0.22). The old assumption "`.json` wins, else
+  `.jsonc`" was wrong; `opencode_skill_dirs()` now unions `skills.paths` from both.
+- [ ] OpenCode `skills.paths`, still open: a *relative* entry is not followed
+  (OpenCode resolves it against the session cwd, which the home-based table does not
+  have, so it is skipped), and whether `skills.paths` arrays from `opencode.json` and
+  `opencode.jsonc` are concatenated or replaced by the later layer is not verified
+  (2.0.22 has no non-LLM probe; the tool unions them).
+- [ ] Risk, no code change: the opencode MCP flag toggle edits `opencode.json` only, so a
+  same-named server also defined in `opencode.jsonc` (the later layer) overrides the
+  toggle.
 - [ ] `claude.ai` connectors are toggled through each *existing* project's
   `disabledMcpServers`; a project opened for the first time later starts without
   the entry until the toggle is re-run (`ponytail:` note in `backends/mcp_json.py`).
@@ -737,13 +755,22 @@ Known gaps added by phase 2 (`- [x]` fixed or decided, `- [ ]` still open):
 - [x] Fixed: a killed run between the flag write (or dir move, or companion move) and
   the state save is recoverable: state is saved per item with a write-ahead
   `pending` entry that the next run settles (§5.4).
-- [ ] MCP and plugin items have no write-ahead entry, only a per-item checkpoint
-  (except a project `.mcp.json` edit, which has one): a
-  kill after `claude mcp remove` / `claude plugin disable` / the config edit and
-  before that save leaves the change with no state entry (the MCP backup stays in
-  `mcp-backups/`, which `doctor` lists). A recovered op is logged `recovered`, not
-  `ok`, so `undo` does not reverse it. After a real kill the lock blocks the next
-  run until it is stale (10 min) unless removed by hand; the error says so.
+- [x] Fixed: MCP and plugin items had no write-ahead entry, only a per-item checkpoint
+  (except a project `.mcp.json` edit): a kill after `claude mcp remove` /
+  `claude plugin disable` / the config edit and before that save left the change
+  with no state entry. Now the user-scope json MCP (copilot, agy), the claude-json
+  MCP, the toml MCP (codex, grok) and the claude CLI plugin op are write-ahead, and
+  `settle` resolves them (`doctor`, `status` and `undo` reach it through settle): an
+  MCP op from the config file, a plugin op from a live `claude plugin list --json`
+  (30 s; stuck on any failure, never guessed). The cost: a dry run, `status` or
+  `doctor` with a pending plugin op runs that one read-only call. A recovered op is
+  logged `recovered`, not `ok`, so `undo` does not reverse it. After a real kill the
+  lock blocks the next run until it is stale (10 min) unless removed by hand; the
+  error says so. `run_cli` also decodes output as UTF-8 with `errors="replace"`.
+- [ ] Still checkpoint-only: the `claude.ai` connector toggle (the landed state cannot be
+  told from a pre-existing, partial `disabledMcpServers` list; re-running is
+  idempotent) and the plugin bare-key cleanup on `enable foo@mkt`. A kill there can
+  leave the change unrecorded until the toggle is re-run.
 - [x] Accepted: `undo` and `enable --all` trust the project dir recorded in the log or state,
   the same trust user-scope replay already places in them; project dirs are
   still validated (not `$HOME`, roots or tool dirs; must exist).
@@ -768,17 +795,38 @@ Known gaps added by phase 2 (`- [x]` fixed or decided, `- [ ]` still open):
 
 Known gaps found at the final verification (not fixed; each has a stated ceiling):
 
-- [ ] The user-scope JSON MCP backend (copilot's `mcp-config.json`, agy's `mcp_config.json`;
-  `toggle_json_mcp`) still
-  backs up the whole file text before and after the edit, so its backup can hold other
-  servers' headers. Reusing the project entry-only backup (`project_mcp_backup`) would
-  close it.
-- [ ] OpenCode now also scans `~/.claude/skills` and `~/.agents/skills` (§11 q2). Disabling a
-  skill for opencode while a same-named copy sits in another scanned dir prints
-  "disabled" although OpenCode still loads the other copy. Fix: warn or refuse when the
-  name exists in more than one scanned dir.
-- [ ] `list_plugins` is called with the 30 s read timeout, but no test pins that wiring
-  (`run_cli`'s per-call and env-var behaviour are tested).
+- [x] Fixed: the user-scope JSON MCP backend (copilot's `mcp-config.json`, agy's
+  `mcp_config.json`; `toggle_json_mcp`) backed up the whole file text before and after
+  the edit, so its backup could hold other servers' headers. It now reuses the project
+  entry-only backup (`project_mcp_backup`): only the cut entry is stored. Residual: an
+  old whole-file backup already on disk still restores and is not purged, so it still
+  holds other servers' headers; `<harness>__<name>.json` backups of copilot/agy servers
+  written by an earlier version can be deleted once the server is enabled again.
+- [x] Fixed: OpenCode also scans `~/.claude/skills` and `~/.agents/skills` (§11 q2).
+  Disabling a skill for opencode while a same-named copy sits in another scanned dir
+  (including `skills.paths` entries) used to print "disabled" although OpenCode still
+  loaded the other copy. It now warns (stderr, and `warnings` in `--json`) --
+  `opencode still loads another copy of <type> <name>: <paths> -- it stays active until
+  that copy is moved away` -- and still disables the targeted copy. The enable side is
+  unchanged. Two same-name copies under one owner (opencode `skills/` and `skill/`)
+  share one state key, and a second park used to overwrite the first record and strand
+  a copy; so one key is one record: a disable whose key already has a recorded entry
+  whose `parked_at` still exists is refused, nothing moved, rc 1 (a dry run refuses
+  too): `another copy is already parked at <parked_at> -- enable it first`. A stale
+  record (the parked copy deleted by hand) is replaced as before. Every dir type, every
+  harness.
+- [ ] Open: recovery (`settle`, plugin branch in `mechanisms.py`) of a KILLED claude plugin
+  op cannot tell a plugin the user had already disabled by hand from one this tool
+  disabled: a kill between the write-ahead entry and the `claude plugin disable` call, or
+  a CLI timeout, can record a hand-disabled plugin as ours, and a later `enable` would
+  turn it back on. Closing it costs one extra `claude plugin list` per op to record a
+  `was` value (§5.4).
+- [ ] Open test gaps (surviving mutants found by the adversarial verifier; the behaviour is
+  correct): the ambiguous bare-id check in `_plugin_enabled`; `settle`'s editable-file
+  check for the json MCP backend; the local-scope reading in `_mcp_present` for the
+  not-landed case.
+- [x] Fixed: `list_plugins` is called with the 30 s read timeout; a test pins that wiring
+  and the `AGENT_TOGGLE_CLI_TIMEOUT` override (`CliTimeoutTest`, `tests/test_backends.py`).
 
 ---
 
@@ -847,7 +895,12 @@ Known gaps found at the final verification (not fixed; each has a stated ceiling
    `~/` is expanded against home. The `~/.config/opencode/skills` literal is only
    the default when `XDG_CONFIG_HOME` is unset. Implemented in `opencode_skill_dirs()`; the one remaining gap is in §8.2.
 - [ ] **q3** Copilot `installed-plugins/` entry format once a plugin is installed
-   (directory was empty on the surveyed machine).
+   (directory was empty on the surveyed machine). Partly answered by a read-only
+   inspection later: `installed-plugins/<marketplace>/<plugin>/` is a full checkout of
+   the plugin's repo, with `.claude-plugin/plugin.json` carrying its name and version;
+   there is no JSON registry inside `installed-plugins/` (`installed-plugins.lock` is
+   0 bytes). Still unknown: where the enable/disable state lives (`config.json` is
+   machine-managed and was not read), so plugins stay unsupported.
 - [ ] **q4** Windows harness home paths per harness — each harness documents its own;
    fill §5.11 from docs at phase 5, not from guesses.
 - [x] **q5** openclaw: are `skills.entries.<name>.enabled` and
