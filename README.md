@@ -26,10 +26,11 @@ language, update check and Telegram notifications. It also runs tools such as `d
 
 ![agent-toggle config: the settings menu](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/config-menu.jpeg)
 
-**`/agent-toggle` inside Claude Code**: the same picker as a pane, for turning skills, MCP
-servers, plugins and mods on or off without leaving the session ([Claude Code pane mod](#claude-code-pane-mod)).
+**`/agent-toggle` inside Claude Code**: the same picker as a pane. Search, then turn skills, MCP
+servers, plugins and mods on or off without leaving the session; each toggle applies at once and
+queues the matching reload ([Claude Code pane mod](#claude-code-pane-mod)).
 
-![/agent-toggle: the picker as a Claude Code pane](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/claude-pane-mod.jpeg)
+![/agent-toggle: searching and toggling resources in the Claude Code pane](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/claude-mods-demo.gif)
 
 ## Why
 
@@ -357,8 +358,6 @@ A mod is a claude plugin whose `hooks/hooks.json` has a top-level `modules` key,
 a band above the prompt, buttons) and change Claude Code's behaviour. A plugin with no
 `hooks.json`, or with only ordinary hooks (shell commands such as `PreToolUse`), is a plain
 plugin: it ships skills, commands, agents, MCP servers or hooks and draws nothing.
-
-![Claude Mods: toggling mods from the picker](https://raw.githubusercontent.com/weskao/agent-toggle/main/docs/images/claude-mods-demo.gif)
 
 - The check reads the install path `claude plugin list` reports and every cached version
   under `~/.claude/plugins/cache/<marketplace>/<name>/`, so a parked mod is still a mod.
