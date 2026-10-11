@@ -21,6 +21,7 @@ behave identically (same output, same exit code):
 | `doctor` | `--doctor` |
 | `config` | `--config` |
 | `update` | `--update` |
+| `completion <shell>` | `--completion <shell>` |
 
 Rules:
 - Normalise once, in `main()` in `agent_toggle/cli.py`, before argparse runs:

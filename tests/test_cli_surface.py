@@ -276,6 +276,15 @@ class SpellingTest(CliCase):
         self.assertEqual(self.run_cli("profile", "delete", "uno"),
                          self.run_cli("--profile", "delete", "uno"))   # same exit-2 error
 
+    def test_completion_in_both_spellings(self) -> None:
+        for shell in ("bash", "zsh", "fish", "powershell"):
+            rc, out, err = self.run_cli("completion", shell)
+            self.assertEqual((rc, err), (0, ""), shell)
+            self.assertIn("agent-toggle", out)
+            self.assertEqual(self.run_cli("--completion", shell), (rc, out, err), shell)
+        self.assertEqual(self.run_cli("completion", "tcsh")[0], 2)
+        self.assertEqual(self.run_cli("completion", "zsh", "--json")[0], 2)   # a script, not JSON
+
     def test_help_topics_behave_the_same_with_and_without_dashes(self) -> None:
         for topic in ("version", "help", "status", "config"):
             self.assertEqual(self.run_cli("help", f"--{topic}"), self.run_cli("help", topic), topic)

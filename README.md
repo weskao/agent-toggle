@@ -135,16 +135,27 @@ See [Claude Code pane mod](#claude-code-pane-mod).
 
 ## Shell completion
 
-Each release publishes static completion files for bash, zsh and fish as the
-`completions` artifact of its Release workflow run. They are generated from the
-CLI parser; to build them from a checkout:
+`agent-toggle completion <shell>` prints a static completion script, built from the CLI
+parser, for bash, zsh, fish or PowerShell. Save it once where your shell loads it, and
+run the same line again after an upgrade so new commands complete:
 
 ```sh
-python3 tools/gen_completions.py completions   # agent-toggle.bash, _agent-toggle (zsh), agent-toggle.fish
+# zsh: needs fpath=(~/.zfunc $fpath) before compinit in ~/.zshrc
+mkdir -p ~/.zfunc && agent-toggle completion zsh > ~/.zfunc/_agent-toggle
+# bash: loaded on demand by the bash-completion package
+mkdir -p ~/.local/share/bash-completion/completions && agent-toggle completion bash > ~/.local/share/bash-completion/completions/agent-toggle
+# fish
+agent-toggle completion fish > ~/.config/fish/completions/agent-toggle.fish
 ```
 
-Source `agent-toggle.bash` from `~/.bashrc`, put `_agent-toggle` on your zsh
-`fpath`, or copy `agent-toggle.fish` to `~/.config/fish/completions/`.
+```powershell
+# PowerShell: save the script, then load it from your profile
+agent-toggle completion powershell > "$HOME\agent-toggle.ps1"; Add-Content $PROFILE '. "$HOME\agent-toggle.ps1"'
+```
+
+Without the bash-completion package, add `source <file>` to `~/.bashrc` instead.
+`python3 tools/gen_completions.py completions` writes all four files from a checkout; the
+Release workflow uploads them as its `completions` artifact.
 
 ## Usage
 

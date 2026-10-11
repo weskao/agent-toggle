@@ -51,6 +51,7 @@ from pathlib import Path
 
 from . import (
     __version__,
+    completions,
     config,
     cost,
     doctor,
@@ -558,7 +559,7 @@ def _stale_ignore_lines(h, args: argparse.Namespace, out: Result) -> None:
 
 
 COMMANDS = ("ui", "pick", "status", "list", "cost", "migrate", "disable", "enable",
-            "install-shims", "profile", "undo", "doctor", "config", "update")
+            "install-shims", "profile", "undo", "doctor", "config", "update", "completion")
 _GLOBAL_FLAGS = ("--json", "-v", "--verbose")
 
 
@@ -701,6 +702,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="test: send one message | sync-ci: set the GitHub repo secrets")
     cf.add_argument("--repo", metavar="OWNER/REPO", help="sync-ci: repository (default: this one)")
     cf.add_argument("--dry-run", action="store_true", help="sync-ci: show the plan; set nothing")
+    cm = sub.add_parser("completion", parents=[common],
+                        help="print the shell completion script")
+    cm.add_argument("shell", choices=list(completions.SHELLS))
     up2 = sub.add_parser("undo", parents=[common], help="reverse the last logged batch")
     up2.add_argument("--dry-run", action="store_true", help="show the plan; change nothing")
     for name, verb in (("disable", "park"), ("enable", "restore")):
@@ -730,7 +734,8 @@ def main(argv: list[str] | None = None) -> int:
     i18n.set_language(language)
     color = scan_color(argv, color)     # --color > env > setting > auto
     i = _command_index(argv)
-    started = None if argv[i:i + 1] == ["update"] else update_prompt.start()   # `update` is the check
+    # `update` is the check; `completion` may run on every shell start (eval "$(...)")
+    started = None if argv[i:i + 1] in (["update"], ["completion"]) else update_prompt.start()
     try:
         return _main(argv, color)
     except KeyboardInterrupt:
@@ -802,6 +807,17 @@ def _main(argv: list[str], color: str) -> int:
             update_prompt.cmd_update(out)
         elif cmd == "config":
             config.cmd_config(args, out)
+        elif cmd == "completion":
+            if out.json_mode:
+                die("completion prints a shell script; --json is not supported", 2)
+            text = completions.script(args.shell, build_parser())
+            buf = getattr(sys.stdout, "buffer", None)
+            if buf is None:                 # a StringIO: no newline translation to dodge
+                print(text, end="")
+            else:                           # bytes: Windows text stdout would write \r\n,
+                sys.stdout.flush()          # which bash rejects
+                buf.write(text.encode("utf-8"))
+                buf.flush()
         elif cmd == "undo":
             undo.cmd_undo(args.dry_run, args.harness, out)
         elif cmd == "enable" and args.all:

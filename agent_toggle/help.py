@@ -143,6 +143,15 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
                                   "the CLI, the Claude Code plugin (if installed) and the shims. "
                                   "Runs none of them."),
             examples=["update", "update --json"]),
+        "completion": Cmd(
+            "completion bash|zsh|fish|powershell",
+            t("help.completion.summary", "print the shell completion script"),
+            t("help.completion.desc", "Print the tab-completion script for one shell on "
+                                      "stdout; save it where that shell loads completions "
+                                      "(see README \"Shell completion\")."),
+            args=[("bash|zsh|fish|powershell", t("help.arg.shell", "the shell to complete in"))],
+            examples=["completion zsh > ~/.zfunc/_agent-toggle",
+                      "completion bash > ~/.local/share/bash-completion/completions/agent-toggle"]),
         "install-shims": Cmd(
             "install-shims [--dry-run] [--gitignore | --no-gitignore]",
             t("help.install_shims.summary", "write the skill shim into every installed harness"),
@@ -174,7 +183,8 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
 def groups() -> list[tuple[str, list[str]]]:
     return [(t("help.group.toggle", "Toggle"), ["ui", "disable", "enable", "undo", "profile"]),
             (t("help.group.inspect", "Inspect"), ["status", "list", "cost", "doctor"]),
-            (t("help.group.setup", "Setup"), ["config", "install-shims", "update", "migrate"])]
+            (t("help.group.setup", "Setup"), ["config", "install-shims", "update", "completion",
+                                                "migrate"])]
 
 
 def _table(rows: list[tuple[str, str]], color: bool, role: str = "choice") -> list[str]:

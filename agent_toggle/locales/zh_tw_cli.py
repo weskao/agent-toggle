@@ -30,6 +30,10 @@ CATALOG: dict[str, str] = {
     "help.update.summary": "檢查新版本；顯示更新方式",
     "help.update.desc": "立即向 PyPI 查詢（忽略快取與已略過的版本）；有新版本時，印出更新 CLI、"
                         "Claude Code 外掛（若已安裝）與 shim 的指令。不會執行任何指令。",
+    "help.completion.summary": "印出 shell 自動補完腳本",
+    "help.completion.desc": "在 stdout 印出某個 shell 的 Tab 補完腳本；"
+                            "存到該 shell 載入補完的位置（見 README「Shell completion」）。",
+    "help.arg.shell": "要補完的 shell",
     "help.doctor.summary": "檢查 harness 目錄結構與狀態",
     "help.doctor.desc": "比對狀態檔與磁碟；有問題時結束碼為 1。在終端機上，可自動修復的問題"
                         "（chmod、過期項目、孤立檔案、中斷的操作）會逐一詢問 y/n；否則不做任何變更。",

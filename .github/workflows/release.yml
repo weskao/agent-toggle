@@ -37,7 +37,7 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
-      # Static bash/zsh/fish completions built from the argparse parser. No job
+      # The bash/zsh/fish/PowerShell scripts `agent-toggle completion` prints. No job
       # creates a GitHub Release, so they ship as a workflow artifact.
       - name: Generate shell completions
         run: python tools/gen_completions.py completions
