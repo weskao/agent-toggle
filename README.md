@@ -114,17 +114,12 @@ tool itself stays in one place.
 **Optional: Telegram alerts for CI** (for maintainers of a fork or clone). The
 Telegram support comes from [telegram-kit](https://pypi.org/project/telegram-kit/)
 (itself stdlib-only), which every install includes, so a reinstall or upgrade keeps
-your settings. Run the setup once; see [CI notifications](#ci-notifications):
-
-```sh
-agent-toggle config                          # settings menu: bot token + chat id live under Notifications
-agent-toggle config sync-ci                  # set the two GitHub repository secrets
-```
+your settings. The settings menu hides its Telegram rows for now; set up the alerts as in
+[CI notifications](#ci-notifications).
 
 The old `agent-toggle[telegram]` extra still resolves and is now a no-op. If
 telegram-kit is missing from a broken install, `config test` and `config sync-ci`
-exit `4`, bare `config` still opens, and the Telegram rows read
-`telegram-kit missing: reinstall agent-toggle`.
+exit `4`.
 
 **Optional: the Claude Code pane mod** (the picker as a pane inside Claude Code, claude harness
 only). It is not part of the PyPI package; with `agent-toggle` already on `PATH` from one of the
@@ -394,8 +389,7 @@ end of input, `q` or an empty line exits `0`
 | General | Check for updates, Color, Logo, Language, Default harness |
 | Harnesses | one On/Off per harness, with `found ~/.x` or `not on this machine` |
 | Picker | default sort, harness filter, type filter |
-| Notifications | Telegram bot token (masked, last 4 characters shown), Telegram chat ID |
-| Tools | Health check (`doctor`; then asks y/n per fix it can run), Install shims, Undo last change (asks y/n), Send test message, Sync CI secrets (asks y/n); their output shows in an overlay |
+| Tools | Health check (`doctor`; then asks y/n per fix it can run), Install shims, Undo last change (asks y/n); their output shows in an overlay |
 
 Keys: `↑` `↓` move (wraps, skips headings), `←` `→` cycle a value, `Enter` / `Space` change or run
 the row, `r` reset the row, `R` reset everything (asks y/n), `q` / `Esc` / `Ctrl-C` quit. In an
@@ -999,17 +993,18 @@ it on macOS, Linux and Windows.
 push (a lint-only failure does not page). Alerts never fire for pull requests or green
 runs. The message names the repository, branch, 7-character commit and a link to the run.
 
-Set it up once, with the `telegram` extra installed (see [Install](#install)):
+The [settings menu](#settings--config-menu) hides its Telegram rows (bot token, chat ID,
+Send test message, Sync CI secrets) for now; `SHOW_TELEGRAM` in `agent_toggle/ui/config_menu.py`
+brings them back. `config test` and `config sync-ci` still work: they read a bot token and
+chat ID saved earlier, else `TG_BOT_TOKEN` / `TG_CHAT_ID` from the environment. Without
+either, set the secrets by hand (below).
 
 ```sh
-agent-toggle config            # settings menu: Notifications has the bot token (hidden) and chat id
 agent-toggle config test       # send one test message
 agent-toggle config sync-ci    # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID on the repo
 ```
 
-In the [settings menu](#settings--config-menu) an inline field commits on `Enter`, cancels on
-`Esc`, and clears on `-` then `Enter`; the Tools group also has Send test message and Sync CI
-secrets (the same as `config test` / `config sync-ci`). The bot token
+When the rows are shown, the bot token
 is kept only in the OS credential store (macOS Keychain, Linux Secret Service, Windows DPAPI)
 through telegram-kit, never in a file or on a command line, and is shown masked. With no
 credential store it refuses to store the token; set `TG_BOT_TOKEN` in the environment instead

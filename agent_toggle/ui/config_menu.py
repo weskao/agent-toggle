@@ -7,8 +7,8 @@ numbered fallback (no TTY, no curses) prints the same rows and treats EOF as qui
 never blocks. curses is imported only inside the curses code path, so the fallback still
 works where curses does not exist (Windows without windows-curses).
 
-The Telegram rows need the optional telegram-kit extra; without it they say so and do
-nothing, and the rest of the menu works as usual.
+The Telegram rows are hidden for now (see SHOW_TELEGRAM). When shown, they need
+telegram-kit; without it they say so and do nothing, and the rest of the menu works as usual.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class Row:
     key: str = ""                               # the settings key (bool / choice / text)
     run: Callable[[Ctx, Result], None] | None = None     # action rows
     confirm: Callable[[], str] | None = None    # y/n question asked before the action runs
-    telegram: bool = False                      # inert when telegram-kit is missing
+    telegram: bool = False                      # hidden unless SHOW_TELEGRAM; inert without telegram-kit
     harness: str = ""                           # harness rows: the name, for the detected note
     role: str = "title"                         # headings: each group in its own colour
 
@@ -61,7 +61,12 @@ def _harness_row(name: str) -> Row:
                               "On: agent-toggle manages %s. Off: it is left out.", name))
 
 
-ROWS: tuple[Row, ...] = (
+# Temporarily hidden, not removed: only the maintainer's CI alerts use the Telegram rows,
+# so every `telegram=True` row (and its heading) is left out of the menu, and the keychain
+# is never read. Set True to bring them back; docs/DESIGN.md "Decision log" names the commit.
+SHOW_TELEGRAM = False
+
+ALL_ROWS: tuple[Row, ...] = (
     Row("heading", lambda: t("config.group_general", "General"), role="accent"),
     Row("bool", lambda: t("config.update_check", "Check for updates"), key="update_check",
         help=lambda: t("config.help_update_check",
@@ -90,7 +95,7 @@ ROWS: tuple[Row, ...] = (
     Row("choice", lambda: t("config.picker_type", "Default type filter"), key="picker_type",
         help=lambda: t("config.help_picker_type", "The type filter the picker opens with.")),
     Row("heading", lambda: t("config.group_notifications", "Notifications"),
-        role="warning"),
+        role="warning", telegram=True),
     Row("secret", lambda: t("config.bot_token", "Telegram bot token"), telegram=True,
         help=lambda: t("config.help_bot_token",
                        "Kept in the OS credential store, never in a file. "
@@ -122,6 +127,7 @@ ROWS: tuple[Row, ...] = (
         help=lambda: t("config.help_sync_ci",
                        "Set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on this GitHub repo (gh).")),
 )
+ROWS = tuple(r for r in ALL_ROWS if SHOW_TELEGRAM or not r.telegram)
 ITEMS = tuple(r for r in ROWS if r.kind != "heading")      # what the numbered list numbers
 
 
@@ -145,7 +151,7 @@ class Ctx:
 
     def refresh_token(self) -> None:
         self.token, self.token_env = "", False      # token: masked (stars + last chars), never raw
-        if self.tk is not None:
+        if self.tk is not None and SHOW_TELEGRAM:
             stored = self.store.get(self.tk.TOKEN_KEY)
             token = config.credentials(self.tk, self.store)[0]
             self.token = self.tk.mask_secret(token) if token else ""

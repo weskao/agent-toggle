@@ -16,7 +16,7 @@ from unittest import mock
 
 from base import SandboxCase
 from test_cli_surface import CliCase
-from test_config import FakeKit, FakeStore
+from test_config import FakeKit, FakeStore, show_telegram_rows
 
 from agent_toggle import __version__, config, doctor, i18n, settings, undo
 from agent_toggle.output import Result
@@ -105,7 +105,7 @@ class CursesMenuTest(MenuCase):
         self.assertEqual(rc, 0)
         text = win.text()
         for want in ("agent-toggle config", f"v{__version__}", "saves as you go", "General", "Harnesses",
-                     "Picker", "Notifications", "Tools", "Check for updates", "Sync CI secrets",
+                     "Picker", "Tools", "Check for updates", "Undo last change",
                      "› Check for updates", "╭", "╰", "↑↓ move", "R reset all",
                      "found ~/.claude", "not on this machine"):
             self.assertIn(want, text)
@@ -114,6 +114,11 @@ class CursesMenuTest(MenuCase):
         self.assertIn("q/Ctrl+C to leave · auto-save", keys)
         help_line = next(ln for ln in text.splitlines() if "look for a newer agent-toggle" in ln)
         self.assertNotIn("q/Ctrl+C", help_line)
+
+    def test_telegram_rows_are_hidden(self) -> None:
+        win, _ = self.menu(["q"])
+        for gone in ("Notifications", "Telegram", "Send test message", "Sync CI secrets"):
+            self.assertNotIn(gone, win.text())
 
     def test_title_puts_version_next_to_the_name(self) -> None:
         win, _ = self.menu(["q"], size=(24, 100))    # too short for the logo
@@ -141,16 +146,16 @@ class CursesMenuTest(MenuCase):
 
     def test_up_wraps_to_the_last_row_skipping_headings(self) -> None:
         win, _ = self.menu([curses.KEY_UP, "q"], size=(24, 80))
-        self.assertIn("› Sync CI secrets", win.text())
+        self.assertIn("› Undo last change", win.text())
         win, _ = self.menu([curses.KEY_UP, curses.KEY_DOWN, "q"], size=(24, 80))
         self.assertIn("› Check for updates", win.text())
 
     def test_short_terminal_scrolls(self) -> None:
-        win, _ = self.menu([*to("Sync CI"), "q"], size=(24, 80))
+        win, _ = self.menu([*to("Undo"), "q"], size=(24, 80))
         first, last = win.text(0), win.text()
         self.assertIn("more", first)                  # rows below the fold are announced
-        self.assertNotIn("Sync CI secrets", first)
-        self.assertIn("Sync CI secrets", last)
+        self.assertNotIn("Undo last change", first)
+        self.assertIn("Undo last change", last)
         self.assertTrue(all(len(f) <= 24 for f in win.frames))
 
     def test_reset_row_and_reset_all_ask_first(self) -> None:
@@ -201,6 +206,7 @@ class CursesMenuTest(MenuCase):
         self.assertIn("could not save: disk full", win.text())
 
     def test_chat_id_inline_edit_validates(self) -> None:
+        show_telegram_rows(self)
         win, _ = self.menu([*to("Telegram chat"), "\n", *"abc", "\n",
                             *"\x7f\x7f\x7f", *"-100123", "\n", "q"])
         self.assertTrue(any("not a chat ID: abc" in win.text(i) for i in range(len(win.frames))))
@@ -213,6 +219,7 @@ class CursesMenuTest(MenuCase):
         self.assertNotIn("telegram_chat_id", self.file())
 
     def test_token_row_shows_mask_with_last_chars_never_the_token(self) -> None:
+        show_telegram_rows(self)
         FakeStore.items = {"telegram_bot_token": "123456:ABCDEFtoken"}
         ctx = self.ctx()
         self.assertEqual(ctx.token, "********oken")
@@ -233,6 +240,7 @@ class CursesMenuTest(MenuCase):
         self.assertEqual(self.ctx().token, "")
 
     def test_token_edit_is_hidden_and_stored(self) -> None:
+        show_telegram_rows(self)
         win, _ = self.menu([*to("Telegram bot"), "\n", *"sekrit", "\n", "q"])
         self.assertEqual(FakeStore.items["telegram_bot_token"], "sekrit")
         self.assertTrue(any("••••••" in win.text(i) for i in range(len(win.frames))))
@@ -245,6 +253,7 @@ class CursesMenuTest(MenuCase):
         self.assertEqual(FakeStore.items, {})
 
     def test_arrows_do_not_open_the_editor(self) -> None:
+        show_telegram_rows(self)
         win, _ = self.menu([*to("Telegram chat"), curses.KEY_RIGHT, "q"])
         self.assertNotIn("Enter saves", win.text())
 
@@ -258,6 +267,7 @@ class CursesMenuTest(MenuCase):
         self.assertIn("Pick a setting to change", out.getvalue())
 
     def test_without_telegram_kit_the_rows_are_inert(self) -> None:
+        show_telegram_rows(self)
         win, rc = self.menu([*to("Telegram chat"), "\n", "r", "q"], telegram=False)
         self.assertEqual(rc, 0)
         self.assertIn("reinstall agent-toggle", win.text())
@@ -300,6 +310,7 @@ class CursesMenuTest(MenuCase):
         self.assertIn("fixed 1 of 1", win.text(-2))
 
     def test_undo_and_sync_ask_first(self) -> None:
+        show_telegram_rows(self)
         with mock.patch.object(undo, "cmd_undo") as m:
             self.menu([*to("Undo"), "\n", "n", "q"])
             m.assert_not_called()
@@ -327,6 +338,7 @@ class CursesMenuTest(MenuCase):
         self.assertNotIn("Traceback", win.text(-2))
 
     def test_send_test_without_values_shows_the_error(self) -> None:
+        show_telegram_rows(self)
         win, _ = self.menu([*to("Send test"), "\n", "x", "q"])
         self.assertIn("set the bot token and chat id first", win.text(-2))
         self.assertEqual(self.kit.sent, [])
@@ -341,6 +353,16 @@ class NumberedTest(MenuCase):
     def test_title_shows_the_package_version(self) -> None:
         _, out = self.run_numbered("q\n")
         self.assertIn(f"agent-toggle config  v{__version__}", out.splitlines()[0])
+
+    def test_telegram_rows_are_hidden(self) -> None:
+        _, out = self.run_numbered("q\n")
+        for gone in ("Notifications", "Telegram", "Send test message", "Sync CI secrets"):
+            self.assertNotIn(gone, out)
+
+    def test_hidden_telegram_rows_never_read_the_keychain(self) -> None:
+        with mock.patch.object(FakeStore, "get") as get:
+            self.ctx()
+        get.assert_not_called()
 
     def test_digits_toggle_and_cycle_then_eof_quits(self) -> None:
         rc, out = self.run_numbered(f"1\n{number('Color')}\n")
@@ -367,6 +389,7 @@ class NumberedTest(MenuCase):
         self.assertEqual(cm.numbered(self.ctx(), io.StringIO(""), ascii_out), 0)
 
     def test_zh_tw_prompts_on_an_ascii_pipe_never_crash(self) -> None:
+        show_telegram_rows(self)
         chat, undo_row = number("Telegram chat"), number("Undo")
         i18n.set_language("zh-TW")
         raw = io.BytesIO()
@@ -378,11 +401,13 @@ class NumberedTest(MenuCase):
         self.assertIn(b"(y/n)", raw.getvalue())
 
     def test_a_rejected_chat_id_is_not_echoed_in_full(self) -> None:
+        show_telegram_rows(self)
         _, out = self.run_numbered(f"{number('Telegram chat')}\n123456:ABCDEFGHIJKLMNOP\n")
         self.assertIn("not a chat ID: 123456:AB...", out)
         self.assertNotIn("CDEFGH", out)
 
     def test_chat_id_prompt_and_token_via_hidden_input(self) -> None:
+        show_telegram_rows(self)
         self.run_numbered(f"{number('Telegram chat')}\nnope\n")
         self.assertIsNone(settings.get("telegram_chat_id"))
         _, out = self.run_numbered(f"{number('Telegram chat')}\n@my_channel\n"
@@ -392,6 +417,7 @@ class NumberedTest(MenuCase):
         self.assertNotIn("ABCDEF", out)
 
     def test_without_telegram_kit_rows_are_degraded(self) -> None:
+        show_telegram_rows(self)
         rc, out = self.run_numbered(f"{number('Telegram chat')}\nq\n", telegram=False)
         self.assertEqual(rc, 0)
         self.assertIn("reinstall agent-toggle", out)
@@ -431,7 +457,6 @@ class CliConfigMenuTest(CliCase):
                 mock.patch.object(sys, "stdin", io.StringIO("1\n")):
             rc, out, err = self.run_cli("config")
         self.assertEqual(rc, 0, err)
-        self.assertIn("reinstall agent-toggle", out)
         self.assertIs(settings.get("update_check"), False)
         with mock.patch.dict(sys.modules, {"telegram_kit": None}):
             rc, env = self.run_json("config")

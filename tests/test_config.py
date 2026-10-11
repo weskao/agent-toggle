@@ -59,9 +59,20 @@ class FakeKit:
         return self.deliver
 
 
+def show_telegram_rows(case: unittest.TestCase) -> None:
+    """The Telegram rows config_menu hides, back for *case* as SHOW_TELEGRAM = True would."""
+    rows = config_menu.ALL_ROWS
+    for name, value in (("SHOW_TELEGRAM", True), ("ROWS", rows),
+                        ("ITEMS", tuple(r for r in rows if r.kind != "heading"))):
+        patcher = mock.patch.object(config_menu, name, value)
+        patcher.start()
+        case.addCleanup(patcher.stop)
+
+
 class ConfigTest(CliCase):
     def setUp(self) -> None:
         super().setUp()
+        show_telegram_rows(self)
         self.kit = FakeKit("123456:ABCDEFtoken")
         self.gh_calls: list[tuple[tuple, str | None]] = []
         for target, new in (("kit", lambda: self.kit), ("gh", self.fake_gh)):
