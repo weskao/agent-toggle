@@ -240,8 +240,9 @@ def live_names(base: Path, type_: str) -> list[str]:
     return sorted(set(names))
 
 
-def live_mcp(home: Path, backend: str | None) -> list[str]:
-    """Names of the MCP servers currently configured for one harness."""
+def live_mcp(home: Path, backend: str | None, file: Path | None = None) -> list[str]:
+    """Names of the MCP servers currently configured for one harness (`file`: the
+    table's McpSpec.file, which the `json` backend reads)."""
     if backend == "claude-json":
         try:
             cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
@@ -260,9 +261,9 @@ def live_mcp(home: Path, backend: str | None) -> list[str]:
         except ProjectMcpError:
             return []
         return sorted(n for n in names if n.isprintable() and _valid_name(n))
-    if backend == "json":                # home is ~/.copilot; user-edited text, so filter names
+    if backend == "json" and file:       # user-edited text, so filter names
         try:
-            names = read_project_mcp(home / "mcp-config.json")[1]["mcpServers"]
+            names = read_project_mcp(file)[1]["mcpServers"]
         except ProjectMcpError:
             return []
         return sorted(n for n in names if n.isprintable() and _valid_name(n))

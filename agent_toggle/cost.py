@@ -312,7 +312,7 @@ def inventory(state: dict, table: dict, warn: Callable[[str], None] = lambda m: 
                         else (0, None, "flag entry; size unknown"))
             elif type_ == "mcp":
                 counts = mcp_tool_counts(h)
-                for name in live_mcp(h.home, h.backend):
+                for name in live_mcp(h.home, h.backend, h.mcp and h.mcp.file):
                     add(hname, type_, name, True, mcp_estimate(hname, counts.get(name)))
 
     listed: list[str] = []                # canonical `name@marketplace` ids, for the parked rows
