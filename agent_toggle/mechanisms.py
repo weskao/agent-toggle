@@ -740,6 +740,11 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
                 fails += fail(name, "not found under " + " or ".join(str(v.live) for v in views))
                 continue
             key = make_key(v.owner, type_, name, project=proj)
+            prior = state["disabled"].get(key)         # one key = one record: never overwrite
+            if prior and _exists(Path(prior.get("parked_at", ""))):   # a live one; a stale
+                fails += fail(name, f"another copy is already parked at "   # record is replaced
+                                    f"{prior['parked_at']} -- enable it first")
+                continue
             others = [h for h in v.sharers if h != harness]        # relative to this request
             ohome = home if v.owner == harness else table[v.owner].home
             # Preserve nesting: commands/orch/batch.md parks as orch/batch.md,
@@ -769,6 +774,18 @@ def toggle_dir_type(action: str, type_: str, names: list[str], state: dict,
             row = _ok(out, dry_run, harness, type_, action, name, _shared_text(
                       "disabled", v.owner, harness, others), parked_at=str(target),
                       **({"shared_with": others, "owner": v.owner} if others else {}))
+            if harness == "opencode" and not proj:
+                # OpenCode scans several skill dirs (DESIGN s11 q2): the park above hid one
+                # copy, so name every other genuinely distinct dir that still holds this name
+                seen = {v.live.resolve()}
+                dups = []
+                for w in views:
+                    if w.live.resolve() not in seen and (p := resolve_item(w.live, name)):
+                        seen.add(w.live.resolve())
+                        dups.append(str(p))
+                if dups:
+                    out.warn(f"opencode still loads another copy of {type_} {name}: "
+                             f"{', '.join(dups)} -- it stays active until that copy is moved away")
             # project scope moves the item only: repo text must not steer other tracked
             # files out of a shared repo (companions are a user-scope heuristic)
             def ahead(rec: dict, new=new, key=key) -> None:   # write-ahead per companion

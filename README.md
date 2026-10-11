@@ -549,6 +549,11 @@ harnesses it also affects. `status` prints `shared dir with: ...`.
 
 If the live directory carries `.synced-from-*` markers, a sync job may
 re-create what you parked; `status` and `disable` warn about it. Park in the
+Disabling an OpenCode skill while a same-named copy sits in another scanned dir warns
+that OpenCode still loads that copy (stderr, and `warnings` in `--json`). Two copies of
+one name under one owner share one record, so a second `disable` is refused with
+`another copy is already parked at <path> -- enable it first`.
+
 source harness instead. The warning is printed once per real directory, naming
 every harness that views it.
 
