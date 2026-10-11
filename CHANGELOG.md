@@ -1,3 +1,20 @@
+## [0.12.0] - 2026-10-11
+
+### 🚀 Features
+
+- **harnesses:** Support agy skills and mcp
+
+### 🐛 Bug Fixes
+
+- **deps:** Make telegram-kit a core dependency
+
+### 🚜 Refactor
+
+- **mechanisms:** Read json mcp from the table file
+
+### 📚 Documentation
+
+- Document agy skill and mcp support
 ## [0.11.4] - 2026-10-10
 
 ### ⚙️ Miscellaneous Tasks
