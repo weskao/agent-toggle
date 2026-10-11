@@ -1,3 +1,31 @@
+## [0.13.0] - 2026-10-11
+
+### 🚀 Features
+
+- **config:** Hide the Telegram rows in the settings menu
+- **cli:** Add the completion command
+
+### 🐛 Bug Fixes
+
+- **harnesses:** Read skills.paths from both opencode files
+- **mechanisms:** Warn on duplicate opencode skill copies
+- **mechanisms:** Journal MCP and plugin ops, trim backups
+
+### 📚 Documentation
+
+- Use demo gif in readme and drop old jpeg
+- Update design doc for landed phases and agy
+- **design:** Log the hidden Telegram rows and their rollback commit
+- Note the hidden Telegram rows in CLAUDE.md
+- **design:** Log the opencode, journal and backup fixes
+
+### 🧪 Testing
+
+- **mechanisms:** Format imports for release lint
+
+### ⚙️ Miscellaneous Tasks
+
+- Page Telegram on release failures
 ## [0.12.1] - 2026-10-11
 
 ### 🐛 Bug Fixes
