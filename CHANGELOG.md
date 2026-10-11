@@ -1,3 +1,12 @@
+## [0.12.1] - 2026-10-11
+
+### 🐛 Bug Fixes
+
+- **fs:** Name git-crypt unlock for locked json
+
+### 📚 Documentation
+
+- Add claude mods picker demo gif
 ## [0.12.0] - 2026-10-11
 
 ### 🚀 Features
