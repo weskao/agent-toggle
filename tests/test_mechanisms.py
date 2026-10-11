@@ -9,7 +9,8 @@ from pathlib import Path
 from base import CAN_SYMLINK, SandboxCase
 from test_cli_surface import CliCase
 
-from agent_toggle import fs, mechanisms as mech
+from agent_toggle import fs
+from agent_toggle import mechanisms as mech
 
 
 class DirTypeTest(SandboxCase):
