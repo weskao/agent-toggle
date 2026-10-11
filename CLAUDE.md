@@ -48,3 +48,7 @@ platform-specific code and say so.
 - Text I/O always passes `encoding="utf-8"` (Windows defaults to cp1252).
 - Windows is verified by CI's `windows-latest` job, not locally; POSIX-only tests are
   skipped on Windows (`os.name == "nt"`).
+
+## Hidden features
+
+- Telegram rows in the `config` menu are hidden, not removed (`SHOW_TELEGRAM = False` in `agent_toggle/ui/config_menu.py`, commit `409ff0a`); restore with `SHOW_TELEGRAM = True` or `git revert 409ff0a`.
