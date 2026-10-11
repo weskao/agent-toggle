@@ -46,7 +46,7 @@ A dash means the harness has no such resource this tool can toggle.
 | claude | `~/.claude` | `skills/` — move | `agents/` — move | `commands/` — move | `rules/` — move | native CLI (`claude plugin enable/disable`); a plugin whose `hooks/hooks.json` has `modules` is a mod | remove-with-backup |
 | codex | `~/.codex` | `skills/` — move | `agents/` — move | `commands/` or `prompts/` — move | — (`rules/default.rules` is a permission file) | — (no CLI this tool can drive) | remove-with-backup |
 | grok | `~/.grok` | `skills/` — move | — | — | — | — | remove-with-backup |
-| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (every OS) | every `skills.paths[]` entry of `opencode.json` (else `opencode.jsonc`; `~`, `$HOME/`, `${HOME}/` expanded, relative entries skipped), `skills/`, `skill/`, `~/.claude/skills`, `~/.agents/skills` — move | — (agents are config entries) | `command/` — move | — | — | flag |
+| opencode | `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (every OS) | every `skills.paths[]` entry of `opencode.json` and `opencode.jsonc` (both load and merge; `~`, `$HOME/`, `${HOME}/` expanded, relative entries skipped), `skills/`, `skill/`, `~/.claude/skills`, `~/.agents/skills` — move | — (agents are config entries) | `command/` — move | — | — | flag |
 | openclaw | `~/.openclaw` | `skills/` — move, or flag when `skills.entries.<name>` exists | `agents/` — move | — | — | flag | — (state is sqlite) |
 | copilot | `~/.copilot` | `skills/` — move | `agents/` — move | — | — | — | remove-with-backup |
 | vibe | `~/.vibe` | `skills/` — move | — | — | — | — | — |
@@ -82,7 +82,7 @@ listed.
 | claude, codex, grok, copilot, vibe homes and skill/agent dirs | Confirmed on a real install (DESIGN §4). |
 | grok MCP in `config.toml` | Confirmed on a live install. |
 | opencode `mcp.<name>.enabled` boolean in `opencode.json` | Shape observed (boolean under each server) on a real install at the version above. Still assumed: that the file is always strict JSON (the one inspected was). |
-| opencode `skills.paths` | A list in `opencode.json`; observed on a real install. The scanned-dir set and relative-entry rule (session cwd, not the config dir) were probed on 2.0.22 (DESIGN §11 q2). `opencode.json` over `opencode.jsonc` precedence is an assumption. |
+| opencode `skills.paths` | A list in `opencode.json`; observed on a real install. The scanned-dir set and relative-entry rule (session cwd, not the config dir) were probed on 2.0.22 (DESIGN §11 q2). Probed on 2.0.22 with `opencode debug agents`: `opencode.json` and `opencode.jsonc` both load and merge (`.jsonc` after `.json`, so it wins on a key conflict); not verified whether `skills.paths` arrays are concatenated or replaced by the later layer (the tool unions them). |
 | openclaw `skills.entries.<name>.enabled`, `plugins.entries.<name>.enabled` | Shape observed (boolean `enabled` per entry; some plugin entries carry only `config` and no `enabled`, which the tool treats as not flaggable) at the version above. `openclaw.json` parsed as strict JSON. |
 | copilot `installed-plugins/` entry format | Unknown: the directory was empty on the surveyed machine, so plugins stay unsupported. |
 | agy `~/.gemini/config/` layout | Confirmed on 1.3.3: the CLI's bundled `agy-customizations` docs name `~/.gemini/config/` as the global root (`skills/<name>/SKILL.md`, `mcp_config.json`), and `agy mcp disable` was probed in a throwaway HOME. agy's own `disabled: true` MCP flag and its `plugins/` (`config.json -> plugins.<dir>.enabled`) are not driven by this tool yet. |

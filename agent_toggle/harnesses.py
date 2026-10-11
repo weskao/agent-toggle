@@ -79,11 +79,11 @@ def opencode_skill_dirs(home: Path, oc: Path) -> tuple[str, ...]:
     """Every dir OpenCode (2.0.22, DESIGN s11 q2) scans for skills, configured
     redirects first (so `dirs["skill"][0]` is where `install-shims` writes):
 
-    1. `skills.paths[]` from `opencode.json`, else `opencode.jsonc` (the first that
-       exists wins; JSONC allowed; `skills` may be `{"paths": [...]}` or a bare
-       list). `~`, `$HOME/`, `${HOME}/` expand against `home`. A relative entry
-       resolves against the session cwd, which this home-based table does not
-       have, so it is skipped (a `--project` view is claude-shaped only).
+    1. `skills.paths[]` from `opencode.json` then `opencode.jsonc` (OpenCode loads
+       both as layers and merges them, probed on 2.0.22; JSONC allowed; `skills` may
+       be `{"paths": [...]}` or a bare list). `~`, `$HOME/`, `${HOME}/` expand
+       against `home`. A relative entry resolves against the session cwd, which
+       this home-based table does not have, so it is skipped (a `--project` view is claude-shaped only).
     2. `<oc>/skills` and `<oc>/skill`: `paths` is additive, they stay scanned.
     3. `~/.claude/skills` and `~/.agents/skills`, but only when OpenCode is
        installed (`oc` exists): they are other harnesses' dirs, so `dir_view`
@@ -92,22 +92,16 @@ def opencode_skill_dirs(home: Path, oc: Path) -> tuple[str, ...]:
     Extra dirs are absolute strings, which `home / sub` passes through intact.
     A missing or malformed file adds nothing: the table build never fails.
     """
-    paths: object = []
-    for name in ("opencode.json", "opencode.jsonc"):
+    paths: list = []
+    for name in ("opencode.json", "opencode.jsonc"):    # both load, in this order, and merge
         try:
-            text = (oc / name).read_text(encoding="utf-8")
-        except OSError:
+            skills = flag_json.jsonc_loads((oc / name).read_text(encoding="utf-8"))["skills"]
+        except (OSError, ValueError, KeyError, TypeError):    # absent, not UTF-8 or JSON: adds nothing
             continue
-        except ValueError:          # not UTF-8: unreadable, never fatal
-            break
-        try:
-            skills = flag_json.jsonc_loads(text)["skills"]
-            paths = skills.get("paths") if isinstance(skills, dict) else skills
-        except (ValueError, KeyError, TypeError):
-            pass
-        break
-    extra = [q for p in paths if isinstance(p, str) and p
-             and (q := _expand_home(p, home)) is not None] if isinstance(paths, list) else []
+        found = skills.get("paths") if isinstance(skills, dict) else skills
+        if isinstance(found, list):
+            paths += found
+    extra = [q for p in paths if isinstance(p, str) and p and (q := _expand_home(p, home)) is not None]
     compat = [str(home / ".claude" / "skills"), str(home / ".agents" / "skills")] if oc.is_dir() else []
     return tuple(dict.fromkeys((*extra, "skills", "skill", *compat)))
 

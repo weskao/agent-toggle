@@ -204,8 +204,8 @@ class OpencodeTableTest(AliasBase):
         self.assertEqual(self.dirs(), (codex, str(self.tmp / "a"), str(self.tmp), *tail))
         self.write_cfg('{"skills": ["~/.codex/skills"]}', "opencode.jsonc")      # bare list
         self.assertEqual(self.dirs(), (codex, *tail))
-        self.write_cfg('{"skills": {"paths": ["~/from-json"]}}')                 # .json wins
-        self.assertEqual(self.dirs()[0], str(self.tmp / "from-json"))
+        self.write_cfg('{"skills": {"paths": ["~/from-json"]}}')                 # both files count
+        self.assertEqual(self.dirs()[:2], (str(self.tmp / "from-json"), codex))
 
     def test_unshared_opencode_items_report_no_sharing(self) -> None:
         rc, env = self.run_json("disable", "command", "own-command", "--harness", "opencode")

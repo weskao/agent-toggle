@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 from pathlib import Path
 
@@ -91,6 +92,27 @@ class HarnessTableTest(SandboxCase):
 
     def test_harnesses_honours_sandbox_home(self) -> None:
         self.assertEqual(hz.harnesses()["codex"].home, self.tmp / ".codex")
+
+
+class OpencodeConfigFilesTest(SandboxCase):
+    """OpenCode 2.0.22 loads opencode.json then opencode.jsonc as separate layers and
+    merges them (probed with `opencode debug config`: both listed, and an agent defined
+    in only one of them is present), so skills.paths of both files count."""
+
+    def test_skills_paths_come_from_both_files_json_first(self) -> None:
+        oc = self.tmp / ".config" / "opencode"
+        oc.mkdir(parents=True)
+        (oc / "opencode.json").write_text(json.dumps({"skills": {"paths": ["~/a"]}}), encoding="utf-8")
+        (oc / "opencode.jsonc").write_text('// c\n{"skills": {"paths": ["~/b", "~/a"]}}', encoding="utf-8")
+        got = build(self.tmp)["opencode"].dirs["skill"]
+        self.assertEqual(got[:3], (str(self.tmp / "a"), str(self.tmp / "b"), "skills"))
+
+    def test_a_broken_file_does_not_hide_the_other(self) -> None:
+        oc = self.tmp / ".config" / "opencode"
+        oc.mkdir(parents=True)
+        (oc / "opencode.json").write_text("{ not json", encoding="utf-8")
+        (oc / "opencode.jsonc").write_text('{"skills": ["~/b"]}', encoding="utf-8")
+        self.assertEqual(build(self.tmp)["opencode"].dirs["skill"][0], str(self.tmp / "b"))
 
 
 class MultiCandidateDirsTest(SandboxCase):

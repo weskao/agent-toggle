@@ -539,7 +539,7 @@ rather than guessing.
 
 OpenCode may read skills from another harness's directory through
 `opencode.json` → `skills.paths` (absolute, `~`, `$HOME/...`
-and `${HOME}/...` entries; read from `opencode.json`, else `opencode.jsonc`;
+and `${HOME}/...` entries; read from `opencode.json` and `opencode.jsonc` (OpenCode loads both and merges them);
 relative entries are skipped, since OpenCode resolves them against the session
 directory). OpenCode also always scans `~/.claude/skills` and `~/.agents/skills`,
 so claude's skills count as shared with it. Such a directory is **one** item, filed under
