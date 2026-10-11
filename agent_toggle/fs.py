@@ -254,6 +254,15 @@ def lock():
             pass
 
 
+def read_utf8(path: Path) -> str:
+    """Exact text of `path`; a git-crypt-locked file raises OSError naming the fix,
+    not an opaque UnicodeDecodeError."""
+    raw = path.read_bytes()
+    if raw.startswith(b"\x00GITCRYPT\x00"):
+        raise OSError("git-crypt encrypted -- run `git-crypt unlock` in its repo")
+    return raw.decode("utf-8")
+
+
 def atomic_write(path: Path, text: str, mode: int = 0o600, newline: str | None = None) -> None:
     """Write `text` to `path` via a same-dir tmp file created with `mode`.
     `newline=""` writes line endings as given (a user file edited in place)."""

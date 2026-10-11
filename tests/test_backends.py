@@ -162,6 +162,12 @@ class ProjectMcpJsonTest(SandboxCase):
         with self.assertRaises(mcp_json.ProjectMcpError):
             mcp_json.project_mcp_remove(self.put('{"mcpServers": {}}'), "a-mcp")
 
+    def test_git_crypt_locked_file_names_the_fix(self) -> None:
+        f = self.tmp / ".mcp.json"
+        f.write_bytes(b"\x00GITCRYPT\x00\xa4\xc7}")
+        with self.assertRaisesRegex(mcp_json.ProjectMcpError, "git-crypt unlock"):
+            mcp_json.read_project_mcp(f)
+
 
 class CopilotMcpTest(CliCase):
     """copilot's user-scope strict-JSON mcp-config.json (backend `json`)."""

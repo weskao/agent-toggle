@@ -94,7 +94,7 @@ def _move_back(p: Path, live: Path) -> None:
 def _read_json(file: Path) -> tuple[object, str, str]:
     """(data, kind, why); kind is ok | missing | jsonc | broken."""
     try:
-        text = file.read_bytes().decode("utf-8").removeprefix("\ufeff")
+        text = fs.read_utf8(file).removeprefix("\ufeff")
     except FileNotFoundError:
         return None, "missing", "is missing"
     except (OSError, UnicodeDecodeError) as e:

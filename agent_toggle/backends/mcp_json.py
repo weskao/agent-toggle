@@ -134,7 +134,7 @@ def read_project_mcp(file: Path) -> tuple[str, dict]:
     try:
         if file.stat().st_size > MAX_PROJECT_MCP:
             raise ProjectMcpError(f"{file} is larger than {MAX_PROJECT_MCP >> 20} MiB")
-        text = file.read_bytes().decode("utf-8")      # bytes: CRLF must survive
+        text = fs.read_utf8(file)                     # bytes: CRLF must survive
     except FileNotFoundError:
         raise ProjectMcpError(f"{file} not found") from None
     except (OSError, UnicodeDecodeError) as e:
