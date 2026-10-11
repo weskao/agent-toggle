@@ -26,11 +26,13 @@ All bookkeeping lives under `~/.agent-toggle/`:
 - A project `.mcp.json` backup holds only the server that was disabled: the
   entry, its exact text and the names of the servers next to it -- never
   another server's entry or the whole file. The user-scope JSON MCP backend
-  (copilot's `mcp-config.json`) still backs up the whole file text before and
-  after the edit, so that backup can include other servers' headers. A project
-  backup written by an earlier version may still hold the whole file text
-  (including other servers' headers); it keeps working, and disabling that
-  server again (after `enable`) replaces it with the per-entry form.
+  (copilot's `mcp-config.json`, agy's `mcp_config.json`) does the same: only the
+  cut entry is stored. A project backup, or a copilot/agy
+  `<harness>__<name>.json` backup, written by an earlier version may still hold
+  the whole file text (including other servers' headers); it keeps working and
+  is not purged. Disabling that server again (after `enable`) replaces a project
+  backup with the per-entry form; you can delete an old copilot/agy backup once
+  the server is enabled again.
 
 ## File-mode policy
 

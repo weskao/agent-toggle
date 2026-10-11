@@ -2,7 +2,9 @@
 
 Compares each installed harness's live layout with its table row, then
 cross-checks state.json against disk. The check takes no lock, never writes state,
-log, backups or modes, and never shells out (no claude CLI). Every problem row names
+log, backups or modes, and never shells out (no claude CLI) -- except one read-only
+`claude plugin list --json` when a killed run left a plugin op pending (settle has no
+other way to tell whether it landed). Every problem row names
 the command that fixes it. A row whose fix needs no judgment also yields a `Fix`;
 `offer_fixes` asks y/n for each (on a terminal only) and runs it under the lock.
 """
@@ -383,7 +385,7 @@ def _check_orphans(out: Result, state: dict, table: dict, only: str | None,
             for p in _untracked(sub, tracked):
                 _row(out, None, None, p.name, "warn", f"{p} is parked but has no state entry; "
                      f"fix: move it back by hand")
-    used = {Path(e["backup"]).name for e in entries
+    used = {Path(e["backup"]).name for e in (*entries, *pending)    # pending: settle's rows
             if isinstance(e, dict) and isinstance(e.get("backup"), str)}
     bdir = fs.backup_dir()
     for b in sorted(bdir.glob("*.json")) if bdir.is_dir() else ():

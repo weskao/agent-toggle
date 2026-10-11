@@ -225,9 +225,10 @@ def end(state: dict, key: str) -> None:
 
 
 def checkpoints(state: dict, dry_run: bool):
-    """tick() to call once per item in mechanisms without a write-ahead entry (mcp,
-    plugin): keeps the lock fresh and saves the items finished so far, only when
-    one changed state (a failed item writes nothing)."""
+    """tick() to call once per item in the mcp / plugin loops: keeps the lock fresh and
+    saves the items finished so far, only when one changed state (a failed item writes
+    nothing; a claude.ai connector, the one op there without a write-ahead entry, relies
+    on it alone)."""
     last = json.dumps(state)
 
     def tick() -> None:

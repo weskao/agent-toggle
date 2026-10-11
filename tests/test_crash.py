@@ -13,6 +13,7 @@ import os
 import shlex
 import shutil
 import stat
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -362,6 +363,681 @@ class CompanionCrashTest(CrashCase):
         self.assertTrue(any("refused: a companion outside" in w for w in env["warnings"]), env)
         self.assertTrue(other.is_file())
         self.assertFalse((self.home / "scripts" / "x.sh").exists())
+
+
+class JsonMcpCrashTest(CrashCase):
+    """User-scope strict-JSON MCP file (backend `json`): copilot mcp-config.json."""
+
+    HARNESS = "copilot"
+    FILE = (".copilot", "mcp-config.json")
+
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.copytree(FIXTURES / self.HARNESS, self.tmp, dirs_exist_ok=True)
+        self.cfg = self.tmp.joinpath(*self.FILE)
+        self.before = self.cfg.read_bytes()
+        self.args = ("mcp", "example-mcp", "--harness", self.HARNESS)
+        self.ghost = ("mcp", "ghost-mcp", "--harness", self.HARNESS)    # fails; settles first
+        self.mkey = f"{self.HARNESS}:mcp:example-mcp"
+        self.bp = fs.backup_dir() / f"{self.HARNESS}__example-mcp.json"
+
+    def kill_in_write(self, action: str, *, write: bool) -> None:
+        """Die in the config write: before it (backup + pending saved) or right after it."""
+        from agent_toggle.backends import mcp_json
+        real = mcp_json.write_project_mcp
+
+        def die(*a, **kw):
+            if write:
+                real(*a, **kw)
+            raise Killed
+        with self.killed("agent_toggle.mechanisms.write_project_mcp", side_effect=die):
+            self.run_cli(action, *self.args)
+
+    def servers(self) -> dict:
+        return json.loads(self.cfg.read_text(encoding="utf-8"))["mcpServers"]
+
+    def pending_rows(self, verdict: str) -> list[dict]:
+        rc, env = self.run_json("doctor")
+        return [r for r in env["results"] if r.get("pending") == verdict]
+
+    def assert_settled(self, disabled: bool, body: bytes) -> None:
+        state = self.raw_state()
+        self.assertNotIn("pending", state)
+        self.assertEqual(self.mkey in state["disabled"], disabled)
+        self.assertEqual(self.cfg.read_bytes(), body)            # whole bytes, never a mix
+
+    def forge(self, action: str, **fields) -> dict:
+        """A pending entry as a killed disable would leave it, with `fields` tampered."""
+        entry = {"mechanism": "remove_backup", "harness": self.HARNESS, "type": "mcp",
+                 "name": "example-mcp", "backend": "json", "backup": str(self.bp),
+                 "scope": "user", "project": None, "at": "2026-01-01T00:00:00+0000", **fields}
+        fs.private_dir(fs.state_dir())
+        store.save_state({"version": 3, "disabled": {},
+                          "pending": {self.mkey: {"action": action, "entry": entry}}})
+        return entry
+
+    # -- disable ---------------------------------------------------------------------
+    def test_kill_before_the_disable_write_rolls_back_and_drops_the_backup(self) -> None:
+        self.kill_in_write("disable", write=False)
+        self.assertEqual(self.pending()[self.mkey]["entry"]["backup"], str(self.bp))
+        self.assertTrue(self.bp.exists())
+        self.assertEqual(self.raw_state()["disabled"], {})
+        self.assertTrue(any("never reached disk" in w for w in self.warnings("status")))
+        rc, env = self.run_json("doctor")
+        self.assertFalse([r for r in env["results"] if r.get("name") == self.bp.name], env)
+        self.assertEqual(self.run_json("disable", *self.ghost)[0], 1)
+        self.assert_settled(False, self.before)
+        self.assertFalse(self.bp.exists())
+
+    def test_an_unsaved_begin_drops_the_backup_it_just_wrote(self) -> None:
+        enospc = OSError(errno.ENOSPC, "No space left on device")
+        with mock.patch("agent_toggle.mechanisms.begin", side_effect=enospc):
+            rc, env = self.run_json("disable", *self.args)
+        self.assertEqual(rc, 1)
+        self.assertIn("state not saved, nothing changed", env["results"][0]["detail"])
+        self.assertFalse(self.bp.exists())
+        self.assertEqual(self.cfg.read_bytes(), self.before)
+
+    def test_an_unsaved_begin_keeps_a_backup_an_older_entry_still_uses(self) -> None:
+        from agent_toggle import mechanisms as mech
+        state = {"version": 3, "disabled": {self.mkey: {}}}      # a falsy entry skips the
+        enospc = OSError(errno.ENOSPC, "No space left on device")   # "already disabled" refusal
+        with mock.patch("agent_toggle.mechanisms.begin", side_effect=enospc):
+            fails = mech.toggle_json_mcp("disable", ["example-mcp"], state, self.HARNESS,
+                                         mech.Result(), False, mech.harnesses())
+        self.assertEqual(fails, 1)
+        self.assertTrue(self.bp.exists())                        # the older entry restores from it
+        self.assertEqual(self.cfg.read_bytes(), self.before)
+
+    def test_settle_keeps_the_backup_of_an_already_recorded_disable(self) -> None:
+        """A pending disable that never reached the file, over a key that already has a
+        recorded entry, must not delete the backup that entry restores from."""
+        self.assertEqual(self.run_json("disable", *self.args)[0], 0)
+        state = self.raw_state()
+        entry = state["disabled"][self.mkey]
+        self.cfg.write_bytes(self.before)                        # the server is back in the file
+        store.save_state({**state, "pending": {self.mkey: {"action": "disable",
+                                                           "entry": entry}}})
+        self.assertTrue(self.bp.exists())
+        self.run_json("disable", *self.ghost)                    # fails; settles first
+        self.assertTrue(self.bp.exists())
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.raw_state()["disabled"][self.mkey], entry)
+
+    def test_kill_after_the_disable_write_is_recorded_and_restorable(self) -> None:
+        self.kill_in_write("disable", write=True)
+        self.assertNotIn("example-mcp", self.servers())
+        self.assertEqual(self.raw_state()["disabled"], {})      # the old gap: edited, unrecorded
+        warning = next(w for w in self.warnings("status") if "finished on disk" in w)
+        cmd = warning.rsplit("`", 2)[-2].split()
+        self.assertEqual(cmd, ["agent-toggle", "enable", *self.args])
+        rc, env = self.run_json(*cmd[1:])
+        self.assertEqual(rc, 0, env)
+        self.assertTrue(any("recovered interrupted disable" in w for w in env["warnings"]))
+        self.assert_settled(False, self.before)
+
+    def test_a_rolled_back_write_settles_inline(self) -> None:
+        def boom(expected=None):
+            def verify(before, after):
+                raise ValueError("boom")
+            return verify
+        with mock.patch.object(fs, "json_verify", boom):
+            rc, env = self.run_json("disable", *self.args)
+        self.assertEqual(rc, 1)
+        self.assertIn("rolled back", env["results"][0]["detail"])
+        self.assert_settled(False, self.before)
+        self.assertFalse(self.bp.exists())
+        self.assertEqual(self.run_json("disable", *self.args)[0], 0)
+        self.assertNotIn("pending", self.raw_state())            # a clean op ends its record
+        after = self.cfg.read_bytes()
+        with mock.patch.object(fs, "json_verify", boom):
+            self.assertEqual(self.run_json("enable", *self.args)[0], 1)
+        self.assert_settled(True, after)
+        self.assertTrue(self.bp.exists())
+
+    def test_enable_all_settles_a_killed_disable_then_restores_it(self) -> None:
+        self.kill_in_write("disable", write=True)
+        rc, env = self.run_json("enable", "--all")
+        self.assertEqual(rc, 0, env)
+        self.assert_settled(False, self.before)
+
+    # -- enable ----------------------------------------------------------------------
+    def test_kill_before_the_enable_write_keeps_it_disabled(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.args)[0], 0)
+        after = self.cfg.read_bytes()
+        self.kill_in_write("enable", write=False)
+        self.assertEqual(len(self.pending_rows("undone")), 1)
+        self.assertEqual(self.run_json("disable", *self.ghost)[0], 1)
+        self.assert_settled(True, after)
+        self.assertTrue(self.bp.exists())                        # still the way back
+        self.assertEqual(self.run_json("enable", *self.args)[0], 0)
+        self.assert_settled(False, self.before)
+
+    def test_kill_after_the_enable_write_drops_the_entry(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.args)[0], 0)
+        self.kill_in_write("enable", write=True)
+        self.assertIn(self.mkey, self.raw_state()["disabled"])  # not saved: the kill
+        self.assertEqual(len(self.pending_rows("done")), 1)
+        self.assertEqual(self.run_json("enable", *self.args)[0], 1)   # recovered, nothing left
+        self.assert_settled(False, self.before)
+
+    def test_an_old_whole_file_backup_settles_and_restores(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.args)[0], 0)
+        after = self.cfg.read_bytes()
+        entry = json.loads(self.bp.read_text(encoding="utf-8"))["json"]["entry"]
+        self.bp.write_text(json.dumps({"json": {"entry": entry, "before": self.before.decode(),
+                                                "after": after.decode()}}), encoding="utf-8")
+        self.kill_in_write("enable", write=False)
+        self.assertEqual(self.run_json("disable", *self.ghost)[0], 1)
+        self.assert_settled(True, after)
+        self.kill_in_write("enable", write=True)
+        self.assertEqual(self.run_json("disable", *self.ghost)[0], 1)
+        self.assert_settled(False, self.before)
+
+    # -- never guessed -----------------------------------------------------------------
+    def test_an_unreadable_config_is_reported_never_guessed(self) -> None:
+        self.kill_in_write("disable", write=True)
+        self.cfg.write_text("{broken", encoding="utf-8")
+        stuck = self.pending_rows("stuck")
+        self.assertEqual(len(stuck), 1, stuck)
+        self.assertIn("not strict JSON", stuck[0]["detail"])
+        self.run_json("disable", *self.ghost)
+        self.assertIn(self.mkey, self.pending())                 # kept until it can be settled
+        self.assertEqual(self.cfg.read_text(encoding="utf-8"), "{broken")
+        self.assertTrue(self.bp.exists())
+
+    def test_a_gone_server_without_its_backup_is_stuck(self) -> None:
+        self.kill_in_write("disable", write=True)
+        for label, body in (("missing", None), ("enable would refuse it", '{"json": {"entry": {}}}')):
+            with self.subTest(label):
+                self.bp.unlink(missing_ok=True)
+                if body:
+                    self.bp.write_text(body, encoding="utf-8")
+                stuck = self.pending_rows("stuck")
+                self.assertEqual(len(stuck), 1, stuck)
+                self.assertIn(str(self.bp), stuck[0]["detail"])
+                self.run_json("disable", *self.ghost)
+                self.assertIn(self.mkey, self.pending())
+                self.assertEqual(self.raw_state()["disabled"], {})
+
+    # -- untrusted state ---------------------------------------------------------------
+    def test_a_forged_backup_path_is_refused_and_touches_nothing(self) -> None:
+        self.assertEqual(self.run_json("disable", "mcp", "other-mcp",
+                                       "--harness", self.HARNESS)[0], 0)
+        other = fs.backup_dir() / f"{self.HARNESS}__other-mcp.json"
+        body = self.cfg.read_bytes()
+        elsewhere = self.tmp / "elsewhere" / self.bp.name
+        for backup, needle in ((other, "backup is not the one declared"),
+                               (elsewhere, "backup outside")):
+            with self.subTest(backup=backup):
+                state = self.raw_state()
+                state["pending"] = {self.mkey: {"action": "disable", "entry": {
+                    **state["disabled"][f"{self.HARNESS}:mcp:other-mcp"],
+                    "name": "example-mcp", "backup": str(backup)}}}
+                fs.state_file().write_text(json.dumps(state), encoding="utf-8")
+                rc, env = self.run_json("disable", *self.ghost)
+                self.assertIn(f"refused: {needle}", " ".join(env["warnings"]))
+                self.assertTrue(other.exists())
+                self.assertEqual(self.cfg.read_bytes(), body)
+                self.assertIn(self.mkey, self.pending())
+
+    def test_a_tampered_entry_is_refused_untouched(self) -> None:
+        for label, fields, needle in (
+                ("harness", {"harness": "agy" if self.HARNESS == "copilot" else "copilot"},
+                 "does not match its key"),
+                ("backend", {"backend": "toml"}, "does not use the toml backend"),
+                ("project", {"project": str(self.tmp / "work")}, "refused"),
+                ("no backup", {"backup": None}, "missing backup")):
+            with self.subTest(label):
+                self.forge("disable", **fields)
+                self.bp.parent.mkdir(parents=True, exist_ok=True)
+                self.bp.write_text("{}", encoding="utf-8")
+                rc, env = self.run_json("disable", *self.ghost)
+                self.assertIn(needle, " ".join(env["warnings"]), env)
+                self.assertTrue(self.bp.exists())
+                self.assertEqual(self.cfg.read_bytes(), self.before)
+                self.assertIn(self.mkey, self.pending())
+
+    def test_a_json_entry_under_a_non_json_harness_key_is_refused(self) -> None:
+        bp = fs.backup_dir() / "claude__x.json"
+        fs.private_dir(fs.backup_dir())
+        bp.write_text("{}", encoding="utf-8")
+        entry = {"mechanism": "remove_backup", "harness": "claude", "type": "mcp", "name": "x",
+                 "backend": "json", "backup": str(bp), "scope": "user", "project": None}
+        store.save_state({"version": 3, "disabled": {},
+                          "pending": {"claude:mcp:x": {"action": "disable", "entry": entry}}})
+        rc, env = self.run_json("disable", *self.ghost)
+        self.assertIn("refused", " ".join(env["warnings"]), env)
+        self.assertTrue(bp.exists())
+        self.assertIn("claude:mcp:x", self.pending())
+        self.assertEqual(self.cli_calls, [])
+
+    def test_the_config_path_comes_from_the_table_never_the_entry(self) -> None:
+        victim = self.tmp / "victim.json"
+        victim.write_text('{"mcpServers": {}}', encoding="utf-8")
+        self.forge("disable", file=str(victim))
+        self.assertEqual(self.run_json("disable", *self.ghost)[0], 1)
+        self.assertEqual(victim.read_text(encoding="utf-8"), '{"mcpServers": {}}')
+        self.assert_settled(False, self.before)    # the table's file still holds the server
+
+
+class AgyJsonMcpCrashTest(JsonMcpCrashTest):
+    """Same, for agy's ~/.gemini/config/mcp_config.json."""
+
+    HARNESS = "agy"
+    FILE = (".gemini", "config", "mcp_config.json")
+    test_a_json_entry_under_a_non_json_harness_key_is_refused = None    # harness-independent
+
+
+NEXT = ("disable", "skill", "nope", "--harness", "claude")     # any change: settles first
+
+
+class CliCrashCase(CrashCase):
+    """A stub claude (never the real one): `plugin enable|disable|list --json` act on
+    `self.plugins`; `mcp remove|add-json` edit the temp HOME's ~/.claude.json, at the
+    scope given (local: under projects/<cwd>). `self.listing` breaks the list read."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.plugins = {"demo@mkt": True}
+        self.listing = "ok"                       # ok | timeout | garbage | fail
+        self.broken = False                       # every mutating call fails, changing nothing
+        self.addCleanup(self._restore_env, "AGENT_TOGGLE_CLI_TIMEOUT",
+                        os.environ.pop("AGENT_TOGGLE_CLI_TIMEOUT", None))
+        self.timeouts: list[float] = []
+        self.cj = self.tmp / ".claude.json"
+        self.cj.write_text(json.dumps({"mcpServers": {"demo-mcp": {"command": "demo"}},
+                                       "projects": {}}), encoding="utf-8")
+
+    def _fake_run(self, cmd: list[str], **kw) -> subprocess.CompletedProcess:
+        args, rc, text = cmd[1:], 1, ""
+        self.cli_calls.append((args, kw.get("cwd")))
+        if self.broken:
+            text = "boom"
+        elif args[:2] == ["plugin", "list"]:
+            self.timeouts.append(kw["timeout"])
+            if self.listing == "timeout":
+                raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+            rc = int(self.listing == "fail")
+            text = "<html>oops" if self.listing == "garbage" else json.dumps(
+                [{"id": i, "enabled": on} for i, on in self.plugins.items()])
+        elif args[0] == "plugin" and args[2] in self.plugins:
+            self.plugins[args[2]], rc = args[1] == "enable", 0
+        elif args[0] == "mcp":
+            cfg = json.loads(self.cj.read_text(encoding="utf-8"))
+            remove = args[1] == "remove"
+            scope, name = (args[4], args[2]) if remove else (args[3], args[4])
+            box = cfg if scope == "user" else cfg["projects"].setdefault(kw["cwd"], {})
+            servers = box.setdefault("mcpServers", {})
+            if remove and name in servers:
+                del servers[name]
+                rc = 0
+            elif not remove:
+                servers[name], rc = json.loads(args[5]), 0
+            self.cj.write_text(json.dumps(cfg), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, rc, stdout=text, stderr="")
+
+    def kill_in_cli(self, *argv: str, landed: bool) -> None:
+        """Die in the mutating CLI call: before it runs, or right after it landed."""
+        from agent_toggle.backends import plugin_cli
+        real = plugin_cli.run_cli
+
+        def die(binary, args, **kw):
+            if landed:
+                real(binary, args, **kw)
+            raise Killed
+        with self.killed("agent_toggle.mechanisms.run_cli", side_effect=die):
+            self.run_cli(*argv)
+
+    def doctor_rows(self, verdict: str) -> list[dict]:
+        rc, env = self.run_json("doctor")
+        return [r for r in env["results"] if r.get("pending") == verdict]
+
+    def forge(self, key: str, action: str, entry: dict) -> None:
+        fs.private_dir(fs.state_dir())
+        store.save_state({"version": 3, "disabled": {} if action == "disable" else {key: entry},
+                          "pending": {key: {"action": action, "entry": entry}}})
+
+
+class PluginCrashTest(CliCrashCase):
+    """claude plugins: the CLI is the op, so settle asks `claude plugin list --json`."""
+
+    KEY = "claude:plugin:demo@mkt"
+    ARGS = ("plugin", "demo@mkt", "--harness", "claude")
+
+    def entry(self, **fields) -> dict:
+        return {"mechanism": "native_cli", "harness": "claude", "type": "plugin",
+                "name": "demo@mkt", "native": True, "at": "2026-01-01T00:00:00+0000", **fields}
+
+    def assert_settled(self, disabled: bool) -> None:
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.KEY in self.raw_state()["disabled"], disabled)
+        self.assertEqual(self.plugins["demo@mkt"], not disabled)
+
+    def test_kill_after_the_cli_disable_is_recorded_and_restorable(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.assertEqual(self.pending()[self.KEY]["entry"]["mechanism"], "native_cli")
+        self.assertEqual(self.raw_state()["disabled"], {})      # the old gap: done, unrecorded
+        warning = next(w for w in self.warnings("status") if "finished on disk" in w)
+        self.assertIn(30, self.timeouts)                          # the read timeout, not 120 s
+        cmd = warning.rsplit("`", 2)[-2].split()
+        self.assertEqual(cmd, ["agent-toggle", "enable", *self.ARGS])
+        rc, env = self.run_json(*cmd[1:])
+        self.assertEqual(rc, 0, env)
+        self.assertTrue(any("recovered interrupted disable" in w for w in env["warnings"]))
+        self.assert_settled(False)
+
+    def test_kill_before_the_cli_disable_rolls_back(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=False)
+        self.assertIn(self.KEY, self.pending())
+        self.assertTrue(any("never reached disk" in w for w in self.warnings("status")))
+        self.run_json(*NEXT)
+        self.assert_settled(False)
+
+    def test_kill_after_the_cli_enable_drops_the_entry(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.assertNotIn("pending", self.raw_state())             # a clean op ends its record
+        self.kill_in_cli("enable", *self.ARGS, landed=True)
+        self.assertIn(self.KEY, self.raw_state()["disabled"])    # not saved: the kill
+        self.assertEqual(len(self.doctor_rows("done")), 1)
+        self.run_json(*NEXT)
+        self.assert_settled(False)
+
+    def test_kill_before_the_cli_enable_keeps_it_disabled(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.kill_in_cli("enable", *self.ARGS, landed=False)
+        self.assertEqual(len(self.doctor_rows("undone")), 1)
+        self.run_json(*NEXT)
+        self.assert_settled(True)
+        self.assertEqual(self.run_json("enable", *self.ARGS)[0], 0)
+        self.assert_settled(False)
+
+    def test_a_failed_cli_call_settles_inline(self) -> None:
+        rc, env = self.run_json("disable", "plugin", "ghost@mkt", "--harness", "claude")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.raw_state()["disabled"], {})
+
+    def test_a_refused_disable_of_an_already_disabled_plugin_is_not_recorded(self) -> None:
+        self.plugins["demo@mkt"] = False                 # disabled by hand, outside the tool
+        self.broken = True                               # the CLI refuses: nothing changes
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 1)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.raw_state()["disabled"], {})
+        self.assertEqual([c for c, _ in self.cli_calls if c[:2] == ["plugin", "list"]], [])
+
+    def test_a_timed_out_cli_call_asks_the_listing(self) -> None:
+        from agent_toggle.backends import plugin_cli
+        real = plugin_cli.run_cli
+
+        def slow(binary, args, **kw):
+            real(binary, args, **kw)                     # landed, then the wait ran out
+            return False, "CLI timed out after 120s (raise it with AGENT_TOGGLE_CLI_TIMEOUT=<s>)"
+        with mock.patch("agent_toggle.mechanisms.run_cli", side_effect=slow):
+            self.assertEqual(self.run_json("disable", *self.ARGS)[0], 1)
+        self.assert_settled(True)
+
+    def test_an_unanswerable_listing_is_stuck_never_guessed(self) -> None:
+        from agent_toggle.backends import plugin_cli
+        for label, needle in (("timeout", "AGENT_TOGGLE_CLI_TIMEOUT"),
+                              ("garbage", "could not read"), ("fail", "could not read"),
+                              ("no cli", "claude CLI not found")):
+            with self.subTest(label):
+                self.setUp()
+                self.kill_in_cli("disable", *self.ARGS, landed=True)
+                self.listing = label
+                if label == "no cli":
+                    plugin_cli.which = lambda name: None
+                stuck = self.doctor_rows("stuck")
+                self.assertEqual(len(stuck), 1, stuck)
+                self.assertIn(needle, stuck[0]["detail"])
+                self.cli_calls.clear()
+                self.run_json(*NEXT)
+                self.assertIn(self.KEY, self.pending())             # kept until it can be settled
+                self.assertEqual(self.raw_state()["disabled"], {})
+                self.assertFalse(self.plugins["demo@mkt"])
+                self.assertEqual([c for c, _ in self.cli_calls if c[:2] != ["plugin", "list"]], [])
+
+    def test_a_plugin_gone_from_the_listing(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        del self.plugins["demo@mkt"]                     # uninstalled: a disable is moot
+        self.run_json(*NEXT)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.raw_state()["disabled"], {})
+        self.forge(self.KEY, "enable", self.entry())     # nor an enable: its record stays
+        self.run_json(*NEXT)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertIn(self.KEY, self.raw_state()["disabled"])
+        rc, env = self.run_json("enable", *self.ARGS)     # a plain failed enable: no leftover
+        self.assertEqual(rc, 1)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertIn(self.KEY, self.raw_state()["disabled"])
+
+    def test_a_tampered_entry_is_refused_untouched(self) -> None:
+        for label, fields, needle in (
+                ("harness", {"harness": "codex"}, "does not match its key"),
+                ("type", {"type": "mcp"}, "does not match its key"),
+                ("mechanism", {"mechanism": "flag"}, "flag"),
+                ("backup", {"backup": str(self.tmp / "x.json")}, "refused")):
+            with self.subTest(label):
+                self.forge(self.KEY, "disable", self.entry(**fields))
+                self.cli_calls.clear()
+                rc, env = self.run_json(*NEXT)
+                self.assertIn(needle, " ".join(env["warnings"]), env)
+                self.assertIn(self.KEY, self.pending())
+                self.assertEqual(self.cli_calls, [])
+                self.assertTrue(self.plugins["demo@mkt"])
+        bad = "claude:plugin:demo&calc"                  # would reach cmd.exe on Windows
+        self.forge(bad, "disable", self.entry(name="demo&calc"))
+        rc, env = self.run_json(*NEXT)
+        self.assertIn("refused", " ".join(env["warnings"]), env)
+        self.assertIn(bad, self.pending())
+        self.assertEqual(self.cli_calls, [])
+
+
+class ClaudeMcpCrashTest(CliCrashCase):
+    """claude MCP servers: `claude mcp remove|add-json` write ~/.claude.json, so settle
+    reads that file strictly (no CLI call); unreadable -> stuck."""
+
+    KEY = "claude:mcp:demo-mcp"
+    ARGS = ("mcp", "demo-mcp", "--harness", "claude")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bp = fs.backup_dir() / "claude__demo-mcp.json"
+
+    def servers(self) -> dict:
+        return json.loads(self.cj.read_text(encoding="utf-8"))["mcpServers"]
+
+    def assert_settled(self, disabled: bool) -> None:
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.KEY in self.raw_state()["disabled"], disabled)
+        self.assertEqual("demo-mcp" in self.servers(), not disabled)
+
+    def entry(self, **fields) -> dict:
+        return {"mechanism": "remove_backup", "harness": "claude", "type": "mcp",
+                "name": "demo-mcp", "backend": "claude-json", "backup": str(self.bp),
+                "scope": "user", "project": None, "at": "2026-01-01T00:00:00+0000", **fields}
+
+    def test_kill_after_the_cli_remove_is_recorded_and_restorable(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.assertEqual(self.pending()[self.KEY]["entry"]["backend"], "claude-json")
+        self.assertNotIn("demo-mcp", self.servers())
+        self.assertEqual(self.raw_state()["disabled"], {})
+        self.cli_calls.clear()
+        warning = next(w for w in self.warnings("status") if "finished on disk" in w)
+        self.assertEqual(self.cli_calls, [])                      # the file says, not the CLI
+        cmd = warning.rsplit("`", 2)[-2].split()
+        self.assertEqual(cmd, ["agent-toggle", "enable", *self.ARGS])
+        rc, env = self.run_json(*cmd[1:])
+        self.assertEqual(rc, 0, env)
+        self.assertTrue(any("recovered interrupted disable" in w for w in env["warnings"]))
+        self.assert_settled(False)
+        self.assertEqual(self.servers()["demo-mcp"], {"command": "demo"})
+
+    def test_kill_before_the_cli_remove_rolls_back_and_drops_the_backup(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=False)
+        self.assertTrue(self.bp.exists())
+        self.assertTrue(any("never reached disk" in w for w in self.warnings("status")))
+        self.run_json(*NEXT)
+        self.assert_settled(False)
+        self.assertFalse(self.bp.exists())
+
+    def test_kill_after_the_cli_add_drops_the_entry(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.assertNotIn("pending", self.raw_state())
+        self.kill_in_cli("enable", *self.ARGS, landed=True)
+        self.assertEqual(len(self.doctor_rows("done")), 1)
+        self.run_json(*NEXT)
+        self.assert_settled(False)
+
+    def test_kill_before_the_cli_add_keeps_it_disabled(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.kill_in_cli("enable", *self.ARGS, landed=False)
+        self.assertEqual(len(self.doctor_rows("undone")), 1)
+        self.run_json(*NEXT)
+        self.assert_settled(True)
+        self.assertTrue(self.bp.exists())
+
+    def test_settle_needs_no_cli(self) -> None:
+        from agent_toggle.backends import plugin_cli
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        plugin_cli.which = lambda name: None
+        self.run_json(*NEXT)
+        self.assert_settled(True)
+
+    def test_a_failed_cli_remove_settles_inline(self) -> None:
+        self.broken = True
+        rc, env = self.run_json("disable", *self.ARGS)
+        self.assertEqual(rc, 1)
+        self.assert_settled(False)
+        self.assertFalse(self.bp.exists())
+
+    def test_an_unreadable_claude_json_is_stuck_never_guessed(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        for body in ("{broken", "[]", '{"mcpServers": []}'):
+            with self.subTest(body):
+                self.cj.write_text(body, encoding="utf-8")
+                stuck = self.doctor_rows("stuck")
+                self.assertEqual(len(stuck), 1, stuck)
+                self.assertIn(str(self.cj), stuck[0]["detail"])
+                self.run_json(*NEXT)
+                self.assertIn(self.KEY, self.pending())
+                self.assertEqual(self.cj.read_text(encoding="utf-8"), body)
+                self.assertTrue(self.bp.exists())
+
+    def test_a_gone_server_without_its_backup_is_stuck(self) -> None:
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.bp.unlink()
+        stuck = self.doctor_rows("stuck")
+        self.assertEqual(len(stuck), 1, stuck)
+        self.assertIn(str(self.bp), stuck[0]["detail"])
+        self.run_json(*NEXT)
+        self.assertIn(self.KEY, self.pending())
+        self.assertEqual(self.raw_state()["disabled"], {})
+
+    def test_a_local_scope_server_settles_in_its_project(self) -> None:
+        proj = self.tmp / "loc"
+        proj.mkdir()
+        self.cj.write_text(json.dumps({"mcpServers": {}, "projects": {
+            str(proj): {"mcpServers": {"loc-mcp": {"command": "loc"}}}}}), encoding="utf-8")
+        self.kill_in_cli("disable", "mcp", "loc-mcp", "--harness", "claude", landed=True)
+        entry = self.pending()["claude:mcp:loc-mcp"]["entry"]
+        self.assertEqual((entry["scope"], entry["project"]), ("local", str(proj)))
+        self.run_json(*NEXT)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.raw_state()["disabled"]["claude:mcp:loc-mcp"]["scope"], "local")
+
+    def test_a_tampered_entry_is_refused_untouched(self) -> None:
+        fs.private_dir(fs.backup_dir())
+        self.bp.write_text('{"command": "demo"}', encoding="utf-8")
+        for label, fields, needle in (
+                ("harness", {"harness": "codex"}, "does not match its key"),
+                ("backend", {"backend": "toml"}, "does not use the toml backend"),
+                ("scope", {"scope": "project"}, "unknown mcp scope"),
+                ("local root", {"scope": "local", "project": "/"}, "not a usable dir"),
+                ("backup", {"backup": str(fs.backup_dir() / "claude__other.json")},
+                 "backup is not the one declared"),
+                ("outside", {"backup": str(self.tmp / "claude__demo-mcp.json")}, "backup outside")):
+            with self.subTest(label):
+                self.forge(self.KEY, "disable", self.entry(**fields))
+                self.cli_calls.clear()
+                rc, env = self.run_json(*NEXT)
+                self.assertIn(needle, " ".join(env["warnings"]), env)
+                self.assertIn(self.KEY, self.pending())
+                self.assertTrue(self.bp.exists())
+                self.assertIn("demo-mcp", self.servers())
+                self.assertEqual(self.cli_calls, [])
+
+
+class TomlMcpCrashTest(CrashCase):
+    """codex config.toml: a direct block edit, settled from the file."""
+
+    KEY = "codex:mcp:example-mcp"
+    ARGS = ("mcp", "example-mcp", "--harness", "codex")
+
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.copytree(FIXTURES / "codex", self.tmp, dirs_exist_ok=True)
+        self.cfg = self.tmp / ".codex" / "config.toml"
+        self.before = self.cfg.read_bytes()
+        self.bp = fs.backup_dir() / "codex__example-mcp.json"
+
+    def kill_in_edit(self, action: str, *, write: bool) -> None:
+        from agent_toggle.backends import mcp_toml
+        fn = "codex_mcp_remove" if action == "disable" else "codex_mcp_add"
+        real = getattr(mcp_toml, fn)
+
+        def die(*a, **kw):
+            if action == "disable" and (len(a) > 2 or kw.get("dry_run")):
+                return real(*a, **kw)                    # the plan, not the edit
+            if write:
+                real(*a, **kw)
+            raise Killed
+        with self.killed(f"agent_toggle.mechanisms.{fn}", side_effect=die):
+            self.run_cli(action, *self.ARGS)
+
+    def assert_settled(self, disabled: bool, body: bytes) -> None:
+        self.assertNotIn("pending", self.raw_state())
+        self.assertEqual(self.KEY in self.raw_state()["disabled"], disabled)
+        self.assertEqual(self.cfg.read_bytes(), body)
+
+    def test_kill_after_the_remove_is_recorded_and_restorable(self) -> None:
+        self.kill_in_edit("disable", write=True)
+        self.assertEqual(self.pending()[self.KEY]["entry"]["backend"], "toml")
+        warning = next(w for w in self.warnings("status") if "finished on disk" in w)
+        rc, env = self.run_json(*warning.rsplit("`", 2)[-2].split()[1:])
+        self.assertEqual(rc, 0, env)
+        self.assert_settled(False, self.before)
+
+    def test_kill_before_the_remove_rolls_back_and_drops_the_backup(self) -> None:
+        self.kill_in_edit("disable", write=False)
+        self.assertTrue(self.bp.exists())
+        self.run_json(*NEXT)
+        self.assert_settled(False, self.before)
+        self.assertFalse(self.bp.exists())
+
+    def test_kill_around_the_enable_edit(self) -> None:
+        for write, disabled in ((False, True), (True, False)):
+            with self.subTest(write=write):
+                self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+                after = self.cfg.read_bytes()
+                self.kill_in_edit("enable", write=write)
+                self.assertEqual(len([r for r in self.run_json("doctor")[1]["results"]
+                                      if r.get("pending") == ("done" if write else "undone")]), 1)
+                self.run_json(*NEXT)
+                self.assert_settled(disabled, after if disabled else self.before)
+                if disabled:
+                    self.assertEqual(self.run_json("enable", *self.ARGS)[0], 0)
+
+    def test_an_unreadable_config_is_stuck_never_guessed(self) -> None:
+        self.kill_in_edit("disable", write=True)
+        self.cfg.write_bytes(b"\xff\xfe not utf-8")
+        rc, env = self.run_json(*NEXT)
+        self.assertTrue(any(str(self.cfg) in w for w in env["warnings"]), env)
+        self.assertIn(self.KEY, self.pending())
+        self.assertEqual(self.cfg.read_bytes(), b"\xff\xfe not utf-8")
+        self.assertTrue(self.bp.exists())
 
 
 class StateCompatTest(CrashCase):

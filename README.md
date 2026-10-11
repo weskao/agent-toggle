@@ -232,7 +232,9 @@ unshared).
 `--dry-run` (`disable` / `enable` / `enable --all` / `undo` / `profile apply` /
 `install-shims` / `ui`) computes the plan --
 moves, companions, backups, MCP edits, warnings -- and writes nothing: no state,
-log, lock or backup, and no chmod; it never shells out to `claude`. `disable` /
+log, lock or backup, and no chmod; it never shells out to `claude`, except one
+read-only `claude plugin list --json` (up to 30 s) when a killed run left a plugin
+op pending and has to be settled. `disable` /
 `enable` result rows have action `would-disable` / `would-enable`; every plan
 row has status `planned`. Read-only commands (`list`, `status`, `cost`) also
 change nothing on disk -- `status` warns about a `state.json` or
@@ -547,13 +549,13 @@ its owner (the harness whose home really holds it): it is
 parked once, tracked once, and every row reports `shared_with`, the other
 harnesses it also affects. `status` prints `shared dir with: ...`.
 
-If the live directory carries `.synced-from-*` markers, a sync job may
-re-create what you parked; `status` and `disable` warn about it. Park in the
 Disabling an OpenCode skill while a same-named copy sits in another scanned dir warns
 that OpenCode still loads that copy (stderr, and `warnings` in `--json`). Two copies of
 one name under one owner share one record, so a second `disable` is refused with
 `another copy is already parked at <path> -- enable it first`.
 
+If the live directory carries `.synced-from-*` markers, a sync job may
+re-create what you parked; `status` and `disable` warn about it. Park in the
 source harness instead. The warning is printed once per real directory, naming
 every harness that views it.
 
@@ -851,10 +853,11 @@ a warning and a `recovered` log row (which `undo` does not reverse). `status` an
 `doctor` report it, with `agent-toggle enable ...` when the item ends up
 disabled. The one case left to you is a cross-filesystem move killed between its
 two renames: both copies are complete, and the report names the `diff -r` to
-check and the `rm -rf` that keeps either one. MCP and plugin items are saved
-per item (when the next one starts), without a `pending` record (a project `.mcp.json`
-edit has one): a kill inside that window
-leaves the change unrecorded (an MCP server's backup stays in `mcp-backups/`).
+check and the `rm -rf` that keeps either one. MCP servers (user-scope json,
+claude-json, toml, project `.mcp.json`) and claude plugins have a `pending` record
+too (a plugin is settled from a live `claude plugin list --json`); only a
+`claude.ai` connector toggle is saved per item (when the next one starts), and a
+kill inside that window leaves its change unrecorded.
 A killed run also leaves its `lock`; the next run's error says so.
 
 Each `log.jsonl` row is `{ts, harness, type, name, action, result, batch,

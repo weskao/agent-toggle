@@ -242,6 +242,68 @@ class SecretAuditTest(CliCase):
         for argv, text in self.seen:
             self.assertNotIn("test-token-000", text, argv)
 
+    def test_user_scope_json_backup_holds_no_other_servers_secret(self) -> None:
+        """G15 for copilot / agy: disabling server A must not copy server B's header into
+        the backup, state, log, any output or the redact path -- and the file round-trips."""
+        token = "Bearer test-token-000"
+        cfgs = {"copilot": self.tmp / ".copilot" / "mcp-config.json",
+                "agy": self.tmp / ".gemini" / "config" / "mcp_config.json"}
+        cfgs["agy"].parent.mkdir(parents=True)
+        servers = {"a-mcp": {"command": "demo"},
+                   "b-mcp": {"url": "https://example.invalid/mcp",
+                             "headers": {"Authorization": token}}}
+        for f in cfgs.values():
+            f.write_text(json.dumps({"mcpServers": servers}, indent=2), encoding="utf-8")
+        for h, f in cfgs.items():
+            orig, p = f.read_bytes(), ("mcp", "a-mcp", "--harness", h)
+            for i, extra in enumerate(VARIANTS):
+                self.go("disable", *p, "--dry-run", *extra)
+                with self.batch(f"{h}{i}"):
+                    self.go("disable", *p, *extra)
+                self.go("enable", *p, "--dry-run", *extra)
+                self.read_only(*extra)
+                self.go("enable", *p, *extra)
+                self.assertEqual(f.read_bytes(), orig, (h, extra))
+            with self.batch(f"{h}-u"):                       # disable, then undo
+                self.go("disable", *p)
+                self.go("undo")
+            self.assertEqual(f.read_bytes(), orig, h)
+            self.go("disable", *p)                           # leave the backup on disk
+            bp = list(fs.backup_dir().glob(f"{h}__a-mcp.json"))
+            self.assertEqual(len(bp), 1)
+            self.assertEqual(json.loads(bp[0].read_text(encoding="utf-8"))["json"]["entry"],
+                             servers["a-mcp"])
+            self.go("enable", *p)
+            self.assertEqual(f.read_bytes(), orig, h)
+        self.go("disable", "mcp", "a-mcp", "--harness", "copilot")
+        self.go("disable", "mcp", "a-mcp", "--harness", "agy")
+        for f in fs.state_dir().rglob("*"):
+            if f.is_file():
+                self.assertNotIn("test-token-000", f.read_text(encoding="utf-8"), f)
+        for argv, text in self.seen:
+            self.assertNotIn("test-token-000", text, argv)
+
+    def test_old_whole_file_user_backup_still_restores(self) -> None:
+        f = self.tmp / ".copilot" / "mcp-config.json"
+        before = json.dumps({"mcpServers": {"a-mcp": {"command": "demo"},
+                                             "b-mcp": {"url": "https://example.invalid/mcp"}}},
+                            indent=2)
+        after = json.dumps({"mcpServers": {"b-mcp": {"url": "https://example.invalid/mcp"}}},
+                           indent=2)
+        f.write_bytes(after.encode("utf-8"))        # bytes: no CRLF translation on Windows
+        bp = fs.backup_dir() / "copilot__a-mcp.json"
+        fs.private_dir(fs.backup_dir())
+        bp.write_text(json.dumps({"json": {"entry": {"command": "demo"}, "before": before,
+                                           "after": after}}), encoding="utf-8")
+        state = store.load_state(write_back=False)
+        state["disabled"]["copilot:mcp:a-mcp"] = {
+            "mechanism": "remove_backup", "harness": "copilot", "type": "mcp", "name": "a-mcp",
+            "backend": "json", "backup": str(bp), "scope": "user", "project": None,
+            "at": "2026-01-01T00:00:00+0000"}
+        fs.state_file().write_text(json.dumps(state), encoding="utf-8")
+        self.assertEqual(self.go("enable", "mcp", "a-mcp", "--harness", "copilot"), 0)
+        self.assertEqual(f.read_bytes(), before.encode("utf-8"))
+
     def test_corrupt_backups_and_configs_show_no_value(self) -> None:
         self.each("disable")
         for b in fs.backup_dir().glob("*.json"):     # truncate mid-value: parsers must not echo it

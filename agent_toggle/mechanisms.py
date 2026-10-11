@@ -27,7 +27,7 @@ from .backends.mcp_json import (
     toggle_claudeai_connector,
     write_project_mcp,
 )
-from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove
+from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove, toml_block
 from .backends.plugin_cli import claude_bin, full_plugin_id, list_plugins, run_cli
 from .companions import move, park_companions, restore_companions
 from .fs import prune_empty
@@ -112,9 +112,12 @@ def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> 
             return f"missing {f}"
     if entry.get("backend") == "project-json" and "@" not in head:
         return "project .mcp.json entry under a user-scope key"
-    if entry.get("backend") == "json" and (
-            "@" in head or getattr(table.get(head), "backend", None) != "json"):
-        return "json entry for a harness whose table row does not use the json backend"
+    if (b := entry.get("backend")) in ("json", "toml", "claude-json") and (
+            "@" in head or getattr(table.get(head), "backend", None) != b):
+        return f"{b} entry for a harness whose table row does not use the {b} backend"
+    if entry.get("mechanism") == "native_cli" and not (
+            head == "claude" and type_ == "plugin" and valid_plugin_id(name)):
+        return "native_cli entry is not a claude plugin with a plain id"
     if entry.get("backend") == "claude-json" and entry.get("scope") in ("user", "local"):
         if entry["scope"] == "local":
             # `project` here is the claude local-scope cwd, not a --project scope
@@ -460,7 +463,8 @@ def _enable_cmd(key: str, entry: dict) -> str:
 
 def settle(state: dict, key: str, out: Result | None = None, *,
            dry_run: bool = False, inline: bool = False) -> tuple[str, str]:
-    """Resolve the write-ahead entry `key` from what is on disk: (verdict, message).
+    """Resolve the write-ahead entry `key` from what is on disk (a claude plugin: from a
+    live `claude plugin list --json`, under the caller's lock): (verdict, message).
 
     `done`: the op landed -- record it; `undone`: it did not -- drop the record (and
     a half copy); `stuck`: kept, and the message names the exact fix. Never
@@ -474,22 +478,34 @@ def settle(state: dict, key: str, out: Result | None = None, *,
     fix = f"fix: check it, then delete {json.dumps(key)} under \"pending\" in {fs.state_file()}"
     try:
         if action not in ("disable", "enable") or entry.get("connector") or not (
-                mech in ("flag", "move")
-                or (mech == "remove_backup" and entry.get("backend") == "project-json")):
-            raise ValueError("not a pending disable/enable of a flag, a move or a "
-                             "project .mcp.json entry")
-        if parse_key(key)[1] is None:
+                mech in ("flag", "move", "native_cli") or (mech == "remove_backup" and (
+                    entry.get("backend") in ("project-json", "json", "claude-json", "toml")))):
+            raise ValueError("not a pending disable/enable of a flag, a move, a "
+                             "claude plugin or an MCP server")
+        digest = parse_key(key)[1]
+        if digest is None:
             table = harnesses()
         elif isinstance(entry.get("project"), str):
             table = {"claude": project_view(Path(entry["project"]))}
         else:
             raise ValueError("project-scope key without a project")
-        need = {"move": ("parked_at", "origin"), "remove_backup": ("backup", "project")}
+        need = {"move": ("parked_at", "origin"),
+                "remove_backup": ("backup", "project") if digest else ("backup",)}
         if why := _entry_reason(entry, table, key, need.get(mech, ())):
             raise ValueError(f"refused: {why}")
-        if mech == "remove_backup" and Path(entry["backup"]) != _project_backup_path(
-                parse_key(key)[1], entry["harness"], entry["name"]):
-            raise ValueError("refused: backup is not the one declared for this server")
+        if mech == "remove_backup":
+            # the config file comes from the table (h.mcp.file), never the entry
+            if entry["backend"] != "project-json":
+                h = table[entry["harness"]]
+                mcp_file, bp = h.mcp.file, _json_backup_path(entry["harness"], entry["name"])
+                if entry["backend"] == "json" and h.mcp.file.name not in h.editable:
+                    raise ValueError(f"refused: {h.mcp.file.name} is not an editable "
+                                     f"{h.name} file")
+            else:
+                mcp_file = Path(entry["project"]) / ".mcp.json"
+                bp = _project_backup_path(digest, entry["harness"], entry["name"])
+            if Path(entry["backup"]) != bp:
+                raise ValueError("refused: backup is not the one declared for this server")
         own = fs.companion_dir() / key.replace(":", "_")    # what park_companions uses
         if any(not fs.contained(Path(c["to"]), own) for c in entry.get("companions") or []):
             raise ValueError(f"refused: a companion outside {own}")
@@ -509,12 +525,29 @@ def settle(state: dict, key: str, out: Result | None = None, *,
             return _report(out, dry_run, "stuck",
                            f"{what}: {e}; fix: make sure {'.'.join(ptr)} is "
                            f"{json.dumps(was)} in {file} (its value before the run)")
-    elif mech == "remove_backup":         # project .mcp.json: is the server in the file?
+    elif mech == "native_cli":            # the CLI is the op: ask it, never assume
         try:
-            servers = read_project_mcp(Path(entry["project"]) / ".mcp.json")[1]["mcpServers"]
-        except ProjectMcpError as e:
-            return _report(out, dry_run, "stuck", f"{what}: {e}; {fix}")
-        landed = (entry["name"] in servers) == (action == "enable")
+            on = _plugin_enabled(entry["name"])
+        except ValueError as e:
+            return _report(out, dry_run, "stuck",
+                           f"{what}: cannot tell whether it landed: {e}; fix: run `claude "
+                           f"plugin list` and {action} {entry['name']} by hand if needed, "
+                           f"then delete {json.dumps(key)} under \"pending\" in {fs.state_file()}")
+        # unlisted (uninstalled): neither op can have landed; an enable keeps its record
+        landed = on is not None and on == (action == "enable")
+    elif mech == "remove_backup":         # the MCP config file: is the server in it?
+        try:
+            present = _mcp_present(entry, mcp_file)
+        except (ProjectMcpError, OSError, ValueError, RecursionError) as e:
+            return _report(out, dry_run, "stuck", f"{what}: cannot read {mcp_file}: {e}; {fix}")
+        landed = present == (action == "enable")
+        if landed and action == "disable" and _backup_entry(entry) is None:
+            # recording it would leave a disabled server with no way back
+            return _report(out, dry_run, "stuck",
+                           f"{what}: {entry['name']} is gone from {mcp_file} but its backup "
+                           f"{entry['backup']} is missing or unreadable; fix: put "
+                           f"mcpServers.{entry['name']} back in {mcp_file} by hand, then "
+                           f"delete {json.dumps(key)} under \"pending\" in {fs.state_file()}")
     else:
         parked, origin = Path(entry["parked_at"]), Path(entry["origin"])
         src, dst = (origin, parked) if action == "disable" else (parked, origin)
@@ -537,14 +570,14 @@ def settle(state: dict, key: str, out: Result | None = None, *,
     if mech == "move":
         with contextlib.suppress(OSError):    # a stray dot-named copy, never the item
             fs.remove_leftover(fs.move_leftovers(src, dst)[1 if landed else 0])
-    if mech == "remove_backup":
+    if mech in ("remove_backup", "native_cli"):
         if landed and action == "disable":
             state["disabled"][key] = entry
-        elif action == "disable" and key not in state["disabled"]:    # never reached the
-            with contextlib.suppress(OSError):                         # file: backup is moot
-                Path(entry["backup"]).unlink(missing_ok=True)
         elif landed:
             state["disabled"].pop(key, None)
+        elif mech == "remove_backup" and action == "disable" and key not in state["disabled"]:
+            with contextlib.suppress(OSError, ValueError):   # never reached the file: the
+                Path(entry["backup"]).unlink(missing_ok=True)    # backup is moot
     elif landed and action == "disable":   # companions: the ones the killed run moved
         state["disabled"][key] = {**entry, "companions": [
             c for c in entry.get("companions") or [] if _exists(Path(c["to"]))]}
@@ -860,9 +893,11 @@ def _shared_text(verb: str, owner: str, harness: str, others: list[str]) -> str:
 def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                   out: Result | None = None, dry_run: bool = False, *,
                   batch: str = BATCH) -> int:
-    """Claude Code has a native, fully reversible plugin disable -- drive it."""
+    """Claude Code has a native, fully reversible plugin disable -- drive it, under a
+    write-ahead `pending` entry that settle resolves with a live `claude plugin list`."""
     out = out or Result()
-    if "plugin" in harnesses()[harness].flags:
+    table = harnesses()
+    if "plugin" in table[harness].flags:
         return toggle_flag(action, "plugin", names, state, harness, out, dry_run, batch=batch)[0]
     if harness != "claude":
         for name in names:
@@ -886,28 +921,49 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                 fails += fail_row(out, dry_run, harness, "plugin", action, name,
                                "claude CLI not found", batch=batch)
             continue
-        ok, res = run_cli(claude_bin(), ["plugin", action, name])
+        key = f"{harness}:plugin:{name}"
+        exe = claude_bin()
+        entry = state["disabled"].get(key) if action == "enable" else {
+            "mechanism": "native_cli", "harness": harness, "type": "plugin",
+            "name": name, "native": True,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+        # write-ahead only when state changes and settle can check it: no CLI, no entry
+        # to drop, or one settle would refuse -> the op runs as before, unlogged
+        logged = bool(exe and entry) and entry.get("mechanism") == "native_cli" \
+            and not _refusal(entry, table, key, ())
+        if logged:
+            try:
+                _begin(state, key, action, entry)
+            except OSError as e:
+                fails += fail_row(out, dry_run, harness, "plugin", action, name,
+                                  f"state not saved, nothing changed: {e}", batch=batch)
+                continue
+        ok, res = run_cli(exe, ["plugin", action, name])
         if not ok:
+            # a timeout may still have landed: ask the CLI. A plain non-zero exit did not
+            # (and asking would record an already-disabled plugin as ours: no `was` here)
+            if logged and res.startswith("CLI timed out"):     # run_cli's timeout text
+                settle(state, key, out, inline=True)
+            elif logged:
+                end(state, key)
             fails += fail_row(out, dry_run, harness, "plugin", action, name,
                            res.splitlines()[-1] if res else "failed", batch=batch)
             continue
-        key = f"{harness}:plugin:{name}"
         if action == "disable":
-            state["disabled"][key] = {
-                "mechanism": "native_cli", "harness": harness, "type": "plugin",
-                "name": name, "native": True,
-                "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            }
+            state["disabled"][key] = entry
         else:
             state["disabled"].pop(key, None)
             # parked as the bare `foo`, enabled as `foo@mkt`: the same plugin when it is the
             # only listed id for that name (cost.inventory's rule); ambiguous stays separate.
-            # ponytail: no write-ahead entry -- plugins have none (the CLI is the op), a kill
-            # before the per-item save leaves the stale bare entry; `enable foo` clears it.
+            # ponytail: outside the write-ahead entry (it is keyed `foo@mkt`): a kill before
+            # the next save leaves the stale bare entry; `enable foo` clears it.
             bare = name.partition("@")[0]
             if "@" in name and f"{harness}:plugin:{bare}" in state["disabled"] \
                     and full_plugin_id(bare, [p["id"] for p in list_plugins(lambda m: None)]) == name:
                 del state["disabled"][f"{harness}:plugin:{bare}"]
+        if logged:                        # never drop a stuck record this op did not write
+            end(state, key)
         _ok(out, dry_run, harness, "plugin", action, name, f"{action}d")
         log(action, "plugin", name, "ok", harness=harness, batch=batch)
     return fails
@@ -982,7 +1038,7 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     batch=batch)
             continue
 
-        bp = backup_dir / f"{harness}__{name.replace('/', '_')}.json"
+        bp = _json_backup_path(harness, name)
         scope, project = "user", None
 
         if action == "disable":
@@ -1003,17 +1059,10 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     fails += fail(name, hint)
                     continue
                 raw, scope, project = found
-                if dry_run:
-                    if not claude_bin():
-                        fails += fail(name, "claude CLI not found")
-                        continue
-                else:
-                    fs.atomic_write(bp, json.dumps(raw, indent=2, ensure_ascii=False))
-                    ok, res = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
-                                      cwd=project)
-                    if not ok:
-                        fails += fail(name, redact(res, raw)[:100])
-                        continue
+                if dry_run and not claude_bin():
+                    fails += fail(name, "claude CLI not found")
+                    continue
+                saved = json.dumps(raw, indent=2, ensure_ascii=False)
             else:  # toml
                 config = home / "config.toml"
                 # plan first, back up, THEN edit: the block is never only in memory
@@ -1021,24 +1070,41 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                 if block is None:
                     fails += fail(name, f"no [mcp_servers.{name}] in {config}")
                     continue
-                if not dry_run:
-                    fs.atomic_write(bp, json.dumps({"toml": block}, ensure_ascii=False,
-                                                   indent=2))
-                    try:
-                        codex_mcp_remove(config, name)
-                    except fs.WriteError as e:      # config rolled back; drop the backup
-                        bp.unlink(missing_ok=True)
-                        fails += fail(name, str(e))
-                        continue
+                saved = json.dumps({"toml": block}, ensure_ascii=False, indent=2)
 
             where = f" [{scope}{f': {project}' if project else ''}]"
             if not dry_run:
-                state["disabled"][key] = {
+                fs.atomic_write(bp, saved)
+                new = {
                     "mechanism": "remove_backup", "harness": harness, "type": "mcp",
                     "name": name, "backend": backend, "backup": str(bp),
                     "scope": scope, "project": project,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
+                try:
+                    _begin(state, key, "disable", new)
+                except OSError as e:
+                    if key not in state["disabled"]:     # else an older entry still needs it
+                        with contextlib.suppress(OSError):
+                            bp.unlink(missing_ok=True)
+                    fails += fail(name, f"state not saved, nothing changed: {e}")
+                    continue
+                if backend == "claude-json":
+                    ok, res = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
+                                      cwd=project)
+                    err = None if ok else redact(res, raw)[:100]
+                else:
+                    try:
+                        codex_mcp_remove(config, name)
+                        err = None
+                    except fs.WriteError as e:      # config rolled back
+                        err = str(e)
+                if err is not None:     # settled from the file: untouched -> backup dropped
+                    settle(state, key, out, inline=True)
+                    fails += fail(name, err)
+                    continue
+                state["disabled"][key] = new
+                end(state, key)
                 # claude local scope logs its real scope + cwd; undo treats every
                 # scope but `project` (a --project change) as user scope, which is right
                 # for local: the replay finds the user-keyed entry and its own cwd.
@@ -1058,21 +1124,16 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             except (OSError, ValueError) as e:       # unreadable / not UTF-8: this row only
                 fails += fail(name, f"backup {path} is unreadable ({type(e).__name__}: {e})")
                 continue
-            if (entry or {}).get("backend", backend) == "toml":
-                if not dry_run:
-                    try:
-                        block = json.loads(payload)["toml"]
-                        if not isinstance(block, str):
-                            raise TypeError("toml is not text")
-                    except (ValueError, KeyError, TypeError) as e:
-                        fails += fail(name, f"backup {path} is unusable ({type(e).__name__}: {e})")
-                        continue
-                    try:
-                        codex_mcp_add(home / "config.toml", block)
-                    except (fs.WriteError, OSError, ValueError) as e:   # the config, not the backup
-                        fails += fail(name, str(e))
-                        continue
-            else:
+            toml = (entry or {}).get("backend", backend) == "toml"
+            if toml and not dry_run:
+                try:
+                    block = json.loads(payload)["toml"]
+                    if not isinstance(block, str):
+                        raise TypeError("toml is not text")
+                except (ValueError, KeyError, TypeError) as e:
+                    fails += fail(name, f"backup {path} is unusable ({type(e).__name__}: {e})")
+                    continue
+            elif not toml:
                 # Entries parked before scope tracking have neither field;
                 # they were user-scope by construction, so that is the default.
                 scope = (entry or {}).get("scope") or "user"
@@ -1081,19 +1142,39 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     fails += fail(name, f"project {project} is gone -- "
                                         f"re-add it by hand from {path}")
                     continue
-                if dry_run:
-                    if not claude_bin():
-                        fails += fail(name, "claude CLI not found")
+                if dry_run and not claude_bin():
+                    fails += fail(name, "claude CLI not found")
+                    continue
+            if not dry_run:
+                # write-ahead only for an entry settle can check: no entry changes no
+                # state, and a legacy backup path or backend-less entry would be refused
+                logged = entry is not None and path == bp and entry.get("backend") == backend \
+                    and entry.get("mechanism") == "remove_backup"
+                if logged:
+                    try:
+                        _begin(state, key, "enable", entry)
+                    except OSError as e:
+                        fails += fail(name, f"state not saved, nothing changed: {e}")
                         continue
+                if toml:
+                    try:
+                        codex_mcp_add(home / "config.toml", block)
+                        err = None
+                    except (fs.WriteError, OSError, ValueError) as e:   # the config, not the backup
+                        err = str(e)
                 else:
                     ok, res = run_cli(claude_bin(),
                                       ["mcp", "add-json", "--scope", scope, name, payload],
                                       cwd=project)
-                    if not ok:
-                        fails += fail(name, redact(res, payload)[:120])
-                        continue
-            if not dry_run:
+                    err = None if ok else redact(res, payload)[:120]
+                if err is not None:
+                    if logged:
+                        settle(state, key, out, inline=True)
+                    fails += fail(name, err)
+                    continue
                 state["disabled"].pop(key, None)
+                if logged:                # never drop a stuck record this op did not write
+                    end(state, key)
                 log(action, "mcp", name, "ok", harness=harness, batch=batch,
                     project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
@@ -1213,6 +1294,66 @@ def _project_backup_path(digest: str, harness: str, name: str) -> Path:
     return fs.backup_dir() / f"{digest}__{harness}__{name.replace('/', '_')}.json"
 
 
+def _json_backup_path(harness: str, name: str) -> Path:
+    return fs.backup_dir() / f"{harness}__{name.replace('/', '_')}.json"
+
+
+def _backup_entry(entry: dict) -> dict | None:
+    """What a remove_backup backup holds for enable to put back (any backend, either
+    project form), or None when the backup is missing, unreadable or malformed. The
+    caller has checked the backup path."""
+    try:
+        data = json.loads(Path(entry["backup"]).read_text(encoding="utf-8"))
+        if entry["backend"] == "claude-json":       # the raw config `claude mcp add-json` takes
+            return data if isinstance(data, dict) else None
+        if entry["backend"] == "toml":
+            return data if isinstance(data["toml"], str) else None
+        payload = data["json" if entry["backend"] == "json" else "project_json"]
+        ok = isinstance(payload["entry"], dict) and _project_backup_ok(payload, entry["name"])
+        return payload["entry"] if ok else None   # enable re-checks an old form's `before`
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        return None
+
+
+def _mcp_present(entry: dict, file: Path) -> bool:
+    """Whether the live config `file` holds the entry's server, read strictly: an
+    unreadable or malformed file raises (OSError / ValueError / ProjectMcpError), it
+    never reads as "absent". claude-json is what `claude mcp remove|add-json` write."""
+    name = entry["name"]
+    if entry["backend"] == "toml":
+        return toml_block(file.read_bytes().decode("utf-8"), name) is not None
+    if entry["backend"] != "claude-json":
+        return name in read_project_mcp(file)[1]["mcpServers"]
+    box = json.loads(file.read_text(encoding="utf-8"))
+    if isinstance(box, dict) and entry.get("scope") == "local":
+        box = box.get("projects", {})
+        box = box.get(entry["project"], {}) if isinstance(box, dict) else None
+    servers = box.get("mcpServers", {}) if isinstance(box, dict) else None
+    if not isinstance(servers, dict):
+        raise ValueError("not the expected JSON object shape")
+    return name in servers
+
+
+def _plugin_enabled(name: str) -> bool | None:
+    """Whether `claude plugin list --json` shows plugin `name` enabled (None: not listed;
+    a bare name matches its one `name@marketplace` id). ValueError when the CLI cannot
+    say -- absent, slow (READ_TIMEOUT / AGENT_TOGGLE_CLI_TIMEOUT), failing, unparseable
+    or ambiguous: the verdict is then stuck, never guessed."""
+    if not claude_bin():
+        raise ValueError("claude CLI not found")
+    why: list[str] = []
+    listed = list_plugins(why.append)
+    if why:      # its "; plugin rows come from state only" tail is list's, not ours
+        raise ValueError(why[0].rpartition("; ")[0])
+    hits = [p for p in listed
+            if p["id"] == name or ("@" not in name and p["id"].partition("@")[0] == name)]
+    states = {p.get("enabled") for p in hits}
+    if len({p["id"] for p in hits}) > 1 or len(states) > 1 \
+            or not all(isinstance(s, bool) for s in states):
+        raise ValueError(f"the listing does not say plainly whether {name} is enabled")
+    return states.pop() if states else None
+
+
 def _project_backup_ok(payload: dict, name: str) -> bool:
     """A project backup's fields have the right types: the per-entry form (G15) or
     the old whole-file `before` / `after` form, which still restores."""
@@ -1228,11 +1369,13 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
     """User-scope strict-JSON MCP file (backend `json`, e.g. copilot mcp-config.json).
 
     Same direct, verified edit as toggle_project_mcp (fs.checked_write, rolled back on
-    failure, NO claude CLI call), but the file comes from the harness TABLE
+    failure, NO claude CLI call, under a write-ahead `pending` entry that settle
+    resolves from the file and the backup), but the file comes from the harness TABLE
     (h.mcp.file, which must be in h.editable), never from the state entry. The backup
-    `<harness>__<name>.json` (0600) holds the raw entry plus the exact before/after
-    text; enable restores the pre-disable bytes when the file is unchanged since, else
-    merges the entry in. A JSONC / symlinked / oversized file is refused untouched."""
+    `<harness>__<name>.json` (0600) holds only the cut entry (project_mcp_backup, G15),
+    never another server's bytes; enable puts it back into the current file. An old
+    backup holding the whole before/after text still restores as it did. A JSONC /
+    symlinked / oversized file is refused untouched."""
     h = table[harness]
     file = h.mcp.file
     fails = 0
@@ -1248,7 +1391,7 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
             continue
         key = make_key(harness, "mcp", name)
         entry = state["disabled"].get(key)
-        bp = fs.backup_dir() / f"{harness}__{name.replace('/', '_')}.json"
+        bp = _json_backup_path(harness, name)
         if action == "disable":
             try:
                 raw, before, after = project_mcp_remove(file, name)
@@ -1260,22 +1403,30 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
                 continue
             if not dry_run:
                 fs.private_dir(fs.backup_dir())
-                fs.atomic_write(bp, json.dumps(
-                    {"json": {"entry": raw, "before": before, "after": after}},
-                    ensure_ascii=False, indent=2))
-                try:
-                    write_project_mcp(file, after, before)
-                except fs.WriteError as e:          # file rolled back; drop the backup
-                    if "restore failed" not in str(e):   # else it holds the only good copy
-                        bp.unlink(missing_ok=True)
-                    fails += fail(name, str(e))
-                    continue
-                state["disabled"][key] = {
+                fs.atomic_write(bp, json.dumps({"json": project_mcp_backup(before, name)},
+                                               ensure_ascii=False, indent=2))
+                new = {
                     "mechanism": "remove_backup", "harness": harness, "type": "mcp",
                     "name": name, "backend": "json", "backup": str(bp),
                     "scope": "user", "project": None,
                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 }
+                try:
+                    _begin(state, key, "disable", new)
+                except OSError as e:
+                    if key not in state["disabled"]:     # else an older entry still needs it
+                        with contextlib.suppress(OSError):
+                            bp.unlink(missing_ok=True)
+                    fails += fail(name, f"state not saved, nothing changed: {e}")
+                    continue
+                try:
+                    write_project_mcp(file, after, before, name, raw)
+                except fs.WriteError as e:   # settled from disk: rolled back -> backup dropped
+                    settle(state, key, out, inline=True)
+                    fails += fail(name, str(e))
+                    continue
+                state["disabled"][key] = new
+                end(state, key)
                 log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch,
                     project=None, scope="user")
             _ok(out, dry_run, harness, "mcp", action, name,
@@ -1296,15 +1447,16 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
             continue
         try:
             payload = json.loads(bp.read_text(encoding="utf-8"))["json"]
-            if not (isinstance(payload["entry"], dict) and isinstance(payload["before"], str)
-                    and isinstance(payload["after"], str)):
+            if not (isinstance(payload["entry"], dict) and _project_backup_ok(payload, name)):
                 raise TypeError("bad field")
-            # `before` is written back verbatim when the file is unchanged: it must be
-            # exactly the strict-JSON config this server was removed from
-            servers = json.loads(payload["before"], object_pairs_hook=_no_dup,
-                                 parse_constant=_not_json, parse_float=_finite)["mcpServers"]
-            if servers[name] != payload["entry"]:
-                raise ValueError("before does not hold the entry")
+            if "cut" not in payload:
+                # old form: `before` is written back verbatim when the file is unchanged,
+                # so it must be exactly the strict-JSON config this server was removed from
+                servers = json.loads(payload["before"], object_pairs_hook=_no_dup,
+                                     parse_constant=_not_json,
+                                     parse_float=_finite)["mcpServers"]
+                if servers[name] != payload["entry"]:
+                    raise ValueError("before does not hold the entry")
         except OSError:
             fails += fail(name, f"backup missing at {bp}")
             continue
@@ -1313,8 +1465,6 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
             continue
         try:
             current, text = project_mcp_restore(file, name, payload)
-            if not dry_run:
-                write_project_mcp(file, text, current)
         except ProjectMcpError as e:
             msg = str(e)
             if "backup stays in state" not in msg:      # file / mcpServers key vanished
@@ -1322,11 +1472,20 @@ def toggle_json_mcp(action: str, names: list[str], state: dict, harness: str,
                         f"the backup stays in state")
             fails += fail(name, msg)
             continue
-        except fs.WriteError as e:
-            fails += fail(name, str(e))
-            continue
         if not dry_run:
+            try:
+                _begin(state, key, "enable", entry)
+            except OSError as e:
+                fails += fail(name, f"state not saved, nothing changed: {e}")
+                continue
+            try:
+                write_project_mcp(file, text, current, name, payload["entry"])
+            except fs.WriteError as e:
+                settle(state, key, out, inline=True)
+                fails += fail(name, str(e))
+                continue
             state["disabled"].pop(key, None)
+            end(state, key)
             log(action, "mcp", name, "ok", harness=harness, batch=batch, project=None,
                 scope="user")
         _ok(out, dry_run, harness, "mcp", action, name,

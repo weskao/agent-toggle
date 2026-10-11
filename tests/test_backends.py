@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from unittest import mock
 
 from base import SandboxCase
 from test_cli_surface import CliCase, snapshot
@@ -232,7 +233,8 @@ class CopilotMcpTest(CliCase):
         self.assertEqual(entry["backup"], str(self.bp))
         payload = json.loads(self.bp.read_text(encoding="utf-8"))["json"]
         self.assertEqual(payload["entry"]["headers"], {"Authorization": "Bearer test-token-000"})
-        self.assertEqual(payload["before"], before.decode("utf-8"))
+        self.assertEqual(set(payload), {"name", "entry", "cut", "prev", "next"})   # G15
+        self.assertNotIn('"command": "other"', payload["cut"])         # no other server's body
         self.assertNotIn("example-mcp", self.cfg.read_text(encoding="utf-8"))
         self.assertIn("other-mcp", self.cfg.read_text(encoding="utf-8"))
         if os.name == "posix":
@@ -359,10 +361,15 @@ class CopilotMcpTest(CliCase):
         self.disable()
         after = self.cfg.read_bytes()
         good = json.loads(self.bp.read_text(encoding="utf-8"))["json"]
-        for bad in ({"entry": []}, {"entry": "x"}, {"before": 1}, {"before": None},
-                    {"after": 1}, {"after": ["a"]}):
+        old = {"entry": good["entry"], "before": "{}", "after": "{}"}     # old whole-file form
+        for bad in ({"entry": []}, {"entry": "x"}, {"cut": 1}, {"prev": 1}, {"next": 2},
+                    {"name": "other-mcp"}, {"cut": None}):
             with self.subTest(bad=bad):
                 self.bp.write_text(json.dumps({"json": {**good, **bad}}), encoding="utf-8")
+                self.assert_refused(self.enable(), "is not a copilot mcp backup", after)
+        for bad in ({"before": 1}, {"before": None}, {"after": 1}, {"after": ["a"]}):
+            with self.subTest(bad=bad):
+                self.bp.write_text(json.dumps({"json": {**old, **bad}}), encoding="utf-8")
                 self.assert_refused(self.enable(), "is not a copilot mcp backup", after)
         for raw in ('{"json": []}', '{"other": {}}', "[]", "not json"):
             with self.subTest(raw=raw):
@@ -379,9 +386,13 @@ class CopilotMcpTest(CliCase):
         self.assert_refused(self.enable(), "refused", after)
 
     def test_a_tampered_before_text_is_refused_and_the_file_stays(self) -> None:
-        self.disable()
+        """An old whole-file backup (before / after) is still validated before it is used."""
+        orig = self.disable().decode("utf-8")
         after = self.cfg.read_bytes()
-        good = json.loads(self.bp.read_text(encoding="utf-8"))["json"]
+        good = {"entry": json.loads(self.bp.read_text(encoding="utf-8"))["json"]["entry"],
+                "before": orig, "after": after.decode("utf-8")}
+        self.bp.write_text(json.dumps({"json": good}), encoding="utf-8")
+        self.assertEqual(self.enable("--dry-run")[0], 0)         # untampered old form restores
         evil = good["before"].replace("example.invalid", "evil.invalid")
         ent = json.dumps(good["entry"])
         dup = '{"mcpServers": {"example-mcp": %s, "example-mcp": %s}}' % (ent, ent)
@@ -645,6 +656,13 @@ class CliTimeoutTest(SandboxCase):
         plugin_cli.run_cli("bin", ["plugin", "enable", "x"])
         plugin_cli.run_cli("bin", ["plugin", "list"], timeout=30)
         self.assertEqual(self.seen, [7.5, 7.5])
+
+    def test_list_plugins_passes_the_read_timeout_and_env_overrides_it(self) -> None:
+        with mock.patch.object(plugin_cli, "claude_bin", return_value="bin"):
+            plugin_cli.list_plugins(lambda _msg: None)
+            os.environ[plugin_cli.TIMEOUT_ENV] = "7.5"
+            plugin_cli.list_plugins(lambda _msg: None)
+        self.assertEqual(self.seen, [plugin_cli.READ_TIMEOUT, 7.5])
 
     def test_invalid_env_is_ignored_with_a_warning(self) -> None:
         for bad in ("abc", "0", "-5", "nan", "inf", ""):

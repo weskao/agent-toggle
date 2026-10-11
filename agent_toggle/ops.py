@@ -94,10 +94,11 @@ def apply_plan(plan: list[Op], out: Result, dry_run: bool = False, *,
 
     A real run takes ONE fs.lock() for the whole plan, re-reads state under it,
     first settles what a killed run left in flight (mechanisms.recover), then
-    saves state per item -- a write-ahead entry before each flag write or dir
-    move (store.begin), a checkpoint per mcp/plugin item -- and once more in
-    `finally`, so a kill loses at most the item in flight and that one is
-    recoverable. A dry run plans against a read-only state: no lock, state,
+    saves state per item -- a write-ahead entry before each flag write, dir
+    move, MCP edit (user-scope json, claude-json, toml, project .mcp.json) and
+    claude plugin op (store.begin); only a claude.ai connector toggle has just a
+    checkpoint -- and once more in `finally`, so a kill loses at most the item in
+    flight and that one is recoverable. A dry run plans against a read-only state: no lock, state,
     log or backup write. A caller that already holds the lock passes `state`.
     """
     if state is not None:

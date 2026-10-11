@@ -59,8 +59,8 @@ def run_cli(binary: str | None, args: list[str], cwd: str | None = None,
         return False, "CLI not found on PATH"
     limit = _timeout(timeout)
     try:
-        p = runner([binary, *args], capture_output=True, text=True,
-                   timeout=limit, cwd=cwd)
+        p = runner([binary, *args], capture_output=True, text=True, encoding="utf-8",
+                   errors="replace", timeout=limit, cwd=cwd)     # Windows: not cp1252
     except subprocess.TimeoutExpired:
         return False, f"CLI timed out after {limit:g}s (raise it with {TIMEOUT_ENV}=<seconds>)"
     except OSError as e:                     # cwd gone, binary unexecutable
@@ -79,7 +79,8 @@ def list_plugins(warn: Callable[[str], None]) -> list[dict]:
     except ValueError:
         data = None
     if not isinstance(data, list):
-        warn("could not read `claude plugin list --json`; plugin rows come from state only")
+        why = f" ({text.splitlines()[-1][:120]})" if not ok and text else ""   # e.g. a timeout
+        warn(f"could not read `claude plugin list --json`{why}; plugin rows come from state only")
         return []
     return [p for p in data if isinstance(p, dict) and isinstance(p.get("id"), str)]
 
