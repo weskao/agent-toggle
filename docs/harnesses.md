@@ -27,7 +27,7 @@ nothing to check.
 | copilot | 1.0.90 | `copilot --version` |
 | vibe | 2.25.8 | `vibe --version` |
 | devin | unverified | `devin --version` did not return within 10 s; the row has nothing to check |
-| agy | unverified | CLI reports 1.2.15, but the row declares no layout (`types=()`), so there is nothing for `doctor` to confirm |
+| agy | 1.3.3 | `agy --version` |
 
 Last full pass: 2026-10-03, macOS, `doctor` reported `ok` ("layout matches the
 table row") for every harness above except as noted. To refresh, run
@@ -51,11 +51,11 @@ A dash means the harness has no such resource this tool can toggle.
 | copilot | `~/.copilot` | `skills/` — move | `agents/` — move | — | — | — | remove-with-backup |
 | vibe | `~/.vibe` | `skills/` — move | — | — | — | — | — |
 | devin | `~/.devin` | — | — | — | — | — | — (resources are cloud-side) |
-| agy | `~/.antigravity` | — | — | — | — | — | — (layout not yet surveyed) |
+| agy | `~/.gemini/config` | `skills/` — move | — | — | — (`GEMINI.md` / `AGENTS.md` are per-directory files) | — | remove-with-backup |
 
 Linux and Windows homes follow each harness's documentation and are not yet
-checked against real installs there (DESIGN §11 q4). opencode is the only home
-that differs from `~/.<name>`.
+checked against real installs there (DESIGN §11 q4). opencode and agy
+(`~/.gemini/config`) are the only homes that differ from `~/.<name>`.
 
 ## MCP configuration
 
@@ -67,10 +67,11 @@ that differs from `~/.<name>`.
 | opencode | `<home>/opencode.json` | `mcp.<name>.enabled` (flag, no removal) | flag, strict JSON only |
 | openclaw | `~/.openclaw/state/openclaw.sqlite` | not togglable | refused |
 | copilot | `~/.copilot/mcp-config.json` | `mcpServers` | `json` |
-| vibe, devin, agy | none the tool handles | | |
+| agy | `~/.gemini/config/mcp_config.json` | `mcpServers` | `json` |
+| vibe, devin | none the tool handles | | |
 
 Files the tool may write are limited to the row's `editable` set
-(`opencode.json`, `openclaw.json`, `mcp-config.json`) plus the MCP config files
+(`opencode.json`, `openclaw.json`, `mcp-config.json`, `mcp_config.json`) plus the MCP config files
 above. Copilot's `config.json` is machine-managed JSONC and is never edited or
 listed.
 
@@ -84,5 +85,5 @@ listed.
 | opencode `skills.paths` | A list in `opencode.json`; observed on a real install. The scanned-dir set and relative-entry rule (session cwd, not the config dir) were probed on 2.0.22 (DESIGN §11 q2). `opencode.json` over `opencode.jsonc` precedence is an assumption. |
 | openclaw `skills.entries.<name>.enabled`, `plugins.entries.<name>.enabled` | Shape observed (boolean `enabled` per entry; some plugin entries carry only `config` and no `enabled`, which the tool treats as not flaggable) at the version above. `openclaw.json` parsed as strict JSON. |
 | copilot `installed-plugins/` entry format | Unknown: the directory was empty on the surveyed machine, so plugins stay unsupported. |
-| agy skills/command layout | Unknown: not observed (DESIGN §11 q1). |
+| agy `~/.gemini/config/` layout | Confirmed on 1.3.3: the CLI's bundled `agy-customizations` docs name `~/.gemini/config/` as the global root (`skills/<name>/SKILL.md`, `mcp_config.json`), and `agy mcp disable` was probed in a throwaway HOME. agy's own `disabled: true` MCP flag and its `plugins/` (`config.json -> plugins.<dir>.enabled`) are not driven by this tool yet. |
 | Windows and Linux harness homes | Assumed from documentation. |

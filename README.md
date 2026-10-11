@@ -491,7 +491,7 @@ logo, centred, when the window is tall enough to fit the whole menu beside it; t
 | copilot | `~/.copilot` | ✓ | ✓ | — | — | — | ✓ `mcp-config.json` |
 | vibe | `~/.vibe` | ✓ | — | — | — | — | — |
 | devin | `~/.devin` | — | — | — | — | — | — |
-| agy | `~/.antigravity` | — | — | — | — | — | — |
+| agy | `~/.gemini/config` | ✓ | — | — | — | — | ✓ `mcp_config.json` |
 
 Per-harness locations, mechanisms and the harness versions this was checked
 against are in [docs/harnesses.md](docs/harnesses.md).

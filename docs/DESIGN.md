@@ -50,7 +50,7 @@ first push.
 
 | area | state |
 |---|---|
-| harnesses | claude, codex, grok, opencode, openclaw, copilot, vibe, devin (explicit not applicable), agy (table row only) — one `Harness` record each in `harnesses.py` |
+| harnesses | claude, codex, grok, opencode, openclaw, copilot, vibe, devin (explicit not applicable), agy (skills, mcp) — one `Harness` record each in `harnesses.py` |
 | types | skill, agent, command, rule (move to `~/.agent-toggle/parked/user/<owner>/<dir>/`, never inside a harness home), plugin (claude CLI only), mcp (remove + verbatim backup) |
 | safety | `safe_move()` guards the rename trap; companion files parked only when exclusive; parks are central, so a harness home is never written into except for the shim (the park dir is checked for gitignore only when it sits in a git work tree); symlinks and broken links handled; `0600` state/backups, lock per batch |
 | state | `~/.agent-toggle/state.json` (schema v3, atomic write), `log.jsonl`, `mcp-backups/`, `companions/`, `lock` |
@@ -812,7 +812,13 @@ Known gaps found at the final verification (not fixed; each has a stated ceiling
 
 ## 11. Open questions (need a real install to answer)
 
-1. Agy skill/command layout — not present on the surveyed machine.
+1. Agy skill/command layout — not present on the surveyed machine. Answered on
+   agy 1.3.3 (the CLI's bundled `agy-customizations` docs, a real install, and
+   `agy mcp disable` probed in a throwaway HOME): the global root is
+   `~/.gemini/config/`, with `skills/<name>/SKILL.md` and a strict-JSON
+   `mcp_config.json -> mcpServers` (agy's own disable writes `disabled: true`;
+   this tool uses remove-with-backup, like copilot). Plugins
+   (`config.json -> plugins.<dir>.enabled`) are left unsupported.
 2. Whether OpenCode's `skills.paths` default (when unset) is its own
    `~/.config/opencode/skills` — determines the fixture for a non-aliased
    install. Answered on opencode 2.0.22 (probed in a throwaway HOME / `XDG_*`
