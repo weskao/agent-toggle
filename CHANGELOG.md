@@ -1,3 +1,14 @@
+## [0.13.1] - 2026-10-13
+
+### 🐛 Bug Fixes
+
+- **mechanisms:** Clear per-project mcp disable on enable
+- **mechanisms:** Clear project mcp disable mark on enable
+- **mechanisms:** Pin plugin toggle to the install's scope
+
+### 📚 Documentation
+
+- Add toggle-paths reference for per-type disk changes
 ## [0.13.0] - 2026-10-11
 
 ### 🚀 Features
