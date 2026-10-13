@@ -58,11 +58,12 @@ def claudeai_connector_names() -> set[str]:
     return set(cfg.get("claudeAiMcpEverConnected", []) or [])
 
 
-def toggle_claudeai_connector(action: str, name: str,
-                              dry_run: bool = False) -> tuple[bool, list | str]:
+def toggle_claudeai_connector(action: str, name: str, dry_run: bool = False,
+                              under: Path | None = None) -> tuple[bool, list | str]:
     """Fan a claude.ai connector on/off across every EXISTING project entry
     in ~/.claude.json's disabledMcpServers list -- the only place /mcp writes
-    that state; no `claude mcp` CLI verb reaches it.
+    that state; no `claude mcp` CLI verb reaches it. `under`: only the project
+    entries that are that dir or inside it.
 
     ponytail: covers projects that exist now; a project dir opened for the
     first time later starts without the entry until this is re-run for it.
@@ -75,7 +76,8 @@ def toggle_claudeai_connector(action: str, name: str,
 
     touched = []
     for proj, pdata in cfg.get("projects", {}).items():
-        if not isinstance(pdata, dict):
+        if not isinstance(pdata, dict) or (
+                under is not None and under != Path(proj) and under not in Path(proj).parents):
             continue
         cur = pdata.get("disabledMcpServers") or []
         has = name in cur

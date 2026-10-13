@@ -442,6 +442,23 @@ class ProjectMcpTest(ProjectCase):
         self.assertIn("symlink", env["results"][0]["detail"])
         self.assertEqual(target.read_text(encoding="utf-8"), self.text)
 
+    def test_enable_clears_this_projects_mcp_disable_mark_only(self) -> None:
+        """A session's `/mcp disable example-mcp` (the mod queues it) lists it in that
+        project's disabledMcpServers; enable clears it there, never in another repo."""
+        self.assertEqual(self.p("disable", "mcp", "example-mcp")[0], 0)
+        root = self.proj.resolve()
+        self.claude_json({"projects": {
+            str(root): {"disabledMcpServers": ["example-mcp", "keep-mcp"]},
+            str(root / "sub"): {"disabledMcpServers": ["example-mcp"]},
+            str(self.tmp / "work" / "other"): {"disabledMcpServers": ["example-mcp"]},
+        }})
+        self.assertEqual(self.p("enable", "mcp", "example-mcp")[0], 0)
+        projects = json.loads(fs.claude_json().read_text(encoding="utf-8"))["projects"]
+        self.assertEqual({k: v["disabledMcpServers"] for k, v in projects.items()}, {
+            str(root): ["keep-mcp"], str(root / "sub"): [],
+            str(self.tmp / "work" / "other"): ["example-mcp"]})
+        self.assertEqual(self.cli_calls, [])
+
     def test_user_scope_mcp_state_is_never_touched(self) -> None:
         self.claude_json({"mcpServers": {"example-mcp": {"url": "https://user.example.com"}}})
         self.cli_rc = 0

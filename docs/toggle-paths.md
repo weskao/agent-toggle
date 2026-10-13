@@ -22,7 +22,7 @@ example `claude:skill:demo-skill`). It also appends a row to
 | MCP (codex, grok) | remove with backup | the `[mcp_servers.<name>]` text block saved, then cut from `config.toml` | the block is appended back to `config.toml` |
 | MCP (copilot, agy) | remove with backup | the entry is saved, then cut from the JSON config | the entry is put back |
 | MCP (opencode) | flag | `mcp.<name>.enabled` → `false` in `opencode.json` | the flag's previous value is written back |
-| MCP (project `.mcp.json`) | direct JSON edit, `--project` only | only that server's entry is cut; every other byte stays | the entry goes back after its old neighbour; an unchanged file comes back byte for byte |
+| MCP (project `.mcp.json`) | direct JSON edit, `--project` only | only that server's entry is cut; every other byte stays | the entry goes back after its old neighbour; an unchanged file comes back byte for byte; the name leaves that project's `disabledMcpServers` |
 | MCP (claude.ai connector) | flag | the name is added to `disabledMcpServers` in every existing project of `~/.claude.json` | the name is removed again; a project first opened later needs a re-run |
 
 ## Moved items: skill, agent, command, rule
@@ -103,7 +103,9 @@ in `~/.agent-toggle/mcp-backups/`.
   from every project's `disabledMcpServers` in `~/.claude.json`, where the
   mod's `/mcp disable example-mcp` would otherwise keep it off.
 - **codex and grok:** append the saved block to the end of `config.toml`.
-- **copilot, agy and project `.mcp.json`:** put the entry back.
+- **copilot, agy and project `.mcp.json`:** put the entry back. For a project
+  `.mcp.json`, the name also leaves `disabledMcpServers` for that project and the
+  dirs inside it (`projects["/home/u/work/repo"]`), never for another repo.
 - **opencode:** writes the old flag value back.
 - **connectors:** remove the name from `disabledMcpServers`.
 

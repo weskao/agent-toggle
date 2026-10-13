@@ -592,6 +592,11 @@ visible rather than silent.
 MCP changes need a **new session** to take effect, except in a Claude Code session running the
 agent-toggle mod, which runs `/mcp disable|enable <name>` for you (see the mod section).
 
+`/mcp disable <name>` also lists the server in that project's `disabledMcpServers` in
+`~/.claude.json`. Left there, a restored server would stay off in that project, so `enable`
+removes the name again: from every project for a user- or local-scope server, and only from
+that repo and the dirs inside it for a `--project` `.mcp.json` server.
+
 ### Claude MCP scopes
 
 Both scopes stored in `~/.claude.json` are togglable, and the scope round-trips:
@@ -970,6 +975,9 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `/reload-plugins`, an MCP server `/mcp disable|enable <name>`. The toast names it, e.g.
   `⛔ [DISABLED] skill: foo (/reload-skills)`. Agents and rules have no reload and still say
   `takes effect in a new session`. If Claude refuses a queued command, a toast says so.
+  `/reload-skills` and `/reload-plugins` only re-read what is on disk. `/mcp disable` also
+  leaves the per-project mark that `enable` clears (see
+  [MCP backups are verbatim](#mcp-backups-are-verbatim)).
 - `agent-toggle ui` in another terminal applies on Enter and writes the Claude rows it changed to
   `~/.agent-toggle/reload.json`. Every open session running the mod checks that file's mtime every
   5 s (one `stat`) and queues the same reloads, toasting `agent-toggle ui: /reload-skills`. A file

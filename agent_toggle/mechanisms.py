@@ -1176,17 +1176,21 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                 if logged:                # never drop a stuck record this op did not write
                     end(state, key)
                 if not toml:
-                    # the mod's `/mcp disable` listed it in a project's disabledMcpServers;
-                    # left there, the restored server stays off in that project
-                    cleared, res = toggle_claudeai_connector("enable", name)
-                    if not cleared:
-                        out.say(f"    ! {name}: per-project /mcp disable not cleared: {res}",
-                                warn=True)
+                    _clear_mcp_marks(out, name)
                 log(action, "mcp", name, "ok", harness=harness, batch=batch,
                     project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
                 "restored (open a NEW session for it to load)", backup=str(path))
     return fails
+
+
+def _clear_mcp_marks(out: Result, name: str, under: Path | None = None) -> None:
+    """After a claude MCP enable: drop `name` from projects' disabledMcpServers (`under`:
+    only that project's). The mod follows a disable with `/mcp disable <name>`, which
+    lists it there; left in place, the restored server stays off in that project."""
+    cleared, res = toggle_claudeai_connector("enable", name, under=under)
+    if not cleared:
+        out.say(f"    ! {name}: per-project /mcp disable not cleared: {res}", warn=True)
 
 
 def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
@@ -1289,6 +1293,7 @@ def toggle_project_mcp(action: str, names: list[str], state: dict, harness: str,
                 continue
             state["disabled"].pop(key, None)
             end(state, key)
+            _clear_mcp_marks(out, name, Path(pstr))
             log(action, "mcp", name, "ok", harness=harness, batch=batch, project=pstr,
                 scope="project")
         _ok(out, dry_run, harness, "mcp", action, name,

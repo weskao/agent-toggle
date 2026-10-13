@@ -767,6 +767,12 @@ Known gaps added by phase 2 (`- [x]` fixed or decided, `- [ ]` still open):
   logged `recovered`, not `ok`, so `undo` does not reverse it. After a real kill the
   lock blocks the next run until it is stale (10 min) unless removed by hand; the
   error says so. `run_cli` also decodes output as UTF-8 with `errors="replace"`.
+- [x] Fixed: a disabled MCP server came back off. The mod follows a disable with
+  `/mcp disable <name>`, which lists the server in the session project's
+  `disabledMcpServers`; `enable` only re-added the config, so the server stayed off in
+  that project until it was re-registered by hand. `enable` now drops the name from
+  every project's list (user and local scope) or from that repo and the dirs inside it
+  (`--project`), via the connector helper's `under` filter.
 - [ ] Still checkpoint-only: the `claude.ai` connector toggle (the landed state cannot be
   told from a pre-existing, partial `disabledMcpServers` list; re-running is
   idempotent) and the plugin bare-key cleanup on `enable foo@mkt`. A kill there can

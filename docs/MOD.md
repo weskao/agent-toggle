@@ -80,7 +80,8 @@ ui.message (the Client's post)            # input, not fact
                     row.type, row.name, "--json", "--harness", "claude"])
   └─ needs_new_session → reload(): one $.command.run per kind, deferred a tick:
        skill/command → /reload-skills, plugin → /reload-plugins, mcp → /mcp disable|enable <name>;
-       agent/rule have none ("takes effect in a new session")
+       agent/rule have none ("takes effect in a new session"). /mcp disable also lists the
+       server in the session project's disabledMcpServers; the CLI's enable clears it
   └─ $.ui.toast(ok ? "<state> <type>: <name> (<reload or note>)" : error)
   └─ refresh()
 
