@@ -316,30 +316,31 @@ What is on screen:
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
-| `/` | start a search; any other non-command letter starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` or `mods` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
+| `/` | start a search; any letter or digit starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` or `mods` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
-| `←` `→` | switch harness tab (also while typing a filter); `0` = All, `1`-`9` = that tab, `h` = next tab |
-| `t` | cycle the type filter |
-| `s` | cycle sort: name, cost (biggest first); applies within each type group |
-| `p` | profiles: stage a saved one, or save the live state (see below) |
+| `←` `→` | switch harness tab (also while typing a filter) |
+| `Ctrl-T` | cycle the type filter |
+| `Ctrl-S` | cycle sort: name, cost (biggest first); applies within each type group |
+| `Ctrl-O` | profiles: stage a saved one, or save the live state (see below) |
 | `?` | show the key list |
-| `a` / `Ctrl-A` | toggle every visible row |
-| `n` | toggle every row on this row's harness with the same name, of any type (skill, command, MCP, ...), shown or filtered out; like `disable all <name>` |
+| `Ctrl-A` | toggle every visible row |
+| `Ctrl-E` | toggle every row on this row's harness with the same name, of any type (skill, command, MCP, ...), shown or filtered out; like `disable all <name>` |
 
-The command keys (`t`, `s`, `p`, `h`, `a`, `n`, `0`-`9`, `?`) act only while no filter is active.
-Press `/` first to type a filter that begins with one of them; once the filter is non-empty,
-every letter just types.
+Commands are `Ctrl` chords, so every letter and digit types into the search, and the chords
+work while a filter is active too. `?` and `/` act only while no filter is active. The picker
+reads keys in raw mode, so `Ctrl-S`, `Ctrl-T` and `Ctrl-O` reach it instead of the terminal
+(flow control, `SIGINFO`, discard).
 
 The start view (sort, harness tab, type filter) comes from the `picker_sort`, `picker_harness`
 and `picker_type` [settings](#settings--config-menu). A profile skips harnesses that are hidden
 and counts those items as `hidden by settings`; `ui --harness <name>` shows that harness even
 when it is switched off.
 
-`p` opens a prompt over the list of saved profiles: type a number or name (or
+`Ctrl-O` opens a prompt over the list of saved profiles: type a number or name (or
 `apply <name>`) and Enter to **stage** that profile's changes (only the items it
 mentions; ones this machine lacks are skipped), then Enter in the picker applies
 them like any other change, so `ui --dry-run` previews a profile and a stray
-`p` changes nothing. `save <name>` writes the live state (not your staged changes) as
+`Ctrl-O` changes nothing. `save <name>` writes the live state (not your staged changes) as
 a profile, with the same name rules and project scope as `profile save`; it is
 off under `--dry-run`. Esc closes the prompt.
 
@@ -375,7 +376,7 @@ plugin: it ships skills, commands, agents, MCP servers or hooks and draws nothin
   grep -l modules ~/.claude/plugins/cache/*/*/*/hooks/hooks.json
   ```
 
-- The picker lists mods under **Mods**, right after Plugins. `t` cycles to it, the
+- The picker lists mods under **Mods**, right after Plugins. `Ctrl-T` cycles to it, the
   `picker_type` setting can open on it, and a search for `mod` or `mods` finds every mod.
   The detail pane shows its type as `mod (plugin)`.
 - A mod is still a plugin everywhere else: it toggles through `claude plugin
@@ -957,19 +958,19 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 - The mouse wheel over the list moves the cursor, as in the terminal picker; no click needed.
 - Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
   `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,
-  `Tab` toggles and moves on; `/` or any other letter starts a search (terms ANDed over
+  `Tab` toggles and moves on; `/` or any letter starts a search (terms ANDed over
   `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
-  `s` sorts by name or cost; `n` toggles every type with this row's name (skill, command, MCP,
+  `Ctrl-S` sorts by name or cost; `Ctrl-E` toggles every type with this row's name (skill, command, MCP,
   ...), like `disable all <name>`; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state
   with an emoji and a bracketed tag (no colour codes, so nothing garbles; on the Linux console and the
   legacy Windows console, where emoji draw as boxes, the tag alone): `✅ [ENABLED] skill: foo`, `⛔ [DISABLED] mod: bar (/reload-plugins)`,
-  `⛔ [DISABLED] rule: baz (takes effect in a new session)`, `⛔ [DISABLED] all: foo` after `n`, or `❌ [FAILED] disable skill: foo - <error>`.
+  `⛔ [DISABLED] rule: baz (takes effect in a new session)`, `⛔ [DISABLED] all: foo` after `Ctrl-E`, or `❌ [FAILED] disable skill: foo - <error>`.
   The row flips the moment you press (and flips back
   if the CLI fails); the list reloads in the background. While a toggle runs, further keys are ignored.
 - Opening the pane shows the same braille spinner and `Loading resources…` as `agent-toggle ui`
   until the list arrives, and a spinner beside `working…` while a toggle runs.
-- Not in the pane: harness tabs (claude only), and the `t` `p` `a` keys. Where Claude draws no
+- Not in the pane: harness tabs (claude only), and the `Ctrl-T` `Ctrl-O` `Ctrl-A` keys. Where Claude draws no
   such pane (the mobile app, VS Code) it is a plain list of buttons instead.
 - `/agent-toggle <command> ...` with `disable`, `enable`,
   `undo`, `list`, `status`, `cost` or `doctor` runs the CLI instead of opening the pane and prints
