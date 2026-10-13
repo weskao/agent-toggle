@@ -127,6 +127,30 @@ class ClaudeJsonScopeTest(SandboxCase):
         # scopeless entry restores with no cwd
         self.assertIsNone(cwd)
 
+    def test_mcp_enable_clears_per_project_disabled_mark(self) -> None:
+        """The mod follows a disable with `/mcp disable <name>`, which lists the
+        server in that project's disabledMcpServers; enable must clear it or the
+        restored server stays off in that project."""
+        self.claude_json({"projects": {
+            "/work/a": {"disabledMcpServers": ["example-mcp", "other"]},
+            "/work/b": {"disabledMcpServers": ["other"]},
+        }})
+        fs.backup_dir().mkdir(parents=True)
+        bp = fs.backup_dir() / "claude__example-mcp.json"
+        bp.write_text('{"type": "http", "url": "http://127.0.0.1:1/mcp"}', encoding="utf-8")
+        self.cli_rc = 0
+        state = {"version": 2, "disabled": {"claude:mcp:example-mcp": {
+            "mechanism": "remove_backup", "harness": "claude", "type": "mcp",
+            "name": "example-mcp", "backend": "claude-json", "backup": str(bp),
+            "scope": "user", "project": None, "at": "2026-01-01"}}}
+        fails = mechanisms.toggle_mcp("enable", ["example-mcp"], state, "claude",
+                                      self.home, "claude-json")
+        self.assertEqual(fails, 0)
+        projects = json.loads(fs.claude_json().read_text(encoding="utf-8"))["projects"]
+        # the stale per-project mark is gone; unrelated names stay
+        self.assertEqual(projects["/work/a"]["disabledMcpServers"], ["other"])
+        self.assertEqual(projects["/work/b"]["disabledMcpServers"], ["other"])
+
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

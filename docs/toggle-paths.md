@@ -18,7 +18,7 @@ example `claude:skill:demo-skill`). It also appends a row to
 | skill, agent, command, rule | move | moves the item to `~/.agent-toggle/parked/user/<owner>/<dir>/`, nested path kept; exclusive companion files go to `~/.agent-toggle/companions/` | moves it back to the `origin` in the state entry, restores the companions, removes emptied park dirs |
 | plugin (claude) | native CLI | `claude plugin disable <id>`; nothing moved | `claude plugin enable <id>` |
 | plugin (openclaw) | flag | `plugins.entries.<name>.enabled` → `false` in `openclaw.json` | the flag's previous value is written back |
-| MCP (claude) | remove with backup | raw entry from `~/.claude.json` saved to `mcp-backups/`, then `claude mcp remove -s <scope>` | `claude mcp add-json` with the saved entry; local scope runs in the saved project dir |
+| MCP (claude) | remove with backup | raw entry from `~/.claude.json` saved to `mcp-backups/`, then `claude mcp remove -s <scope>` | `claude mcp add-json` with the saved entry; local scope runs in the saved project dir; the name leaves every project's `disabledMcpServers` |
 | MCP (codex, grok) | remove with backup | the `[mcp_servers.<name>]` text block saved, then cut from `config.toml` | the block is appended back to `config.toml` |
 | MCP (copilot, agy) | remove with backup | the entry is saved, then cut from the JSON config | the entry is put back |
 | MCP (opencode) | flag | `mcp.<name>.enabled` → `false` in `opencode.json` | the flag's previous value is written back |
@@ -99,7 +99,9 @@ in `~/.agent-toggle/mcp-backups/`.
 **Enable** depends on the server:
 
 - **claude:** runs `claude mcp add-json -s <scope> example-mcp '<saved entry>'`.
-  Local scope runs it back in the saved project dir.
+  Local scope runs it back in the saved project dir. Then the name is removed
+  from every project's `disabledMcpServers` in `~/.claude.json`, where the
+  mod's `/mcp disable example-mcp` would otherwise keep it off.
 - **codex and grok:** append the saved block to the end of `config.toml`.
 - **copilot, agy and project `.mcp.json`:** put the entry back.
 - **opencode:** writes the old flag value back.

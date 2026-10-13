@@ -1175,6 +1175,13 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                 state["disabled"].pop(key, None)
                 if logged:                # never drop a stuck record this op did not write
                     end(state, key)
+                if not toml:
+                    # the mod's `/mcp disable` listed it in a project's disabledMcpServers;
+                    # left there, the restored server stays off in that project
+                    cleared, res = toggle_claudeai_connector("enable", name)
+                    if not cleared:
+                        out.say(f"    ! {name}: per-project /mcp disable not cleared: {res}",
+                                warn=True)
                 log(action, "mcp", name, "ok", harness=harness, batch=batch,
                     project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,
