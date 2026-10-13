@@ -501,7 +501,9 @@ logo, centred, when the window is tall enough to fit the whole menu beside it; t
 | agy | `~/.gemini/config` | ✓ | — | — | — | — | ✓ `mcp_config.json` |
 
 Per-harness locations, mechanisms and the harness versions this was checked
-against are in [docs/harnesses.md](docs/harnesses.md).
+against are in [docs/harnesses.md](docs/harnesses.md). What `disable` and `enable`
+change on disk for each type, with example live, parked and backup paths, is in
+[docs/toggle-paths.md](docs/toggle-paths.md).
 
 **Homes per OS.** Every `~` above is Python's `Path.home()`: `$HOME` on macOS and
 Linux, `%USERPROFILE%` on Windows (so `~/.claude` is `C:\Users\<you>\.claude`).
