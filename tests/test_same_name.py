@@ -33,9 +33,9 @@ class ModelSameNameTest(unittest.TestCase):
 
 @unittest.skipIf(picker is None, "curses unavailable")
 class PickerSameNameTest(SandboxCase):
-    def test_n_key_toggles_every_row_with_the_current_name(self) -> None:
+    def test_ctrl_e_toggles_every_row_with_the_current_name(self) -> None:
         rows = same_name_rows()
-        out = picker.loop(FakeWin(["n", "\n"]), rows, glyphs=theme.UNICODE)
+        out = picker.loop(FakeWin([picker.ctrl("e"), "\n"]), rows, glyphs=theme.UNICODE)
         self.assertEqual(sorted((r.harness, r.type, r.name) for r in out),
                          [("claude", "command", "tg"), ("claude", "mcp", "tg"),
                           ("claude", "skill", "tg")])

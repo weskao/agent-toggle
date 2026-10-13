@@ -115,7 +115,7 @@ def ops_rows() -> list:
             model.Row("codex", "skill", "beta", True, 10)]
 
 
-MODS = ["t", "t", "t"]                  # All -> Skills -> Plugins -> Mods
+MODS = ["\x14"] * 3                   # Ctrl-T: All -> Skills -> Plugins -> Mods
 
 
 @unittest.skipIf(picker is None, "curses unavailable")
@@ -138,7 +138,7 @@ class PickerModOpsTest(SandboxCase):
     def test_type_filter_cycles_through_mods_between_plugins_and_mcp(self) -> None:
         seen = []
         for n in range(1, 6):
-            _, win = self.run_keys(["t"] * n + ["\x1b"])
+            _, win = self.run_keys(["\x14"] * n + ["\x1b"])
             seen.append(win.screen[2].split("type: ")[1].split()[0])
         self.assertEqual(seen, ["Skills", "Plugins", "Mods", "MCP", "All"])
         _, win = self.run_keys([*MODS, "\x1b"])
@@ -147,23 +147,23 @@ class PickerModOpsTest(SandboxCase):
         self.assertIn("Mods 3", win.text())
 
     def test_cost_sort_holds_inside_the_mods_group(self) -> None:
-        _, win = self.run_keys(["s", "\x1b"])
+        _, win = self.run_keys(["\x13", "\x1b"])      # Ctrl-S
         self.assertLess(win.find("plain@mk"), win.find("Mods 3"))
         self.assertLess(win.find("Mods 3"), win.find("big@mk"))
         self.assertLess(win.find("big@mk"), win.find("pane@mk"))
         self.assertLess(win.find("pane@mk"), win.find("off@mk"))     # parked (40) after live (50)
         self.assertLess(win.find("off@mk"), win.find("MCP 1"))
 
-    def test_a_toggles_only_the_mods_under_the_mods_filter(self) -> None:
-        out, _ = self.run_keys([*MODS, "a", "\n"])            # one parked -> all live
+    def test_ctrl_a_toggles_only_the_mods_under_the_mods_filter(self) -> None:
+        out, _ = self.run_keys([*MODS, "\x01", "\n"])            # one parked -> all live
         self.assertEqual([(r.name, r.staged) for r in out], [("off@mk", True)])
-        out, _ = self.run_keys([*MODS, "a", "a", "\n"])       # all live -> all parked
+        out, _ = self.run_keys([*MODS, "\x01", "\x01", "\n"])       # all live -> all parked
         self.assertEqual(sorted(r.name for r in out), ["big@mk", "pane@mk"])
 
     def test_harness_tabs_count_and_filter_mods_like_any_row(self) -> None:
-        _, win = self.run_keys(["1", "\x1b"])                 # claude
+        _, win = self.run_keys([picker.curses.KEY_RIGHT, "\x1b"])      # claude
         self.assertIn("Mods 3", win.text())
-        _, win = self.run_keys(["2", "\x1b"])                 # codex
+        _, win = self.run_keys([picker.curses.KEY_LEFT, "\x1b"])       # codex
         self.assertNotIn("Mods", win.text())
         self.assertIn("beta", win.text())
 
@@ -189,6 +189,19 @@ class PickerModOpsTest(SandboxCase):
         _, win = self.run_keys(["/", "p", "a", "n", "e", "\x1b"])
         self.assertIn("Mods 1", win.text())
         self.assertIn("pane@mk", win.text())
+
+
+@unittest.skipIf(picker is None, "curses unavailable")
+class PaneKeysMatchPickerTest(unittest.TestCase):
+    def test_the_pane_uses_the_curses_pickers_ctrl_chords(self) -> None:
+        import re
+        from pathlib import Path
+        tsx = (Path(__file__).parents[1] / "mod" / "hooks" / "picker.tsx").read_text(encoding="utf-8")
+        found = re.search(r"const KEYS = \{([^}]*)\}", tsx)
+        self.assertIsNotNone(found, "picker.tsx has no KEYS table")
+        pane = dict(re.findall(r"(\w+): '(\w)'", found.group(1)))
+        self.assertEqual(set(pane), {"sort", "same"})
+        self.assertEqual(pane, {k: picker.KEYS[k] for k in pane})
 
 
 class ModProfileAndApplyTest(SandboxCase):

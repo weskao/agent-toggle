@@ -301,22 +301,36 @@ class KeysTest(ScreenCase):
         self.assertIn("Type to search", win.frames[0][2])
         self.assertNotIn("█", win.frames[0][2])
 
-    def test_command_keys_only_act_with_no_filter(self) -> None:
-        # with no filter, `s` sorts ...
-        _, win = self.run_keys(["s", "\x1b"])
-        self.assertIn("sort: cost", win.screen[2])
-        # ... after `/` it is a letter, and so is every letter after an implicit start
-        _, win = self.run_keys(["/", "s", "\x1b"])
-        self.assertIn(" s█", win.screen[2])
-        self.assertIn("sort: name", win.screen[2])
+    def test_every_letter_and_digit_starts_a_search(self) -> None:
+        # the old command letters and tab digits are search text now
+        for key in (*"tsphna", *"0123456789"):
+            _, win = self.run_keys([key, "\x1b"])
+            self.assertIn(f" {key}█", win.screen[2], key)
+            self.assertIn("sort: name", win.screen[2], key)
+            self.assertIn("type: All", win.screen[2], key)
         _, win = self.run_keys(["x", "s", "\x1b"])
         self.assertIn(" xs█", win.screen[2])
+
+    def test_ctrl_chords_command_with_or_without_a_filter(self) -> None:
+        _, win = self.run_keys([picker.ctrl("s"), "\x1b"])
+        self.assertIn("sort: cost", win.screen[2])
+        _, win = self.run_keys(["/", "a", picker.ctrl("s"), picker.ctrl("t"), "\x1b"])
+        self.assertIn(" a█", win.screen[2])                       # the query is kept
+        self.assertIn("sort: cost", win.screen[2])
+        self.assertIn("type: Skills", win.screen[2])
+
+    def test_the_picker_reads_keys_in_raw_mode(self) -> None:
+        # cbreak leaves Ctrl-S to the tty (XOFF), Ctrl-T to SIGINFO and Ctrl-O to discard
+        with mock.patch.object(picker.curses, "raw", create=True) as raw:
+            self.run_keys(["\x1b"])
+        raw.assert_called_once_with()
+
+    def test_filter_editing(self) -> None:
         # Space types while filtering (it separates AND terms) instead of toggling
         out, _ = self.run_keys(["/", "l", " ", "\n"])
         self.assertEqual(out, [])
-        # Backspace emptying the filter returns to command mode
-        _, win = self.run_keys(["/", "x", "\x7f", "s", "\x1b"])
-        self.assertIn("sort: cost", win.screen[2])
+        # Backspace emptying the filter returns to the idle placeholder
+        _, win = self.run_keys(["/", "x", "\x7f", "\x1b"])
         self.assertIn("Type to search", win.screen[2])
         # Ctrl-U clears a filter outright
         _, win = self.run_keys(["/", "z", "z", "\x15", "\x1b"])
@@ -341,7 +355,7 @@ class KeysTest(ScreenCase):
         self.assertTrue(theme.emoji_ok({"WT_SESSION": "x"}, "win32"))
         self.assertEqual(theme.ASCII.search, "/")
 
-    def test_tabs_switch_with_arrows_and_digits(self) -> None:
+    def test_tabs_switch_with_arrows(self) -> None:
         C = picker.curses
         _, win = self.run_keys(["\x1b"])
         # All counts everything; codex counts its own row and the one shared with it
@@ -349,40 +363,36 @@ class KeysTest(ScreenCase):
         self.assertIn(" claude 4 ", win.screen[1])
         self.assertTrue(win.screen[1].endswith(" codex 2"))
         for keys, shown, hidden in (([C.KEY_RIGHT], "zeta", "delta"),
-                                    (["2"], "delta", "zeta"),
+                                    ([C.KEY_RIGHT, C.KEY_RIGHT], "delta", "zeta"),
                                     ([C.KEY_LEFT], "delta", "zeta"),          # wraps to codex
-                                    (["2", "0"], "delta", None),
-                                    (["h", "h"], "gamma", "alpha")):
+                                    ([C.KEY_LEFT, C.KEY_RIGHT], "delta", None),
+                                    ([C.KEY_LEFT], "gamma", "alpha")):
             _, win = self.run_keys([*keys, "\x1b"])
             self.assertIn(shown, win.text(), keys)
             if hidden:
                 self.assertNotIn(hidden, win.text(), keys)
-        # a digit with no such tab is ignored
-        _, win = self.run_keys(["9", "\x1b"])
-        self.assertIn("delta", win.text())
-        self.assertIn("zeta", win.text())
 
     def test_type_cycles_and_groups_have_headings(self) -> None:
         _, win = self.run_keys(["\x1b"])
         heads = [line.split()[0] for line in win.screen[3:] if "──" in line]
         self.assertEqual(heads, ["Skills", "Agents", "Commands"])
         self.assertIn("Skills 3", win.text())
-        _, win = self.run_keys(["t", "\x1b"])
+        _, win = self.run_keys([picker.ctrl("t"), "\x1b"])
         self.assertIn("type: Skills", win.screen[2])
         self.assertNotIn("gamma", win.text())
-        out, win = self.run_keys(["t", "t", " ", "\n"])
+        out, win = self.run_keys([picker.ctrl("t"), picker.ctrl("t"), " ", "\n"])
         self.assertEqual([r.name for r in out], ["gamma"])
 
     def test_sort_by_cost_holds_inside_each_group(self) -> None:
-        out, win = self.run_keys(["s", " ", "\n"])
+        out, win = self.run_keys([picker.ctrl("s"), " ", "\n"])
         self.assertEqual([r.name for r in out], ["zeta"])
         self.assertLess(win.find("zeta"), win.find("alpha"))
         self.assertLess(win.find("alpha"), win.find("beta"))
 
     def test_toggle_all_visible(self) -> None:
-        out, _ = self.run_keys(["a", "\n"])                 # not all live -> all live
+        out, _ = self.run_keys(["\x01", "\n"])              # not all live -> all live
         self.assertEqual(self.names(out), [("beta", True)])
-        out, _ = self.run_keys(["a", "\n"])                 # all live now -> all parked
+        out, _ = self.run_keys(["\x01", "\n"])              # all live now -> all parked
         self.assertEqual(sorted(r.name for r in out), ["alpha", "delta", "gamma", "zeta"])
         for r in self.rows:
             r.staged = r.enabled
@@ -397,7 +407,7 @@ class KeysTest(ScreenCase):
         self.assertIn("╭", overlay)
         self.assertNotIn("toggle every visible row", win.text())
         self.assertIn("Type to search", win.screen[2])             # the closing key was not typed
-        self.assertIn("p", [k for k, _ in picker.help_lines(theme.UNICODE)])
+        self.assertIn("Ctrl-O", [k for k, _ in picker.help_lines(theme.UNICODE)])
 
     def test_long_list_scrolls_with_the_cursor_and_its_heading(self) -> None:
         rows = [model.Row("claude", "skill", f"s{n:02}", True) for n in range(30)]
@@ -412,15 +422,16 @@ class KeysTest(ScreenCase):
         self.assertIn("Agents 1", win.text(-2))              # the heading scrolled in with it
 
     def test_space_on_an_empty_list_does_not_start_a_filter(self) -> None:
-        out, win = self.run_keys(["2", "t", " ", "s", "\n"])      # codex tab + Skills: empty
-        self.assertEqual(out, [])
+        C = picker.curses
+        out, win = self.run_keys([C.KEY_LEFT, picker.ctrl("t"), " ", picker.ctrl("s"), "\n"])
+        self.assertEqual(out, [])                                 # codex tab + Skills: empty
         self.assertIn("Type to search", win.screen[2])
-        self.assertIn("sort: cost", win.screen[2])                # `s` still a command
+        self.assertIn("sort: cost", win.screen[2])                # Ctrl-S still a command
 
     def test_the_active_tab_always_fits(self) -> None:
         rows = [model.Row(n, "skill", "x", True) for n in
                 ("claude", "codex", "grok", "opencode", "openclaw", "copilot", "vibe")]
-        _, win = self.run_keys(["7", "\x1b"], rows=rows, size=(24, 40))
+        _, win = self.run_keys([picker.curses.KEY_LEFT, "\x1b"], rows=rows, size=(24, 40))
         self.assertIn("vibe 1", win.screen[1])
         _, win = self.run_keys(["\x1b"], rows=rows, size=(24, 40))
         self.assertIn("All 7", win.screen[1])
@@ -722,7 +733,7 @@ class ProfileKeyTest(SandboxCase):
     @unittest.skipIf(picker is None, "curses unavailable")
     def test_curses_prompt_then_enter_returns_the_staged_rows(self) -> None:
         self.stored("work", [("alpha", False)])
-        keys = ["p", "w", "o", "r", "k", "x", "\x7f", "\n", "\n"]       # p, `work`, Enter, Enter
+        keys = [picker.ctrl("o"), *"workx", "\x7f", "\n", "\n"]      # Ctrl-O, `work`, Enter, Enter
         win = FakeWin(keys, size=(12, 70))
         out = picker.loop(win, self.rows)
         self.assertEqual([r.name for r in out], ["alpha"])
@@ -732,7 +743,8 @@ class ProfileKeyTest(SandboxCase):
         self.assertIn("profile work: 1 staged", win.screen[-3])
         # Esc at the prompt stages nothing (even a full valid name) and the picker carries on
         self.rows[0].staged = True
-        self.assertEqual(picker.loop(FakeWin(["p", *"work", "\x1b", "\n"], size=(12, 70)),
+        self.assertEqual(picker.loop(FakeWin([picker.ctrl("o"), *"work", "\x1b", "\n"],
+                                             size=(12, 70)),
                                      self.rows), [])
         # a 2-row window: the prompt clips instead of raising curses.error
         self.assertEqual(picker.ask_profile(FakeWin(["a", "\n"], size=(2, 40))), "a")
@@ -750,13 +762,13 @@ class ProfileKeyTest(SandboxCase):
             {"harness": h, "type": "skill", "name": "alpha", "live": False}
             for h in ("claude", "codex")]}), encoding="utf-8")
         settings.set("harness.codex", False)
-        out = picker.loop(FakeWin(["p", *"work", "\n", "\n"], size=(12, 70)), rows)
+        out = picker.loop(FakeWin([picker.ctrl("o"), *"work", "\n", "\n"], size=(12, 70)), rows)
         self.assertEqual([r.label for r in out], ["claude/skill/alpha"])
         self.assertTrue(rows[-1].staged)                    # the codex row was not touched
 
     @unittest.skipIf(picker is None, "curses unavailable")
-    def test_p_is_a_filter_letter_after_slash(self) -> None:
-        win = FakeWin(["/", "p", "\x1b"], size=(12, 70))
+    def test_p_is_a_filter_letter(self) -> None:
+        win = FakeWin(["p", "\x1b"], size=(12, 70))
         picker.loop(win, self.rows)
         self.assertFalse(any("profile>" in line for f in win.frames for line in f))
 
