@@ -283,7 +283,7 @@ agent-toggle             # same, on a terminal; elsewhere prints help and exits 
   ●   delta                             codex         10 ▏             │ cost       0 now; ~300 tok if restored
                                                                        │ since      2026-09-19 10:00:00
  5 of 5 shown · 2/5
- Space toggle  Enter apply  Esc cancel  ? help  / search  ←→ harness  t type  s sort  p profile  a all
+ Tab toggle  Enter apply  Esc cancel  ? help  / search  ←→ harness  t type  s sort  p profile  a all
 ```
 
 What is on screen:
@@ -311,8 +311,8 @@ What is on screen:
 
 | key | action |
 |---|---|
-| `Space` | toggle the highlighted row (live / parked) and stay on it (while searching, the first `Space` separates search terms and a second one toggles) |
-| `Tab` | toggle the highlighted row and advance to the next |
+| `Tab` | toggle the highlighted row (live / parked) and stay on it, including while searching |
+| `Space` | enter a space in the search (separates search terms) |
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
 | `Esc` / `Ctrl-C` | cancel; nothing is applied |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
@@ -957,9 +957,9 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   and the first and last list lines count the rows out of view (`↑ 4`, `↓ 12`).
 - The mouse wheel over the list moves the cursor, as in the terminal picker; no click needed.
 - Click the list once so it takes keys (Esc hands the keyboard back to the prompt). Then `↑` `↓`
-  `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Space` or `Enter` toggles the row,
-  `Tab` toggles and moves on; `/` or any letter starts a search (terms ANDed over
-  `type/name` and the group, letters-in-order if nothing matches; a second `Space` toggles);
+  `PgUp` `PgDn` `Home` `End` (also `Ctrl-P` / `Ctrl-N`) move; `Tab` toggles the row
+  and stays on it, including while searching; `/` or any letter starts a search (terms ANDed over
+  `type/name` and the group, letters-in-order if nothing matches; `Space` separates terms);
   `Ctrl-S` sorts by name or cost; `Ctrl-E` toggles every type with this row's name (skill, command, MCP,
   ...), like `disable all <name>`; `Ctrl-U` clears the search. A click moves the cursor.
 - A toggle applies at once (no staging, no Enter to apply); the toast names the target and the state

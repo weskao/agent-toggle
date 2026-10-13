@@ -64,7 +64,6 @@ CATALOG: dict[str, str] = {
     "picker.help.title": "按鍵",
     "picker.help.move": "移動（也可用 Ctrl-P / Ctrl-N）",
     "picker.help.toggle": "切換此列（啟用 <-> 停用），停留在該列",
-    "picker.help.toggle_next": "切換此列，然後移到下一列",
     "picker.help.apply": "套用暫存的變更（--dry-run：只看計畫）",
     "picker.help.cancel": "取消；不做任何變更",
     "picker.help.filter": "搜尋名稱 / harness / 路徑（可模糊）；直接打任何字母或數字也會開始搜尋",

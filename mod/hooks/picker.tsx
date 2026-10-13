@@ -97,16 +97,11 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     if (k === 'pagedown') return go(cursor + body)
     if (k === 'home') return go(0)
     if (k === 'end') return go(rows.length - 1)
-    if (k === 'return') return toggle()
-    if (k === 'tab') return toggle(), go(cursor + 1)
+    if (k === 'tab') return toggle()
     // a trailing Space is only the term separator: the rows, and so the cursor, stay
     if (k === 'backspace') return go(s.query.endsWith(' ') ? cursor : 0, { query: s.query.slice(0, -1), typing: s.query.length > 1 })
     if (e.ctrl && k === 'u') return go(0, { query: '', typing: false })
-    if (k === ' ' || k === 'space') {
-      if (!s.query.trim()) return toggle() // as the curses picker: no term yet, nothing to separate
-      if (s.query.endsWith(' ')) return toggle(), go(cursor, { query: s.query.trimEnd() }) // second Space toggles
-      return go(cursor, { query: s.query + ' ' })
-    }
+    if (k === ' ' || k === 'space') return go(cursor, { query: s.query + ' ', typing: true })
     if (e.ctrl && k === KEYS.sort) return go(0, { sort: s.sort === 'name' ? 'cost' : 'name' })
     if (e.ctrl && k === KEYS.same) return toggle('same') // every type with this row's name
     if (k.length !== 1 || e.ctrl || e.meta) return
@@ -122,7 +117,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
   const topCost = Math.max(0, ...rows.map(r => (r.enabled ? r.tokens : r.save)))
   const live = props.rows.reduce((n, r) => n + (r.enabled ? r.tokens : 0), 0)
   const summary = `${props.rows.length} resources · ~${tok(live)} tok live`
-  const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], [`^${KEYS.sort.toUpperCase()}`, 'sort'], [`^${KEYS.same.toUpperCase()}`, 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
+  const chips: Array<[string, string]> = [['Tab', 'toggle'], ['/', 'search'], [`^${KEYS.sort.toUpperCase()}`, 'sort'], [`^${KEYS.same.toUpperCase()}`, 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
 
   // rows scrolled out of view, counted on the first and last list lines: the pane draws no scrollbar
   const shown = items.slice(top, top + body)

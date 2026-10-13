@@ -40,9 +40,9 @@ async function open($: T, on: On, list = COST, toggle = OK, env: Record<string, 
 }
 
 describe('agent-toggle pane', () => {
-  test('Space disables the highlighted row and toasts ok', async ($, on) => {
+  test('Tab disables the highlighted row and toasts ok', async ($, on) => {
     const { argvs, toasts, ui, tick } = await open($, on)
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(argvs[0]).toEqual(['agent-toggle', 'cost', '--json', '--harness', 'claude'])
     expect(argvs[1]).toEqual(['agent-toggle', 'disable', 'skill', 'a', '--json', '--harness', 'claude'])
@@ -52,17 +52,17 @@ describe('agent-toggle pane', () => {
   test('the arrows and End move the cursor; the cost summary row (null type/name) is not a row', async ($, on) => {
     const { toggles, ui, tick } = await open($, on)
     await ui.key({ key: 'down' })
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     await ui.key({ key: 'end' })
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toggles()).toEqual(['enable skill b', 'enable skill b']) // End stops on the last real row
   })
 
   test('a failed disable toasts the reason from stdout', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, COST, done(1, JSON.stringify({ ok: false, results: [{ status: 'error', detail: 'not found' }] })))
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toasts).toContain('❌ [FAILED] disable skill: a - not found')
   })
@@ -72,7 +72,7 @@ describe('agent-toggle pane', () => {
     const clock = mock.clock(on)
     on('command.run', (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' })) // any command, so a stray /reload-plugins or /mcp would show
     const { toasts, ui, tick } = await open($, on, COST, done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'skill', name: 'a', action: 'disable', status: 'ok' }] })))
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     await clock.advance(0)
     expect(toasts).toContain('⛔ [DISABLED] skill: a (/reload-skills)')
@@ -81,14 +81,14 @@ describe('agent-toggle pane', () => {
 
   test('a toggle with no reload (a rule) still says a new session is needed', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, cost(row('rule', 'r', true, 5)), done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'rule', name: 'r', action: 'disable', status: 'ok' }] })))
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toasts).toContain('⛔ [DISABLED] rule: r (takes effect in a new session)')
   })
 
   test('two simultaneous keys run exactly one toggle', async ($, on) => {
     const { toggles, ui, tick } = await open($, on)
-    await Promise.all([ui.key({ key: ' ' }), ui.key({ key: 'return' })])
+    await Promise.all([ui.key({ key: 'tab' }), ui.key({ key: 'tab' })])
     await tick()
     expect(toggles()).toHaveLength(1)
   })
@@ -99,16 +99,16 @@ describe('agent-toggle pane', () => {
     for (let i = 0; i < 5; i++) {
       await ui.key({ key: 'home' })
       for (let j = 0; j < i; j++) await ui.key({ key: 'down' })
-      await ui.key({ key: ' ' })
+      await ui.key({ key: 'tab' })
       await tick()
     }
     expect(toggles()).toEqual(['disable skill s', 'disable agent g', 'disable plugin p', 'disable plugin m', 'disable mcp x'])
   })
 
-  test('typing filters: terms are ANDed and a second Space toggles', async ($, on) => {
+  test('typing filters: terms are ANDed and Tab toggles', async ($, on) => {
     const { toggles, type, ui, tick } = await open($, on)
-    await type('ki b ') // "ki" matches both skills, "b" narrows to skill/b; the trailing Space is the toggle
-    await ui.key({ key: ' ' })
+    await type('ki b ') // "ki" matches both skills, "b" narrows to skill/b; Space separates terms
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toggles()).toEqual(['enable skill b'])
   })
@@ -116,7 +116,7 @@ describe('agent-toggle pane', () => {
   test('letters in order find a name when nothing matches exactly', async ($, on) => {
     const { toggles, type, ui, tick } = await open($, on, cost(row('skill', 'context-md', true, 5), row('skill', 'other', true, 5)))
     await type('ctxmd')
-    await ui.key({ key: 'return' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toggles()).toEqual(['disable skill context-md'])
   })
@@ -124,7 +124,7 @@ describe('agent-toggle pane', () => {
   test('ctrl+s sorts by cost, biggest first', async ($, on) => {
     const { toggles, ui, tick } = await open($, on, cost(row('skill', 'a', true, 100), row('skill', 'b', true, 900)))
     await ui.key({ key: 's', ctrl: true })
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toggles()).toEqual(['disable skill b'])
   })
@@ -138,7 +138,7 @@ describe('agent-toggle pane', () => {
 
   test('a failed toggle leaves its error in the picker after the refresh succeeds', async ($, on) => {
     const { ui, tick } = await open($, on, COST, done(1, JSON.stringify({ ok: false, results: [{ status: 'error', detail: 'not found' }] })))
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(((await ui.drawn()) as any).props.props.error).toBe('not found')
   })
@@ -156,7 +156,7 @@ describe('agent-toggle pane', () => {
     await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     const first = async () => ((await ui.drawn()) as any).props.props.rows[0]
-    const pressed = ui.key({ key: ' ' })
+    const pressed = ui.key({ key: 'tab' })
     for (let i = 0; i < 500; i++) await Promise.resolve() // the toggle reaches the CLI
     const mid = await first()
     release()
@@ -191,7 +191,7 @@ describe('agent-toggle pane', () => {
   test('every letter starts a search, the old s and n keys too', async ($, on) => {
     const { toggles, type, ui, tick } = await open($, on, cost(row('skill', 'b', true, 5), row('skill', 'nso', true, 5)))
     await type('ns')
-    await ui.key({ key: 'return' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toggles()).toEqual(['disable skill nso'])
   })
@@ -206,14 +206,14 @@ describe('agent-toggle pane', () => {
 
   test('a legacy Windows console toasts the tag alone, no emoji', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, COST, OK, { OS: 'Windows_NT' })
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toasts).toEqual(['[DISABLED] skill: a'])
   })
 
   test('Windows Terminal keeps the emoji', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, COST, OK, { OS: 'Windows_NT', WT_SESSION: 'test-session' })
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toasts).toEqual(['⛔ [DISABLED] skill: a'])
   })
@@ -227,7 +227,7 @@ describe('agent-toggle pane', () => {
 
   test('a toast names a mod as a mod, with no escape codes', async ($, on) => {
     const { toasts, ui, tick } = await open($, on, cost(row('plugin', 'm', false, 7, true)))
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     expect(toasts).toEqual(['✅ [ENABLED] mod: m'])
     expect(/[\x00-\x1f]/.test(toasts[0]!)).toBe(false) // an ANSI colour code would show as garbage
@@ -250,7 +250,7 @@ describe('agent-toggle pane', () => {
     await tickDown(9) // the picker fits the pane: the tick is the picker's
     await tick()
     await ui.advance(16)
-    await ui.key({ key: ' ' })
+    await ui.key({ key: 'tab' })
     await tick()
     await tickDown(40) // the Button list on vscode/mobile: the engine scrolls it
     expect({ toggles: toggles(), reached }).toEqual({ toggles: ['enable skill b'], reached: [1] })

@@ -46,10 +46,10 @@ so a schema change and the mod's fix land in one PR and one CI run; the mod is
 |---|---|
 | `/agent-toggle` | opens the pane titled `agent-toggle`; a pane the person asked for is placed at any width, and if no surface can place it a toast says so (`isPlaced` false) |
 | pane opens | runs `agent-toggle cost --json --harness claude`, draws the curses picker's look: bold title with the live-token total, a search line with the sort label, rows grouped by type (`model.py` GROUPS order, a heading with count and rule per group), green `●` live / yellow `○` parked, tokens (`(N)` for a parked row) and a bar, the cursor row in reverse video, a key-chip footer; the status line ends with the cursor position (`· 7/23`, as the curses picker), and the first and last list lines end with the count of rows scrolled out above (`↑ 4`) and below (`↓ 12`), in place of a scrollbar |
-| keys (after a click on the list) | `↑ ↓ PgUp PgDn Home End Ctrl-P Ctrl-N` move; `Space`/`Enter` toggle; `Tab` toggles and advances; `/` or any letter starts a search; `Ctrl-S` cycles sort (name, cost); `Ctrl-E` toggles every type with the row's name (`<disable\|enable> all <name>`, one batch; only rows in the cursor row's state move); `Backspace`, `Ctrl-U` edit; a click moves the cursor |
+| keys (after a click on the list) | `↑ ↓ PgUp PgDn Home End Ctrl-P Ctrl-N` move; `Tab` toggles and stays on the row (also while searching); `Space` enters a search-term separator; `/` or any letter starts a search; `Ctrl-S` cycles sort (name, cost); `Ctrl-E` toggles every type with the row's name (`<disable\|enable> all <name>`, one batch; only rows in the cursor row's state move); `Backspace`, `Ctrl-U` edit; a click moves the cursor |
 | mouse wheel over the list (no click needed) | moves the cursor a row per tick, as the wheel sends Up/Down to the curses picker |
 | toggle a row | runs `agent-toggle <disable\|enable> <type> <name> --json --harness claude`, then re-runs `cost --json` and redraws; a toast carries `ok` or the error line. It applies at once: no staging, no Enter-to-apply |
-| search | terms ANDed over `type/name` and the group (`mod`, `mods`); with no hit, letters-in-order on the name (`ctxmd` finds `context-md`, status line says `≈ fuzzy match`); a second `Space` toggles. Commands are `Ctrl` chords (the curses picker's), so every letter is search text |
+| search | terms ANDed over `type/name` and the group (`mod`, `mods`); with no hit, letters-in-order on the name (`ctxmd` finds `context-md`, status line says `≈ fuzzy match`); `Tab` toggles the selected row; repeated spaces remain search text. Commands are `Ctrl` chords (the curses picker's), so every letter is search text |
 | `/agent-toggle` again | refreshes the list (re-open is idempotent) |
 
 Out of scope for v1, by decision: harness tabs, the `Ctrl-T` `Ctrl-O` `Ctrl-A` keys, staging,
@@ -140,7 +140,7 @@ dropped, and the picker says `working…`; `error` is the last failure text or `
 |---|---|
 | manifest + hook surface | `claude plugin validate mod` |
 | types | `tsc -p mod` (after first load lays `.claude-plugin/types/`) |
-| behaviour | `claude plugin test mod` — `hooks/*.test.ts`, driven by `ui.key`, reading the picker's lines with `ui.findAll({ in: 'picker' })`; the core one: a fake `process.run` returning two rows, press Space on the first, assert the second `process.run` argv is `["agent-toggle","disable","skill","a","--json","--harness","claude"]` and the toast is `ok` |
+| behaviour | `claude plugin test mod` — `hooks/*.test.ts`, driven by `ui.key`, reading the picker's lines with `ui.findAll({ in: 'picker' })`; the core one: a fake `process.run` returning two rows, press Tab on the first, assert the second `process.run` argv is `["agent-toggle","disable","skill","a","--json","--harness","claude"]` and the toast is `ok` |
 | manual | `claude --plugin-dir ./mod`, `/agent-toggle`, toggle one skill, confirm with `agent-toggle status` |
 
 CI: one extra job `mod` on `ubuntu-latest` that runs validate + test. It

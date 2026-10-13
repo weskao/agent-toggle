@@ -11,12 +11,17 @@ const skills = (n: number) => Array.from({ length: n }, (_, i) => ({ type: 'skil
 async function open($: T, on: On, n: number) {
   mock.env(on, {})
   const stdout = JSON.stringify({ ok: true, command: 'cost', results: skills(n) })
-  on('process.run', () => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const toggled: string[][] = []
+  on('process.run', (_$, e) => {
+    if (e.argv[1] === 'disable' || e.argv[1] === 'enable') toggled.push([...e.argv])
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
   const lines = async () => (await ui.findAll({ in: 'picker', type: 'Text' })).map(t => t.text)
-  return { ui, lines }
+  return { ui, lines, toggled }
 }
 
 describe('picker scroll cues', () => {
@@ -61,5 +66,28 @@ describe('picker search', () => {
     expect(await status()).toBe(' 30 of 30 shown · 4/30')
     await ui.key({ key: 'backspace' })
     expect(await status()).toBe(' 30 of 30 shown · 4/30')
+  })
+})
+
+
+describe('picker toggle key', () => {
+  test('Tab toggles the selected row without advancing in every search state', async ($, on) => {
+    const { ui, toggled } = await open($, on, 3)
+    for (const query of ['', '/', '/s', '/s ', '/s  ']) {
+      await ui.key({ key: 'u', ctrl: true })
+      for (const key of query) await ui.key({ key })
+      await ui.key({ key: 'down' })
+      await ui.key({ key: 'tab' })
+      expect((await ui.find({ in: 'picker', type: 'Text', text: / shown/ }))?.text).toBe(' 3 of 3 shown · 2/3')
+      expect(toggled[toggled.length - 1]).toContain('s01')
+    }
+    expect(toggled.length).toBe(5)
+  })
+
+  test('Space and Enter never toggle a row', async ($, on) => {
+    const { ui, lines, toggled } = await open($, on, 3)
+    for (const key of [' ', 'space', 'return', 's', ' ', 'space']) await ui.key({ key })
+    expect(toggled.length).toBe(0)
+    expect((await lines()).some(t => t.includes('  s  '))).toBe(true)
   })
 })

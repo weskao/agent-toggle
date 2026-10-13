@@ -253,31 +253,36 @@ class ScreenCase(SandboxCase):
 
 
 class KeysTest(ScreenCase):
-    def test_space_stays_on_the_row_and_tab_advances(self) -> None:
-        out, _ = self.run_keys([" ", " ", " ", "\n"])             # 3 presses, all on alpha
-        self.assertEqual(self.names(out), [("alpha", False)])
-        self.rows = demo_rows()
-        out, win = self.run_keys(["\t", " ", "\n"])               # Tab: alpha, then beta
-        self.assertEqual(self.names(out), [("alpha", False), ("beta", True)])
-        # the staged rows carry a - / + marker and their glyph flips
-        line = win.screen[win.find("alpha")]
-        self.assertIn("○ - alpha", line)
-        self.assertIn("● + beta", win.screen[win.find("beta")])
+    def test_tab_toggles_and_stays_on_the_row_in_every_search_state(self) -> None:
+        for query in ("", "/", "/a", "/a ", "/a  "):
+            with self.subTest(query=query):
+                self.rows = demo_rows()
+                out, win = self.run_keys([*query, picker.curses.KEY_DOWN, "\t", "\n"])
+                self.assertEqual(self.names(out), [("beta", True)])
+                self.assertIn("beta", next(line for line in win.screen if line.startswith("›")))
+
+    def test_space_only_enters_search_text(self) -> None:
+        for query in ("", "/a"):
+            with self.subTest(query=query):
+                self.rows = demo_rows()
+                out, win = self.run_keys([*query, " ", " ", "\n"])
+                self.assertEqual(out, [])
+                self.assertIn(query.lstrip("/") + "  █", win.screen[2])
 
     def test_the_search_separator_keeps_the_cursor(self) -> None:
-        # "a" matches every row; the cursor on beta stays there through Space and Backspace
-        out, _ = self.run_keys(["/", "a", picker.curses.KEY_DOWN, " ", "\x7f", " ", " ", "\n"])
+        # "a" matches every row; beta stays selected through Space and Backspace.
+        out, _ = self.run_keys(["/", "a", picker.curses.KEY_DOWN, " ", "\x7f", "\t", "\n"])
         self.assertEqual(self.names(out), [("beta", True)])
 
     def test_toggling_twice_unstages(self) -> None:
-        out, _ = self.run_keys(["\t", "\x10", " ", "\n"])         # Tab down, Ctrl-P back up
+        out, _ = self.run_keys(["\t", "\t", "\n"])         # Tab twice on the same row
         self.assertEqual(out, [])
 
     def test_enter_applies_and_esc_or_ctrl_c_cancel(self) -> None:
         self.assertEqual(self.run_keys(["\n"])[0], [])
-        self.assertIsNone(self.run_keys([" ", "\x1b"])[0])
-        self.assertIsNone(self.run_keys([" ", "\x03"])[0])
-        self.assertIsNone(self.run_keys([" ", KeyboardInterrupt()])[0])
+        self.assertIsNone(self.run_keys(["\t", "\x1b"])[0])
+        self.assertIsNone(self.run_keys(["\t", "\x03"])[0])
+        self.assertIsNone(self.run_keys(["\t", KeyboardInterrupt()])[0])
 
     def test_moving(self) -> None:
         C = picker.curses
@@ -286,7 +291,7 @@ class KeysTest(ScreenCase):
                  (C.KEY_NPAGE,): "delta", (C.KEY_NPAGE, C.KEY_PPAGE): "alpha"}
         for keys, name in cases.items():
             self.rows = demo_rows()
-            out, _ = self.run_keys([*keys, " ", "\n"])
+            out, _ = self.run_keys([*keys, "\t", "\n"])
             self.assertEqual([r.name for r in out], [name], keys)
 
     def test_typing_filters_and_shows_the_input_with_a_cursor(self) -> None:
@@ -380,11 +385,11 @@ class KeysTest(ScreenCase):
         _, win = self.run_keys([picker.ctrl("t"), "\x1b"])
         self.assertIn("type: Skills", win.screen[2])
         self.assertNotIn("gamma", win.text())
-        out, win = self.run_keys([picker.ctrl("t"), picker.ctrl("t"), " ", "\n"])
+        out, win = self.run_keys([picker.ctrl("t"), picker.ctrl("t"), "\t", "\n"])
         self.assertEqual([r.name for r in out], ["gamma"])
 
     def test_sort_by_cost_holds_inside_each_group(self) -> None:
-        out, win = self.run_keys([picker.ctrl("s"), " ", "\n"])
+        out, win = self.run_keys([picker.ctrl("s"), "\t", "\n"])
         self.assertEqual([r.name for r in out], ["zeta"])
         self.assertLess(win.find("zeta"), win.find("alpha"))
         self.assertLess(win.find("alpha"), win.find("beta"))
@@ -417,13 +422,13 @@ class KeysTest(ScreenCase):
         cursor = next(line for line in win.screen if line.startswith("›"))
         self.assertIn("s06", cursor)                         # 6-line body: one page down
         self.assertNotIn("s00", win.text())
-        out, win = self.run_keys([C.KEY_END, " ", "\n"], rows=rows, size=(12, 80))
+        out, win = self.run_keys([C.KEY_END, "\t", "\n"], rows=rows, size=(12, 80))
         self.assertEqual([r.name for r in out], ["last"])
         self.assertIn("Agents 1", win.text(-2))              # the heading scrolled in with it
 
-    def test_space_on_an_empty_list_does_not_start_a_filter(self) -> None:
+    def test_tab_on_an_empty_list_does_not_start_a_filter(self) -> None:
         C = picker.curses
-        out, win = self.run_keys([C.KEY_LEFT, picker.ctrl("t"), " ", picker.ctrl("s"), "\n"])
+        out, win = self.run_keys([C.KEY_LEFT, picker.ctrl("t"), "\t", picker.ctrl("s"), "\n"])
         self.assertEqual(out, [])                                 # codex tab + Skills: empty
         self.assertIn("Type to search", win.screen[2])
         self.assertIn("sort: cost", win.screen[2])                # Ctrl-S still a command
@@ -437,7 +442,7 @@ class KeysTest(ScreenCase):
         self.assertIn("All 7", win.screen[1])
 
     def test_a_tiny_window_keeps_status_and_keys(self) -> None:
-        out, win = self.run_keys([" ", "\n"], size=(5, 40))
+        out, win = self.run_keys(["\t", "\n"], size=(5, 40))
         self.assertEqual([r.name for r in out], ["alpha"])
         self.assertIn("of 5 shown", win.frames[0][-3])
         self.assertIn("Ctrl+C to leave · auto-save", win.frames[0][-1])
@@ -453,7 +458,7 @@ class KeysTest(ScreenCase):
 
 class LayoutTest(ScreenCase):
     def test_title_bar_summary(self) -> None:
-        _, win = self.run_keys([" ", "\x1b"])
+        _, win = self.run_keys(["\t", "\x1b"])
         self.assertIn("agent-toggle  v", win.frames[0][0])
         self.assertIn("5 resources · ~6.3k tok live", win.frames[0][0])
         self.assertIn("1 staged (-1.2k tok)", win.screen[0])
@@ -464,7 +469,7 @@ class LayoutTest(ScreenCase):
                                         ("zh-TW", "離開 · 自動儲存", "切換")):
             i18n.set_language(language)
             for width in (30, 40, 60, 80, 120):
-                for keys, key in ((["\x1b"], "Space"), (["/", "\x1b"], "Tab")):
+                for keys, key in ((["\x1b"], "Tab"), (["/", "\x1b"], "Tab")):
                     with self.subTest(language=language, width=width, key=key):
                         _, win = self.run_keys(keys, size=(24, width))
                         footer = win.screen[-1]
@@ -524,7 +529,7 @@ class LayoutTest(ScreenCase):
         for text in ("beta", "harness", "claude", "○ parked", "path", "/x/skills-disabled/beta",
                      "since", "2026-09-19 10:00:00", "mechanism", "move", "~300 tok if restored"):
             self.assertIn(text, pane)
-        _, win = self.run_keys([" ", picker.curses.KEY_UP, "\x1b"], size=(24, 120))
+        _, win = self.run_keys(["\t", picker.curses.KEY_UP, "\x1b"], size=(24, 120))
         self.assertIn("staged → parked", win.text())
         _, win = self.run_keys([down, "\x1b"], size=(24, 80))
         self.assertNotIn("mechanism", win.text())
@@ -537,7 +542,7 @@ class LayoutTest(ScreenCase):
             self.assertRegex(win.text(), r"●\s+alpha")
             self.assertIn("Ctrl+C to leave · auto-save", win.screen[-1])
             if width >= 60:
-                self.assertIn("Space toggle", win.screen[-1])
+                self.assertIn("Tab toggle", win.screen[-1])
         _, win = self.run_keys(["\x1b"], size=(24, 90))
         self.assertIn("+shared", win.text())
         self.assertIn("1.2k", win.screen[win.find("alpha")])
@@ -557,9 +562,9 @@ class LayoutTest(ScreenCase):
         self.assertIn("nothing matches", line)
         self.assertTrue(line.rstrip().endswith("│"), line)
 
-    def test_typing_mode_swaps_the_key_chips(self) -> None:
+    def test_typing_mode_keeps_the_toggle_key(self) -> None:
         _, win = self.run_keys(["/", "\x1b"], size=(24, 120))
-        self.assertIn("Space toggle", win.frames[0][-1])
+        self.assertIn("Tab toggle", win.frames[0][-1])
         self.assertIn("Tab toggle", win.screen[-1])
         self.assertIn("clear filter", win.screen[-1])
 
@@ -591,7 +596,7 @@ class LayoutTest(ScreenCase):
             self.assertNotEqual(win.attrs[y, 2], win.attrs[win.find("beta"), 2])
             m["init_pair"].reset_mock()
             m["has_colors"].return_value = False
-            out, win = self.run_keys([" ", "\n"], color=True)
+            out, win = self.run_keys(["\t", "\n"], color=True)
             m["init_pair"].assert_not_called()
             self.assertEqual([r.name for r in out], ["alpha"])
             self.run_keys(["\x1b"], color=False)
@@ -632,7 +637,7 @@ class SettingsTest(ScreenCase):
 
     def test_saved_sort_harness_and_type_are_the_start_view(self) -> None:
         settings.set("picker_sort", "cost")
-        out, _ = self.run_keys([" ", "\n"])
+        out, _ = self.run_keys(["\t", "\n"])
         self.assertEqual([r.name for r in out], ["zeta"])
         settings.set("picker_harness", "codex")
         _, win = self.run_keys(["\x1b"])
@@ -650,7 +655,7 @@ class SettingsTest(ScreenCase):
             self.write(f"skills/{n}/SKILL.md")
         table = {"claude": build(self.tmp)["claude"]}
         with mock.patch.object(picker.curses, "wrapper",
-                               side_effect=lambda fn, *a: fn(FakeWin([" ", "\n"]), *a)):
+                               side_effect=lambda fn, *a: fn(FakeWin(["\t", "\n"]), *a)):
             out = picker.pick({"version": 3, "disabled": {}}, table, plugins=False)
         self.assertEqual([(r.label, r.staged) for r in out], [("claude/skill/one", False)])
 

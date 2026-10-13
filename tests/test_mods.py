@@ -127,12 +127,12 @@ class PickerModOpsTest(SandboxCase):
         win = FakeWin(keys, size=size)
         return picker.loop(win, self.rows, glyphs=theme.UNICODE), win
 
-    def test_space_parks_a_mod_and_enter_returns_it_as_a_plugin(self) -> None:
-        out, _ = self.run_keys([*MODS, " ", "\n"])
+    def test_tab_parks_a_mod_and_enter_returns_it_as_a_plugin(self) -> None:
+        out, _ = self.run_keys([*MODS, "\t", "\n"])
         self.assertEqual([(r.type, r.name, r.staged) for r in out], [("plugin", "big@mk", False)])
 
-    def test_space_restores_a_parked_mod(self) -> None:
-        out, _ = self.run_keys([*MODS, picker.curses.KEY_DOWN, " ", "\n"])
+    def test_tab_restores_a_parked_mod(self) -> None:
+        out, _ = self.run_keys([*MODS, picker.curses.KEY_DOWN, "\t", "\n"])
         self.assertEqual([(r.name, r.staged) for r in out], [("off@mk", True)])
 
     def test_type_filter_cycles_through_mods_between_plugins_and_mcp(self) -> None:
@@ -176,12 +176,10 @@ class PickerModOpsTest(SandboxCase):
         _, win = self.run_keys([*MODS, "\x1b"])
         self.assertRegex(win.text(), r"type\s+mod \(plugin\)")
 
-    def test_space_after_a_search_space_toggles_the_mod(self) -> None:
-        """The README's way to a mod is a search: the first Space ends the term, the next
-        toggles, and a later letter still starts a second term."""
-        out, _ = self.run_keys([*"mods", " ", " ", "\n"])
+    def test_tab_after_search_spaces_toggles_the_mod(self) -> None:
+        out, _ = self.run_keys([*"mods", " ", " ", "\t", "\n"])
         self.assertEqual([(r.name, r.staged) for r in out], [("big@mk", False)])
-        out, win = self.run_keys([*"mods", " ", " ", *"pa", "\x1b"])
+        out, win = self.run_keys([*"mods", " ", "\t", *"pa", "\x1b"])
         self.assertIn("pane@mk", win.text())
         self.assertNotIn("big@mk", win.text())
 
