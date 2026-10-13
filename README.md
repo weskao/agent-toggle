@@ -36,7 +36,7 @@ queues the matching reload ([Claude Code pane mod](#claude-code-pane-mod)).
 
 | target | native mechanism | the gap |
 |---|---|---|
-| plugin | `claude plugin disable/enable` | fine — this tool just batches it |
+| plugin | `claude plugin disable/enable` | without `-s` the scope follows the current dir, so a project plugin enabled from elsewhere stays off; this tool pins the install's scope and project |
 | skill | none | moving files by hand hits the rename trap below |
 | agent | none | same |
 | command | none | same, plus nested `group/name.md` paths get flattened |
@@ -520,8 +520,13 @@ Plugin ids are passed to `claude plugin ...`, which on Windows runs through
 
 Copilot's `config.json` is machine-managed and never edited by this tool; Copilot
 plugins are not yet supported. `claude` plugins are toggled through `claude
-plugin enable/disable`; `openclaw` plugins through a config flag (see [Assumed
-formats](#assumed-formats)). Codex has no plugin CLI this tool can drive: `disable
+plugin enable/disable -s <scope>`. The scope comes from the plugin's one install in
+`~/.claude/plugins/installed_plugins.json`, and a project or local install runs in its
+project dir, so a disable and an enable from different directories still hit the same
+setting. With several installs of one id, the CLI picks the scope from the current dir;
+`enable` then runs in the dir the disable ran in. Details are in
+[docs/toggle-paths.md](docs/toggle-paths.md#plugins). `openclaw` plugins are toggled
+through a config flag (see [Assumed formats](#assumed-formats)). Codex has no plugin CLI this tool can drive: `disable
 plugin x --harness codex` exits `4`, which is why the matrix leaves it unchecked.
 
 Flag items (openclaw plugins and flagged skills, opencode mcp) are toggled with

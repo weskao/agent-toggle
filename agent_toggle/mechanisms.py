@@ -28,7 +28,14 @@ from .backends.mcp_json import (
     write_project_mcp,
 )
 from .backends.mcp_toml import codex_mcp_add, codex_mcp_remove, toml_block
-from .backends.plugin_cli import claude_bin, full_plugin_id, list_plugins, run_cli
+from .backends.plugin_cli import (
+    PLUGIN_SCOPES,
+    claude_bin,
+    full_plugin_id,
+    list_plugins,
+    plugin_where,
+    run_cli,
+)
 from .companions import move, park_companions, restore_companions
 from .fs import prune_empty
 from .harnesses import PROBE_SUFFIXES, harnesses, project_view
@@ -118,6 +125,10 @@ def _entry_reason(entry: dict, table: dict, key: str, need: tuple[str, ...]) -> 
     if entry.get("mechanism") == "native_cli" and not (
             head == "claude" and type_ == "plugin" and valid_plugin_id(name)):
         return "native_cli entry is not a claude plugin with a plain id"
+    if entry.get("mechanism") == "native_cli" and (
+            entry.get("scope", "user") not in PLUGIN_SCOPES
+            or ("cwd" in entry and not _abs_path(entry["cwd"]))):
+        return f"plugin scope {entry.get('scope')!r} / cwd {entry.get('cwd')!r} is not usable"
     if entry.get("backend") == "claude-json" and entry.get("scope") in ("user", "local"):
         if entry["scope"] == "local":
             # `project` here is the claude local-scope cwd, not a --project scope
@@ -527,7 +538,8 @@ def settle(state: dict, key: str, out: Result | None = None, *,
                            f"{json.dumps(was)} in {file} (its value before the run)")
     elif mech == "native_cli":            # the CLI is the op: ask it, never assume
         try:
-            on = _plugin_enabled(entry["name"])
+            cwd = entry.get("cwd")         # checked absolute above; a gone dir: list from here
+            on = _plugin_enabled(entry["name"], cwd if cwd and os.path.isdir(cwd) else None)
         except ValueError as e:
             return _report(out, dry_run, "stuck",
                            f"{what}: cannot tell whether it landed: {e}; fix: run `claude "
@@ -890,6 +902,18 @@ def _shared_text(verb: str, owner: str, harness: str, others: list[str]) -> str:
     return f"{verb} (shared dir: {where}also affects {', '.join(others)})"
 
 
+def _plugin_recorded(entry: dict | None, table: dict, key: str, name: str,
+                     home: Path) -> tuple[str | None, str | None]:
+    """(scope, cwd) an enable runs with: what the disable recorded (its project dir gone:
+    the CLI auto-detects), else, for an entry from before scope tracking, the registry."""
+    if entry and ("scope" in entry or "cwd" in entry) and not _refusal(entry, table, key, ()):
+        cwd = entry.get("cwd")
+        if cwd and not os.path.isdir(cwd):
+            return None, None
+        return entry.get("scope"), cwd
+    return plugin_where(name, home)
+
+
 def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                   out: Result | None = None, dry_run: bool = False, *,
                   batch: str = BATCH) -> int:
@@ -923,11 +947,20 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
             continue
         key = f"{harness}:plugin:{name}"
         exe = claude_bin()
-        entry = state["disabled"].get(key) if action == "enable" else {
-            "mechanism": "native_cli", "harness": harness, "type": "plugin",
-            "name": name, "native": True,
-            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        }
+        if action == "enable":
+            entry = state["disabled"].get(key)
+            scope, cwd = _plugin_recorded(entry, table, key, name, table[harness].home)
+        else:
+            scope, cwd = plugin_where(name, table[harness].home)
+            if scope is None:            # the CLI auto-detects from here: enable replays it
+                with contextlib.suppress(OSError):
+                    cwd = os.getcwd()
+            entry = {
+                "mechanism": "native_cli", "harness": harness, "type": "plugin",
+                "name": name, "native": True,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                **({"scope": scope} if scope else {}), **({"cwd": cwd} if cwd else {}),
+            }
         # write-ahead only when state changes and settle can check it: no CLI, no entry
         # to drop, or one settle would refuse -> the op runs as before, unlogged
         logged = bool(exe and entry) and entry.get("mechanism") == "native_cli" \
@@ -939,7 +972,8 @@ def toggle_plugin(action: str, names: list[str], state: dict, harness: str,
                 fails += fail_row(out, dry_run, harness, "plugin", action, name,
                                   f"state not saved, nothing changed: {e}", batch=batch)
                 continue
-        ok, res = run_cli(exe, ["plugin", action, name])
+        ok, res = run_cli(exe, ["plugin", action, name, *(["-s", scope] if scope else [])],
+                          cwd=cwd)
         if not ok:
             # a timeout may still have landed: ask the CLI. A plain non-zero exit did not
             # (and asking would record an already-disabled plugin as ours: no `was` here)
@@ -1346,15 +1380,16 @@ def _mcp_present(entry: dict, file: Path) -> bool:
     return name in servers
 
 
-def _plugin_enabled(name: str) -> bool | None:
-    """Whether `claude plugin list --json` shows plugin `name` enabled (None: not listed;
+def _plugin_enabled(name: str, cwd: str | None = None) -> bool | None:
+    """Whether `claude plugin list --json`, run in `cwd` (where the op ran: a project-scope
+    plugin's state is the project's), shows plugin `name` enabled (None: not listed;
     a bare name matches its one `name@marketplace` id). ValueError when the CLI cannot
     say -- absent, slow (READ_TIMEOUT / AGENT_TOGGLE_CLI_TIMEOUT), failing, unparseable
     or ambiguous: the verdict is then stuck, never guessed."""
     if not claude_bin():
         raise ValueError("claude CLI not found")
     why: list[str] = []
-    listed = list_plugins(why.append)
+    listed = list_plugins(why.append, cwd)
     if why:      # its "; plugin rows come from state only" tail is list's, not ours
         raise ValueError(why[0].rpartition("; ")[0])
     hits = [p for p in listed

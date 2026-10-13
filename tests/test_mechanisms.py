@@ -1,7 +1,10 @@
 """Park / restore of dir-type resources, and the harness/backend gates."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import shutil
 import unittest
 from pathlib import Path
@@ -187,6 +190,97 @@ class OpencodeDuplicateSkillTest(CliCase):
         self.assertEqual(rc, 0)
         self.assertIn("still loads another copy", err)
         self.assertNotIn("still loads another copy", out)
+
+
+class PluginScopeTest(SandboxCase):
+    """`claude plugin disable|enable` without `-s` picks the scope from the cwd: a
+    project-scope plugin enabled from elsewhere got a new user-scope `true` while its
+    project stayed `false`. The install registry names the scope and project."""
+
+    ID = "demo-plugin@demo-mkt"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli_rc = 0
+        (self.tmp / "work" / "repo").mkdir(parents=True)
+        (self.tmp / "work" / "other").mkdir(parents=True)
+        # resolved: os.getcwd() is, and macOS /var is a symlink
+        self.proj = (self.tmp / "work" / "repo").resolve()
+        self.elsewhere = (self.tmp / "work" / "other").resolve()
+        self.state = {"version": 3, "disabled": {}}
+
+    def installs(self, *rows: dict) -> None:
+        reg = self.home / "plugins" / "installed_plugins.json"
+        reg.parent.mkdir(parents=True, exist_ok=True)
+        reg.write_text(json.dumps({"version": 2, "plugins": {self.ID: list(rows)}}),
+                       encoding="utf-8")
+
+    def toggle(self, action: str, cwd: Path) -> int:
+        old = os.getcwd()
+        os.chdir(cwd)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return mech.toggle_plugin(action, [self.ID], self.state, "claude")
+        finally:
+            os.chdir(old)
+
+    def calls(self) -> list[tuple[list[str], str | None]]:
+        return [(a, c) for a, c in self.cli_calls if a[:2] != ["plugin", "list"]]
+
+    def test_project_scope_round_trips_from_any_cwd(self) -> None:
+        self.installs({"scope": "project", "projectPath": str(self.proj)})
+        self.assertEqual(self.toggle("disable", self.elsewhere), 0)
+        self.assertEqual(self.toggle("enable", self.elsewhere), 0)
+        want = (str(self.proj),)
+        self.assertEqual(self.calls(), [
+            (["plugin", "disable", self.ID, "-s", "project"], *want),
+            (["plugin", "enable", self.ID, "-s", "project"], *want)])
+
+    def test_enable_replays_the_recorded_scope_not_todays_registry(self) -> None:
+        self.installs({"scope": "local", "projectPath": str(self.proj)})
+        self.toggle("disable", self.proj)
+        self.installs({"scope": "user"})                 # registry changed meanwhile
+        self.toggle("enable", self.elsewhere)
+        self.assertEqual(self.calls()[-1],
+                         (["plugin", "enable", self.ID, "-s", "local"], str(self.proj)))
+
+    def test_user_scope_passes_the_scope_and_no_cwd(self) -> None:
+        self.installs({"scope": "user"})
+        self.toggle("disable", self.proj)
+        self.assertEqual(self.calls(), [(["plugin", "disable", self.ID, "-s", "user"], None)])
+
+    def test_ambiguous_install_keeps_auto_detect_and_replays_its_cwd(self) -> None:
+        self.installs({"scope": "user"}, {"scope": "project", "projectPath": str(self.proj)})
+        self.toggle("disable", self.proj)
+        self.toggle("enable", self.elsewhere)
+        self.assertEqual(self.calls(), [
+            (["plugin", "disable", self.ID], str(self.proj)),
+            (["plugin", "enable", self.ID], str(self.proj))])
+
+    def test_entry_from_before_scope_tracking_resolves_from_the_registry(self) -> None:
+        self.installs({"scope": "project", "projectPath": str(self.proj)})
+        self.state["disabled"][f"claude:plugin:{self.ID}"] = {
+            "mechanism": "native_cli", "harness": "claude", "type": "plugin",
+            "name": self.ID, "native": True, "at": "2026-01-01T00:00:00+0000"}
+        self.toggle("enable", self.elsewhere)
+        self.assertEqual(self.calls(), [
+            (["plugin", "enable", self.ID, "-s", "project"], str(self.proj))])
+
+    def test_no_registry_and_a_gone_project_fall_back_to_auto_detect(self) -> None:
+        self.toggle("disable", self.elsewhere)           # no installed_plugins.json
+        self.installs({"scope": "project", "projectPath": str(self.tmp / "gone")})
+        self.toggle("enable", self.elsewhere)
+        self.assertEqual(self.calls(), [
+            (["plugin", "disable", self.ID], str(self.elsewhere)),
+            (["plugin", "enable", self.ID], str(self.elsewhere))])
+
+    def test_tampered_scope_or_cwd_is_refused(self) -> None:
+        for bad in ({"scope": "global"}, {"cwd": "relative/dir"}, {"cwd": 7}):
+            with self.subTest(bad=bad):
+                entry = {"mechanism": "native_cli", "harness": "claude", "type": "plugin",
+                         "name": self.ID, "native": True, "at": "2026", **bad}
+                self.assertTrue(mech._entry_reason(entry, mech.harnesses(),
+                                                   f"claude:plugin:{self.ID}", ()))
 
 
 class McpGateTest(SandboxCase):

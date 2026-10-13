@@ -291,7 +291,8 @@ reported with the exact fix: an unreadable flag file, a tampered entry, or a
 cross-fs move killed between its two renames). An MCP op is settled by asking
 whether the server is in the config file (read strictly; a disable whose backup is
 gone is stuck, not recorded). A plugin op is settled by one read-only
-`claude plugin list --json` (30 s, `AGENT_TOGGLE_CLI_TIMEOUT` overrides); a missing
+`claude plugin list --json` (30 s, `AGENT_TOGGLE_CLI_TIMEOUT` overrides), run in the
+entry's `cwd` when it has one (its `enabled` is the state seen from that dir); a missing
 CLI, a timeout, a failure or an ambiguous listing is `stuck` too -- so a dry run,
 `status` or `doctor` that meets a pending plugin op runs that one call. It never guesses,
 bar one documented guess: a flag's prior value is the `was` saved before the write, but a
@@ -773,6 +774,16 @@ Known gaps added by phase 2 (`- [x]` fixed or decided, `- [ ]` still open):
   that project until it was re-registered by hand. `enable` now drops the name from
   every project's list (user and local scope) or from that repo and the dirs inside it
   (`--project`), via the connector helper's `under` filter.
+- [x] Fixed: `claude plugin disable|enable` without `-s` takes the scope from its cwd
+  (checked on 2.1.296 in a throwaway HOME): a project-scope plugin disabled from its
+  repo (the pane) and enabled from a terminal got a new user-scope `true` while the
+  project stayed `false`, and disabled from elsewhere it got a user-scope `false` and
+  stayed on. The op now passes the scope of the plugin's one install in
+  `~/.claude/plugins/installed_plugins.json` (a file read, not a ~0.8 s `plugin list`
+  per pane toggle) and runs in its `projectPath`. The entry records `scope` / `cwd`
+  and `enable` replays them. With several installs, no registry or a gone project, the
+  CLI auto-detects as before, from the recorded `cwd` on enable. Tampered values are
+  refused. `undo` of an `enable` re-resolves through the registry.
 - [ ] Still checkpoint-only: the `claude.ai` connector toggle (the landed state cannot be
   told from a pre-existing, partial `disabledMcpServers` list; re-running is
   idempotent) and the plugin bare-key cleanup on `enable foo@mkt`. A kill there can

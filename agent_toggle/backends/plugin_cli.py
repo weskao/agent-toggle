@@ -10,12 +10,15 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Callable
 
 from .. import fs
 
 which = shutil.which
 runner = subprocess.run
+
+PLUGIN_SCOPES = ("user", "project", "local")      # `claude plugin enable|disable -s`
 
 TIMEOUT_ENV = "AGENT_TOGGLE_CLI_TIMEOUT"
 MUTATE_TIMEOUT = 120      # enable / disable / install / mcp add|remove: may fetch from a marketplace
@@ -68,12 +71,39 @@ def run_cli(binary: str | None, args: list[str], cwd: str | None = None,
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
-def list_plugins(warn: Callable[[str], None]) -> list[dict]:
-    """`claude plugin list --json` through the injectable runner; [] when unavailable."""
+def plugin_where(name: str, claude_home: Path) -> tuple[str | None, str | None]:
+    """(scope, cwd) of plugin `name`'s one install, from Claude Code's install registry
+    (`<claude_home>/plugins/installed_plugins.json`; a bare name: its one `name@mkt` id).
+
+    Without `-s` the CLI picks the scope from its cwd, so a project-scope plugin toggled
+    from another dir lands in user scope. (None, None) when the registry cannot say --
+    absent, another shape, several installs, a project dir that is gone: the caller
+    then lets the CLI auto-detect, as before. A file read, not `claude plugin list`
+    (~0.8 s per call, paid on every pane toggle)."""
+    try:
+        reg = json.loads((claude_home / "plugins" / "installed_plugins.json")
+                         .read_text(encoding="utf-8"))
+        rows = [r for k, v in reg["plugins"].items()
+                if k == name or ("@" not in name and k.partition("@")[0] == name) for r in v]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None, None
+    if len(rows) != 1 or not isinstance(rows[0], dict) or rows[0].get("scope") not in PLUGIN_SCOPES:
+        return None, None
+    scope, proj = rows[0]["scope"], rows[0].get("projectPath")
+    if scope == "user":
+        return scope, None
+    if isinstance(proj, str) and os.path.isabs(proj) and os.path.isdir(proj):
+        return scope, proj
+    return None, None
+
+
+def list_plugins(warn: Callable[[str], None], cwd: str | None = None) -> list[dict]:
+    """`claude plugin list --json` through the injectable runner; [] when unavailable.
+    `cwd`: its `enabled` is the plugin's state as seen from there."""
     exe = claude_bin()
     if not exe:
         return []
-    ok, text = run_cli(exe, ["plugin", "list", "--json"], timeout=READ_TIMEOUT)
+    ok, text = run_cli(exe, ["plugin", "list", "--json"], cwd=cwd, timeout=READ_TIMEOUT)
     try:       # run_cli merges stderr into the text: skip any notice before the array
         data = json.JSONDecoder().raw_decode(text, max(text.find("["), 0))[0] if ok else None
     except ValueError:

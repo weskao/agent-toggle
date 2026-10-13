@@ -727,6 +727,20 @@ class PluginCrashTest(CliCrashCase):
         self.assertTrue(any("recovered interrupted disable" in w for w in env["warnings"]))
         self.assert_settled(False)
 
+    def test_a_project_scope_plugin_is_settled_from_its_project(self) -> None:
+        """The listing's `enabled` is the state seen from its cwd: ask from the project."""
+        proj = self.tmp / "work" / "repo"
+        proj.mkdir(parents=True)
+        reg = self.home / "plugins" / "installed_plugins.json"
+        reg.parent.mkdir(parents=True)
+        reg.write_text(json.dumps({"version": 2, "plugins": {"demo@mkt": [
+            {"scope": "project", "projectPath": str(proj)}]}}), encoding="utf-8")
+        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.run_json(*NEXT)
+        self.assert_settled(True)
+        lists = [cwd for c, cwd in self.cli_calls if c[:2] == ["plugin", "list"]]
+        self.assertEqual(lists, [str(proj)])
+
     def test_kill_before_the_cli_disable_rolls_back(self) -> None:
         self.kill_in_cli("disable", *self.ARGS, landed=False)
         self.assertIn(self.KEY, self.pending())

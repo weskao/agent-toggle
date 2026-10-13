@@ -16,7 +16,7 @@ example `claude:skill:demo-skill`). It also appends a row to
 | type | mechanism | disable | enable |
 |---|---|---|---|
 | skill, agent, command, rule | move | moves the item to `~/.agent-toggle/parked/user/<owner>/<dir>/`, nested path kept; exclusive companion files go to `~/.agent-toggle/companions/` | moves it back to the `origin` in the state entry, restores the companions, removes emptied park dirs |
-| plugin (claude) | native CLI | `claude plugin disable <id>`; nothing moved | `claude plugin enable <id>` |
+| plugin (claude) | native CLI | `claude plugin disable <id> -s <scope>`, run in the install's project; scope and dir recorded; nothing moved | `claude plugin enable <id>` with the recorded scope and dir |
 | plugin (openclaw) | flag | `plugins.entries.<name>.enabled` → `false` in `openclaw.json` | the flag's previous value is written back |
 | MCP (claude) | remove with backup | raw entry from `~/.claude.json` saved to `mcp-backups/`, then `claude mcp remove -s <scope>` | `claude mcp add-json` with the saved entry; local scope runs in the saved project dir; the name leaves every project's `disabledMcpServers` |
 | MCP (codex, grok) | remove with backup | the `[mcp_servers.<name>]` text block saved, then cut from `config.toml` | the block is appended back to `config.toml` |
@@ -70,12 +70,29 @@ dirs that are now empty.
 
 | harness | disable | enable |
 |---|---|---|
-| claude | `claude plugin disable demo-plugin@example-marketplace` | `claude plugin enable demo-plugin@example-marketplace` |
+| claude | `claude plugin disable demo-plugin@example-marketplace -s <scope>` | `claude plugin enable demo-plugin@example-marketplace -s <scope>` |
 | openclaw | `~/.openclaw/openclaw.json`: `plugins.entries.demo-plugin.enabled` `true` → `false` | the previous value is written back |
 
 - A claude plugin, mods included, is never moved. Its files stay under
   `~/.claude/plugins/cache/<marketplace>/<name>/<version>/`, and Claude Code
-  records the change in its own settings.
+  records the change in its own settings for that scope:
+
+  | scope | setting changed |
+  |---|---|
+  | user | `~/.claude/settings.json` → `enabledPlugins["demo-plugin@example-marketplace"]` |
+  | project | `~/work/repo/.claude/settings.json` → the same key |
+  | local | `~/work/repo/.claude/settings.local.json` → the same key |
+
+- The scope comes from the plugin's one install in
+  `~/.claude/plugins/installed_plugins.json`. A project or local install runs the command
+  in its `projectPath` (`~/work/repo`), so it does not matter where you run `agent-toggle`.
+  Without `-s`, the CLI would pick the scope from the current dir: a project plugin
+  enabled from elsewhere would get a new user-scope `true` and stay off in its project.
+- The state entry keeps `scope` and, for project or local scope, `cwd` (the project dir).
+  `enable` replays both, even when the registry changed meanwhile.
+- With several installs of one id, no registry, or a project dir that is gone, the CLI
+  picks the scope itself, as before. The state entry then records the dir that disable ran
+  in as `cwd`, and `enable` runs there, so the CLI resolves the same scope.
 - The plugin id is checked before the command runs. Anything outside
   `A-Z a-z 0-9 . _ @ : / -` is refused.
 
