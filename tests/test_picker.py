@@ -440,7 +440,7 @@ class KeysTest(ScreenCase):
         out, win = self.run_keys([" ", "\n"], size=(5, 40))
         self.assertEqual([r.name for r in out], ["alpha"])
         self.assertIn("of 5 shown", win.frames[0][-3])
-        self.assertIn("Space toggle", win.frames[0][-1])
+        self.assertIn("Ctrl+C to leave · auto-save", win.frames[0][-1])
 
     def test_resize_redraws_at_the_new_size(self) -> None:
         _, win = self.run_keys([(30, 120), (12, 50), (4, 30), "\x1b"])
@@ -458,10 +458,24 @@ class LayoutTest(ScreenCase):
         self.assertIn("5 resources · ~6.3k tok live", win.frames[0][0])
         self.assertIn("1 staged (-1.2k tok)", win.screen[0])
 
-    def test_status_line_says_ctrl_c_leaves_and_auto_saves(self) -> None:
-        _, win = self.run_keys(["\x1b"])
-        self.assertEqual(win.screen[-3].strip(), "5 of 5 shown · 1/5")
-        self.assertEqual(win.screen[-2].strip(), "Ctrl+C to leave · auto-save")
+    def test_leave_hint_shares_the_key_chip_row_and_style(self) -> None:
+        self.addCleanup(i18n.set_language, i18n.LANGUAGE)
+        for language, label, toggle in (("en", "to leave · auto-save", "toggle"),
+                                        ("zh-TW", "離開 · 自動儲存", "切換")):
+            i18n.set_language(language)
+            for width in (30, 40, 60, 80, 120):
+                for keys, key in ((["\x1b"], "Space"), (["/", "\x1b"], "Tab")):
+                    with self.subTest(language=language, width=width, key=key):
+                        _, win = self.run_keys(keys, size=(24, width))
+                        footer = win.screen[-1]
+                        self.assertIn(f"Ctrl+C {label}", footer)
+                        self.assertEqual(win.screen[-2], "")
+                        if width >= 60:
+                            self.assertIn(f"{key} {toggle}", footer)
+                            x = footer.index(key)
+                            y = len(win.screen) - 1
+                            self.assertEqual(win.attrs[y, 1], win.attrs[y, x])
+                            self.assertEqual(win.attrs[y, 8], win.attrs[y, x + len(key) + 1])
 
     def test_detail_pane_shows_the_description(self) -> None:
         text = "park a skill without deleting it"
@@ -521,7 +535,9 @@ class LayoutTest(ScreenCase):
             _, win = self.run_keys(["\x1b"], size=(24, width))
             self.assertTrue(all(len(line) <= width for line in win.screen), width)
             self.assertRegex(win.text(), r"●\s+alpha")
-            self.assertIn("Space toggle", win.screen[-1])
+            self.assertIn("Ctrl+C to leave · auto-save", win.screen[-1])
+            if width >= 60:
+                self.assertIn("Space toggle", win.screen[-1])
         _, win = self.run_keys(["\x1b"], size=(24, 90))
         self.assertIn("+shared", win.text())
         self.assertIn("1.2k", win.screen[win.find("alpha")])
@@ -542,7 +558,7 @@ class LayoutTest(ScreenCase):
         self.assertTrue(line.rstrip().endswith("│"), line)
 
     def test_typing_mode_swaps_the_key_chips(self) -> None:
-        _, win = self.run_keys(["/", "\x1b"])
+        _, win = self.run_keys(["/", "\x1b"], size=(24, 120))
         self.assertIn("Space toggle", win.frames[0][-1])
         self.assertIn("Tab toggle", win.screen[-1])
         self.assertIn("clear filter", win.screen[-1])
@@ -582,7 +598,7 @@ class LayoutTest(ScreenCase):
             m["init_pair"].assert_not_called()
 
     def test_ascii_glyphs(self) -> None:
-        _, win = self.run_keys(["\x1b"], glyphs=theme.ASCII)
+        _, win = self.run_keys(["\x1b"], glyphs=theme.ASCII, size=(24, 120))
         self.assertIn("*   alpha", win.text())
         self.assertIn("o   beta", win.text())
         self.assertNotIn("●", win.text())
@@ -594,7 +610,7 @@ class LayoutTest(ScreenCase):
         _, win = self.run_keys(["\x1b"], size=(24, 100))
         self.assertIn("技能", win.text())
         self.assertIn("全部", win.screen[1])
-        self.assertIn("Ctrl+C 離開 · 自動儲存", win.screen[-2])
+        self.assertIn("Ctrl+C 離開 · 自動儲存", win.screen[-1])
 
 
 class SettingsTest(ScreenCase):

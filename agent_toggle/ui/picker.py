@@ -360,8 +360,8 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
         if dry_run:
             status += _sep(g) + t("picker.status.dry_run", "dry run: Enter only shows the plan")
         put(h - 3, [(" " + status, "muted")])
-    put(h - 2, [(" " + t("picker.status.leave", "Ctrl+C to leave · auto-save"), "muted")])
-    put(h - 1, [(" ", "text"), *theme.key_chips(chips(v, g), w - 2, g)])
+    keys = [("Ctrl+C", t("picker.chip.leave", "to leave · auto-save")), *chips(v, g)]
+    put(h - 1, [(" ", "text"), *theme.key_chips(keys, w - 2, g)])
     win.refresh()
 
 
