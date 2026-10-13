@@ -45,7 +45,19 @@ DETAIL_MIN = 100            # narrower than this: list only, no detail pane
 BODY_TOP = 3                # title, tabs, filter line
 BACKSPACE = (curses.KEY_BACKSPACE, "\x7f", "\b")
 ENTER = ("\n", "\r", curses.KEY_ENTER)
-COMMANDS = ("s", "t", "h", "p", "n", "?", "/", *"0123456789")
+# Commands are Ctrl chords, so every letter and digit is search text. The pane mod
+# (mod/hooks/picker.tsx KEYS) uses the same letters; tests/test_mods.py checks they match.
+KEYS = {"all": "a", "profile": "o", "same": "e", "sort": "s", "type": "t"}
+
+
+def ctrl(letter: str) -> str:
+    """The character Ctrl+`letter` sends."""
+    return chr(ord(letter) & 0x1F)
+
+
+def chord(action: str, caret: bool = False) -> str:
+    """`action`'s key as the help (`Ctrl-T`) or a chip (`^T`) names it."""
+    return ("^" if caret else "Ctrl-") + KEYS[action].upper()
 
 
 def sort_label(sort: str) -> str:
@@ -264,8 +276,10 @@ def chips(v: View, g: theme.Glyphs) -> list[tuple[str, str]]:
     return [("Space", t("picker.chip.toggle", "toggle")), ("Enter", t("picker.chip.apply", "apply")),
             ("Esc", t("picker.chip.cancel", "cancel")), ("?", t("picker.chip.help", "help")),
             ("/", t("picker.chip.filter", "search")), (lr, t("picker.chip.harness", "harness")),
-            ("t", t("picker.chip.type", "type")), ("s", t("picker.chip.sort", "sort")),
-            ("p", t("picker.chip.profile", "profile")), ("a", t("picker.chip.all", "all"))]
+            (chord("type", True), t("picker.chip.type", "type")),
+            (chord("sort", True), t("picker.chip.sort", "sort")),
+            (chord("profile", True), t("picker.chip.profile", "profile")),
+            (chord("all", True), t("picker.chip.all", "all"))]
 
 
 def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
@@ -321,8 +335,8 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
         v.top = 0
         if body:
             put(BODY_TOP, clip([(" " + t("picker.empty", "nothing matches -- Ctrl-U clears "
-                                         "the filter, Left/Right picks another harness, t "
-                                         "another type"), "muted")], lw, g.ellipsis))
+                                         "the filter, Left/Right picks another harness, "
+                                         "Ctrl-T another type"), "muted")], lw, g.ellipsis))
     any_shared = any(r.shared for r in shown)
     cursor_row = shown[v.cur] if shown else None
     for i, line in enumerate(lines[v.top:v.top + body]):
@@ -359,14 +373,15 @@ def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
         ("Tab", t("picker.help.toggle_next", "toggle the row, then move to the next")),
         ("Enter", t("picker.help.apply", "apply staged changes (--dry-run: plan only)")),
         ("Esc  Ctrl-C", t("picker.help.cancel", "cancel; nothing is changed")),
-        ("/", t("picker.help.filter", "search name / harness / path (fuzzy); any other letter starts one too")),
+        ("/", t("picker.help.filter", "search name / harness / path (fuzzy); any letter or digit starts one too")),
         ("Bksp  Ctrl-U", t("picker.help.edit", "edit / clear the filter")),
-        (f"{lr}  0-9  h", t("picker.help.harness", "harness tab (0 = All)")),
-        ("t", t("picker.help.type", "cycle the type filter")),
-        ("s", t("picker.help.sort", "cycle sort: name / cost (biggest first)")),
-        ("p", t("picker.help.profile", "profiles: stage one, or save what is live")),
-        ("a  Ctrl-A", t("picker.help.all", "toggle every visible row")),
-        ("n", t("picker.help.same_name", "toggle every type with this row's name (this harness)")),
+        (lr, t("picker.help.harness", "harness tab")),
+        (chord("type"), t("picker.help.type", "cycle the type filter")),
+        (chord("sort"), t("picker.help.sort", "cycle sort: name / cost (biggest first)")),
+        (chord("profile"), t("picker.help.profile", "profiles: stage one, or save what is live")),
+        (chord("all"), t("picker.help.all", "toggle every visible row")),
+        (chord("same"), t("picker.help.same_name",
+                          "toggle every type with this row's name (this harness)")),
         ("?", t("picker.help.help", "this help")),
     ]
 
@@ -455,8 +470,9 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
          harness: str | None = None) -> list[Row] | None:
     pal = theme.init_curses_colors(color)
     g = glyphs or theme.get_glyphs()
-    # Esc answers in 0.1 s, not the 1 s default; shorter would split a slow SSH arrow key
-    for setup in (lambda: curses.curs_set(0), lambda: curses.set_escdelay(100)):
+    # Esc answers in 0.1 s, not the 1 s default; shorter would split a slow SSH arrow key.
+    # raw: Ctrl-S / Ctrl-T / Ctrl-O reach us instead of the tty (XOFF, SIGINFO, discard)
+    for setup in (lambda: curses.curs_set(0), lambda: curses.set_escdelay(100), curses.raw):
         try:
             setup()
         except (curses.error, AttributeError):
@@ -506,32 +522,25 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
             v.typing = v.typing and bool(v.query)
         elif key == "\x15":                               # Ctrl-U
             v.query, v.typing, v.cur = "", False, 0
-        elif key == "\x01" or key == "a" and not v.filtering:     # Ctrl-A / a
+        elif key == ctrl(KEYS["all"]):
             live = not all(r.staged for r in shown)
             for r in shown:
                 r.staged = live
-        elif not v.filtering and key in COMMANDS:
-            if key == "p":
-                v.note = profile_command(v.rows, ask_profile(win, pal, g), project, dry_run,
-                                         harness)
-            elif key == "n":
-                if shown:
-                    n = toggle_same_name(v.rows, shown[v.cur])
-                    v.note = f"{shown[v.cur].name}: {n} rows"
-            elif key == "s":
-                v.sort = cycle(SORTS, v.sort)
-            elif key == "h":
-                v.tab(1)
-            elif key == "t":
-                v.type_ = cycle(v.types, v.type_)
-            elif key == "?":
-                show_help(win, pal, g)
-            elif key == "/":
-                v.typing = True
-            else:
-                v.tab(to=int(key))
-            if key not in ("?", "n"):
-                v.cur = 0
+        elif key == ctrl(KEYS["same"]):
+            if shown:
+                n = toggle_same_name(v.rows, shown[v.cur])
+                v.note = f"{shown[v.cur].name}: {n} rows"
+        elif key == ctrl(KEYS["profile"]):
+            v.note = profile_command(v.rows, ask_profile(win, pal, g), project, dry_run, harness)
+            v.cur = 0
+        elif key == ctrl(KEYS["sort"]):
+            v.sort, v.cur = cycle(SORTS, v.sort), 0
+        elif key == ctrl(KEYS["type"]):
+            v.type_, v.cur = cycle(v.types, v.type_), 0
+        elif key == "?" and not v.filtering:
+            show_help(win, pal, g)
+        elif key == "/" and not v.filtering:
+            v.typing, v.cur = True, 0
         elif isinstance(key, str) and key.isprintable():
             v.query += key
             v.typing = True

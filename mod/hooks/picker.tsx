@@ -16,6 +16,8 @@ const TICK = 80 // spinner.py INTERVAL
 const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
 const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name', wheel: 0, frame: 0 }
 const CHROME = 5 // title, search, status, chips, and one spare for the error line
+// Ctrl chords, so every letter is search text: the curses picker's KEYS (tests/test_mods.py checks they match)
+const KEYS = { sort: 's', same: 'e' }
 
 const groupOf = (r: Row) => (r.mod ? 'mod' : r.type)
 const rank = (r: Row) => {
@@ -105,9 +107,9 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
       if (s.query.endsWith(' ')) return toggle(), go(cursor, { query: s.query.trimEnd() }) // second Space toggles
       return go(cursor, { query: s.query + ' ' })
     }
+    if (e.ctrl && k === KEYS.sort) return go(0, { sort: s.sort === 'name' ? 'cost' : 'name' })
+    if (e.ctrl && k === KEYS.same) return toggle('same') // every type with this row's name
     if (k.length !== 1 || e.ctrl || e.meta) return
-    if (!searching && k === 's') return go(0, { sort: s.sort === 'name' ? 'cost' : 'name' })
-    if (!searching && k === 'n') return toggle('same') // every type with this row's name, as the curses `n`
     if (!searching && k === '/') return go(0, { typing: true })
     go(0, { query: s.query + k, typing: true })
   })
@@ -120,7 +122,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
   const topCost = Math.max(0, ...rows.map(r => (r.enabled ? r.tokens : r.save)))
   const live = props.rows.reduce((n, r) => n + (r.enabled ? r.tokens : 0), 0)
   const summary = `${props.rows.length} resources · ~${tok(live)} tok live`
-  const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], ['s', 'sort'], ['n', 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
+  const chips: Array<[string, string]> = [['Space', 'toggle'], ['/', 'search'], [`^${KEYS.sort.toUpperCase()}`, 'sort'], [`^${KEYS.same.toUpperCase()}`, 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
 
   // rows scrolled out of view, counted on the first and last list lines: the pane draws no scrollbar
   const shown = items.slice(top, top + body)
