@@ -147,6 +147,25 @@ Fix only if one bites; none blocks a phase.
       byte-preserving re-insert; old whole-file backups still restore
 - [x] `doctor` does not check companion files -- parked file present, no orphans, never both live and parked
 
+## Official plugin directory submission
+
+Requirements from https://www.claude.com/docs/plugins/submit (checked 2026-10-11). No fee is
+mentioned there. The repo is already public, and `claude plugin validate .` and
+`claude plugin validate ./mod` pass locally, `--strict` too (the `ui.scroll` hook carries a
+`.catch`).
+
+- [ ] connect the GitHub account (push access to `weskao/agent-toggle`) on claude.ai and
+      confirm the plan and role may submit (the page does not list which ones)
+- [ ] read and accept the Anthropic Software Directory Terms and Policy
+- [ ] submit `mod/` in the portal: listing details, data-handling answers, contact email and
+      the four acknowledgements; pass the portal's Validate step
+- [ ] say in the listing that the mod needs the `agent-toggle` CLI on `PATH` (PyPI) and edits
+      harness config files locally
+- [ ] wait for the automated scan (pass, held for an Anthropic reviewer, or fail); on a fail,
+      fix and resubmit (limit: 10 submissions per org per 24 h, one per repo and folder)
+- [ ] open question: whether a mod that loads `.tsx` code gets extra review, and how the
+      "community" vs "Anthropic Verified" listing is decided (not on the docs page)
+
 ## Housekeeping
 
 - [x] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
