@@ -314,6 +314,14 @@ class KeysTest(ScreenCase):
                 out = picker.loop(win, self.rows, glyphs=theme.UNICODE)
             self.assertEqual(None if out is None else self.names(out), expected)
 
+    def test_esc_dialog_mouse_hover_moves_cursor_without_confirming(self) -> None:
+        win = FakeWin(["\t", "\x1b", picker.curses.KEY_MOUSE, "\n"])
+        def hover():
+            line = next(y for y, text in enumerate(win.screen) if "[Y] Yes" in text)
+            return (0, win.screen[line].index("No"), line, 0, picker.curses.REPORT_MOUSE_POSITION)
+        with mock.patch.object(picker.curses, "getmouse", side_effect=hover):
+            self.assertIsNone(picker.loop(win, self.rows, glyphs=theme.UNICODE))
+
     def test_esc_dialog_scrolls_and_resizes_in_both_languages(self) -> None:
         self.addCleanup(i18n.set_language, "en")
         for lang, title in (("en", "Save changes?"), ("zh-TW", "儲存變更？")):

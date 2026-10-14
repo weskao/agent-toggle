@@ -473,7 +473,8 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
     previous_mask = None
     try:
         try:
-            _, previous_mask = curses.mousemask(curses.ALL_MOUSE_EVENTS)
+            _, previous_mask = curses.mousemask(
+                curses.ALL_MOUSE_EVENTS | getattr(curses, "REPORT_MOUSE_POSITION", 0))
         except (curses.error, AttributeError):
             pass
         while True:
@@ -554,12 +555,13 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                     _, mx, my, _, state = curses.getmouse()
                 except curses.error:
                     continue
-                if state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
-                    if my == by and bx <= mx < min(end_yes, w - 1):
-                        return True
-                    if my == by and end_yes + 2 <= mx < min(end_no, w - 1):
-                        return False
-                elif state & curses.BUTTON4_PRESSED:
+                hit = (True if my == by and bx <= mx < min(end_yes, w - 1) else
+                       False if my == by and end_yes + 2 <= mx < min(end_no, w - 1) else None)
+                if hit is not None:
+                    yes = hit                    # hover moves the cursor, a click confirms
+                    if state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
+                        return hit
+                if state & curses.BUTTON4_PRESSED:
                     top -= 1
                 elif state & getattr(curses, "BUTTON5_PRESSED", 0):
                     top += 1
