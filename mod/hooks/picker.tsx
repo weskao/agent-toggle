@@ -15,6 +15,7 @@ const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' // spinner.py BRAILLE, what `agent
 const TICK = 80 // spinner.py INTERVAL
 const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
 const INIT: State = { cursor: 0, top: 0, query: '', typing: false, sort: 'name', wheel: 0, frame: 0 }
+const AUTHOR = 'https://github.com/weskao' // plugin.json author.url
 const CHROME = 5 // title, search, status, chips, and one spare for the error line
 // Ctrl chords, so every letter is search text: the curses picker's KEYS (tests/test_mods.py checks they match)
 const KEYS = { sort: 's', same: 'e' }
@@ -170,7 +171,8 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     <Box flexDirection="column">
       <Text key="title" wrap="truncate">
         <Text bold> agent-toggle</Text>
-        <Text dimColor>{summary.padStart(Math.max(0, w - 13))}</Text>
+        <Text dimColor>{` · ${AUTHOR}`}</Text>
+        <Text dimColor>{summary.padStart(Math.max(0, w - 13 - AUTHOR.length - 3))}</Text>
       </Text>
       <Text key="search" wrap="truncate">
         <Text color="cyan">/ </Text>
