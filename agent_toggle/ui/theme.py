@@ -36,7 +36,7 @@ HARNESS_COLOURS = {
 #: "off" and "changed" are aliases of live / parked / pending.
 ROLES = (
     "text", "title", "harness", "type", "live", "parked", "pending", "choice",
-    "warning", "error", "accent", "muted", "cursor",
+    "warning", "error", "accent", "muted", "cursor", "hover",
     "chip_key", "chip_label", "tab_active", "tab_inactive",
     *(f"h_{n}" for n in HARNESS_COLOURS),
 )
@@ -173,6 +173,7 @@ _COLOUR = {
     "accent": ("BLUE", ("BOLD",)),
     "muted": (None, ("DIM",)),
     "cursor": (None, ("BOLD", "REVERSE")),
+    "hover": (None, ("BOLD", "REVERSE", "UNDERLINE")),
     "chip_key": ("CYAN", ("BOLD",)),
     "chip_label": (None, ("DIM",)),
     "tab_active": (None, ("BOLD", "REVERSE")),
@@ -183,7 +184,7 @@ _MONO = {
     "text": (), "title": ("BOLD",), "harness": ("BOLD",), "type": (), "live": ("BOLD",),
     "parked": ("DIM",), "pending": ("BOLD",), "choice": (), "warning": ("BOLD",),
     "error": ("BOLD", "REVERSE"), "accent": ("BOLD",), "muted": ("DIM",),
-    "cursor": ("REVERSE",), "chip_key": ("BOLD",), "chip_label": ("DIM",),
+    "cursor": ("REVERSE",), "hover": ("REVERSE", "UNDERLINE"), "chip_key": ("BOLD",), "chip_label": ("DIM",),
     "tab_active": ("BOLD", "REVERSE"), "tab_inactive": ("DIM",),
     **{f"h_{n}": ("BOLD",) for n in HARNESS_COLOURS},
 }
@@ -255,7 +256,7 @@ def init_curses_colors(enabled: bool, curses_mod=None) -> Palette:
 _SGR = {
     "title": "1", "harness": "1;36", "type": "34", "live": "32", "parked": "33",
     "pending": "35", "choice": "36", "warning": "1;33", "error": "1;31", "accent": "1;34",
-    "muted": "2", "cursor": "1;7", "chip_key": "1;36", "chip_label": "2",
+    "muted": "2", "cursor": "1;7", "hover": "1;4;7", "chip_key": "1;36", "chip_label": "2",
     "tab_active": "1;7", "tab_inactive": "2",
     "h_claude": "1;38;5;208", "h_codex": "1;36", "h_agy": "1;34", "h_grok": "1;33",
     "h_vibe": "1;32", "h_copilot": "1;31", "h_opencode": "1;35",

@@ -322,6 +322,25 @@ class KeysTest(ScreenCase):
         with mock.patch.object(picker.curses, "getmouse", side_effect=hover):
             self.assertIsNone(picker.loop(win, self.rows, glyphs=theme.UNICODE))
 
+    def test_esc_dialog_hover_style_differs_from_keyboard_cursor(self) -> None:
+        pal = theme.init_curses_colors(False)
+        win = FakeWin(["\t", "\x1b", picker.curses.KEY_MOUSE, picker.curses.KEY_LEFT, "y"])
+        seen, get_wch = [], win.get_wch
+        def spy():                                   # attr under the Yes/No buttons when a key is awaited
+            line = next((y for y, text in enumerate(win.screen) if "[Y] Yes" in text), None)
+            if line is not None:
+                seen.append({win.attrs[line, win.screen[line].index(w)] for w in ("Yes", "No")})
+            return get_wch()
+        win.get_wch = spy
+        def hover():
+            line = next(y for y, text in enumerate(win.screen) if "[Y] Yes" in text)
+            return (0, win.screen[line].index("No"), line, 0, picker.curses.REPORT_MOUSE_POSITION)
+        with mock.patch.object(picker.curses, "getmouse", side_effect=hover):
+            picker.loop(win, self.rows, glyphs=theme.UNICODE)
+        self.assertIn(pal.attr("hover"), seen[1])    # frame after the hover
+        self.assertNotIn(pal.attr("hover"), seen[2]) # a key press clears it
+        self.assertIn(pal.attr("cursor"), seen[2])
+
     def test_esc_dialog_scrolls_and_resizes_in_both_languages(self) -> None:
         self.addCleanup(i18n.set_language, "en")
         for lang, title in (("en", "Save changes?"), ("zh-TW", "儲存變更？")):

@@ -347,7 +347,7 @@ off under `--dry-run`. Esc closes the prompt.
 
 The exit dialog lists all staged changes, including rows hidden by a filter. Choose
 **Yes** to apply and leave, or **No** to discard and leave. Use Left/Right or Tab
-to select, Enter to confirm, Y/N shortcuts, or click either button. Esc in the
+to select, Enter to confirm, Y/N shortcuts, or click either button (hovering selects it and underlines it). Esc in the
 dialog returns to editing. Up/Down, PgUp/PgDn, Home/End and the mouse wheel scroll
 a long change list. The dialog follows the selected language and color mode;
 with `--dry-run`, Yes only shows the plan.

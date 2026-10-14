@@ -469,7 +469,7 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
              dry_run: bool = False) -> bool | None:
     """Yes applies, No discards, Esc returns to editing; mouse capture is modal-only."""
     changed = [r for r in v.rows if r.changed]
-    yes, top = True, 0
+    yes, top, hover = True, 0, False
     previous_mask = None
     try:
         try:
@@ -512,7 +512,7 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                                           "dry run: Enter only shows the plan"), "warning")])
             labels = ["[Y] " + t("picker.save.yes", "Yes"), "[N] " + t("picker.save.no", "No")]
             buttons = [(f" {g.pointer if selected else ' '} {label} ",
-                        "cursor" if selected else role)
+                        ("hover" if hover else "cursor") if selected else role)
                        for label, selected, role in zip(labels, (yes, not yes), ("live", "warning"))]
             total = sum(theme.cell_width(s) for s, _ in buttons) + 2
             bx = x0 + 1 + max(0, (inner - total) // 2)
@@ -531,6 +531,8 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                 key = win.get_wch()
             except (curses.error, KeyboardInterrupt):
                 return False
+            if key != curses.KEY_MOUSE:
+                hover = False
             if key == "\x1b":
                 return None
             if key == "\x03":
@@ -557,6 +559,7 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                     continue
                 hit = (True if my == by and bx <= mx < min(end_yes, w - 1) else
                        False if my == by and end_yes + 2 <= mx < min(end_no, w - 1) else None)
+                hover = hit is not None
                 if hit is not None:
                     yes = hit                    # hover moves the cursor, a click confirms
                     if state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):

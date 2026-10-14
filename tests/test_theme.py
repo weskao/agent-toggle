@@ -21,7 +21,7 @@ def text(segments) -> str:
 class FakeCurses:
     """Just enough of curses for init_curses_colors / draw_segments."""
 
-    A_BOLD, A_REVERSE, A_DIM = 1 << 8, 1 << 9, 1 << 10
+    A_BOLD, A_REVERSE, A_DIM, A_UNDERLINE = 1 << 8, 1 << 9, 1 << 10, 1 << 11
     COLOR_BLACK, COLOR_RED, COLOR_GREEN, COLOR_YELLOW = 0, 1, 2, 3
     COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN = 4, 5, 6
 
@@ -259,7 +259,7 @@ class PaletteTest(unittest.TestCase):
 
     def _assert_mono(self, pal, cur):
         self.assertTrue(pal.mono)
-        allowed = cur.A_BOLD | cur.A_REVERSE | cur.A_DIM
+        allowed = cur.A_BOLD | cur.A_REVERSE | cur.A_DIM | cur.A_UNDERLINE
         for role in theme.ROLES:
             self.assertEqual(pal.attr(role) & ~allowed, 0, role)   # no colour-pair bits
         self.assertEqual(pal.attr("parked"), cur.A_DIM)
