@@ -52,7 +52,7 @@ function filtered(rows: Row[], query: string) {
 let spinning = false
 
 const Picker: ClientModule<Props, State> = (props, surface) => {
-  const { Box, Text } = surface.elements
+  const { Box, Text, Link } = surface.elements
   const s = surface.state ?? INIT
   const w = surface.columns || 80
   const body = Math.max(3, (surface.rows || 24) - CHROME)
@@ -171,7 +171,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     <Box flexDirection="column">
       <Text key="title" wrap="truncate">
         <Text bold> agent-toggle</Text>
-        <Text dimColor>{` · ${AUTHOR}`}</Text>
+        <Text dimColor> · <Link href={AUTHOR} /></Text>
         <Text dimColor>{summary.padStart(Math.max(0, w - 13 - AUTHOR.length - 3))}</Text>
       </Text>
       <Text key="search" wrap="truncate">
