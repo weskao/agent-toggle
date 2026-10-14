@@ -391,7 +391,7 @@ class KeysTest(ScreenCase):
         self.assertEqual(len(out), 29)
         self.assertEqual([r.name for r in rows if not r.changed], ["demo-08"])
 
-    def test_review_refreshes_never_expose_background_including_resize(self) -> None:
+    def test_review_refreshes_keep_background_and_dialog_together_including_resize(self) -> None:
         rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
         out, win = self.run_keys([picker.ctrl("a"), "\x1b", picker.curses.KEY_END,
                                  (14, 60), "\t", "y"], rows=rows)
@@ -401,11 +401,14 @@ class KeysTest(ScreenCase):
         for frame in win.frames[opened:]:
             text = "\n".join(frame)
             self.assertIn("Save changes?", text)
-            self.assertNotIn("agent-toggle", text)
-            self.assertNotIn("Type to search", text)
+            self.assertIn("Esc leave / review", text)
             first = next(y for y, line in enumerate(frame) if "Save changes?" in line)
             last = next(y for y, line in enumerate(frame) if theme.UNICODE.bl in line)
-            self.assertTrue(all(not line.strip() for line in frame[:first] + frame[last + 1:]))
+            self.assertTrue(any(line.strip() for line in frame[:first]))
+            self.assertTrue(any(line.strip() for line in frame[last + 1:]))
+            blank = frame[last - 3]
+            left, right = blank.index(theme.UNICODE.v), blank.rindex(theme.UNICODE.v)
+            self.assertFalse(blank[left + 1:right].strip())
 
     def test_esc_dialog_mouse_choices_ignore_outside_clicks(self) -> None:
         for label, expected in (("Yes", [("alpha", False)]), ("No", None)):

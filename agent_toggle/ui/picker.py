@@ -284,7 +284,7 @@ def chips(v: View, g: theme.Glyphs) -> list[tuple[str, str]]:
 
 
 def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
-         dry_run: bool = False) -> None:
+         dry_run: bool = False, *, refresh: bool = True) -> None:
     win.erase()
     h, w = win.getmaxyx()
 
@@ -363,7 +363,8 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
         put(h - 3, [(" " + status, "muted")])
     keys = [("Esc", t("picker.chip.leave", "leave / review")), *chips(v, g)]
     put(h - 1, [(" ", "text"), *theme.key_chips(keys, w - 2, g)])
-    win.refresh()
+    if refresh:
+        win.refresh()
 
 
 def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
@@ -484,7 +485,7 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
             sys.stdout.write("\x1b[?1006h")
             sys.stdout.flush()
         while True:
-            win.erase()
+            draw(win, v, v.shown(), pal, g, dry_run, refresh=False)
             h, w = win.getmaxyx()
             bw = min(w, 76)
             bh = min(h, max(8, min(24, h * 4 // 5)), len(changed) + 8)

@@ -353,8 +353,8 @@ a long change list. Its height is capped at 80% of the terminal (up to 24 lines,
 with a compact layout on tiny terminals); the confirmation buttons stay visible.
 Up/Down and the mouse wheel move the selected row, just like the main picker;
 the list scrolls when the selection reaches its edge. Tab or a click toggles the
-row's staged enabled/disabled state. While the dialog is open, the background
-picker is completely hidden and each refresh paints only the dialog.
+row's staged enabled/disabled state. The picker stays visible behind the opaque
+dialog; both are painted together in one refresh to prevent background flashes.
 Reverted rows stay in the review so they can be toggled again; Yes applies only
 the remaining changes. The dialog follows the selected language and color mode;
 with `--dry-run`, Yes only shows the plan.
