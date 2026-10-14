@@ -203,6 +203,9 @@ class FakeWin:
     def keypad(self, flag):
         pass
 
+    def timeout(self, delay):
+        pass
+
     def get_wch(self):
         key = self.keys.pop(0)
         if isinstance(key, tuple):
@@ -294,13 +297,115 @@ class KeysTest(ScreenCase):
         self.assertIn("parked -> live", win.text())
 
     def test_esc_dialog_keyboard_choices_and_return_to_editing(self) -> None:
-        for choice in ([picker.curses.KEY_RIGHT, "\n"], ["\t", "\n"], ["n"]):
+        for choice in ([picker.curses.KEY_RIGHT, "\n"], ["n"]):
             self.rows = demo_rows()
             self.assertIsNone(self.run_keys(["\t", "\x1b", *choice])[0])
         self.rows = demo_rows()
         out, _ = self.run_keys(["\t", "\x1b", "\x1b", "\t", "\x1b"])
         self.assertIsNone(out)
         self.assertFalse(any(r.changed for r in self.rows))
+
+    def test_review_height_is_bounded_by_terminal_and_absolute_limit(self) -> None:
+        for height in (14, 24, 50):
+            rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(40)]
+            _, win = self.run_keys([picker.ctrl("a"), "\x1b", "y"],
+                                   size=(height, 80), rows=rows)
+            first = win.find("Save changes?")
+            last = next(y for y, line in enumerate(win.screen) if theme.UNICODE.bl in line)
+            self.assertLessEqual(last - first + 1, min(24, height * 4 // 5))
+            self.assertGreater(first, 0)
+
+    def test_review_can_toggle_back_and_save_only_remaining_changes(self) -> None:
+        out, win = self.run_keys(["\t", picker.curses.KEY_DOWN, "\t", "\x1b",
+                                  "\t", "\t", picker.curses.KEY_DOWN, "\t", "y"])
+        self.assertEqual(self.names(out), [("alpha", False)])
+        self.assertFalse(self.rows[2].changed)
+        self.assertIn("1 changes", win.text())
+        self.assertIn("parked -> parked", win.text())
+
+    def test_review_mouse_wheel_and_toggle_use_visible_rows(self) -> None:
+        rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+        C = picker.curses
+        win = FakeWin([picker.ctrl("a"), "\x1b", C.KEY_MOUSE, C.KEY_MOUSE,
+                       C.KEY_MOUSE, C.KEY_MOUSE, "y"], (14, 80))
+        events = ["down", "toggle", "toggle", "up"]
+        def mouse():
+            action = events.pop(0)
+            line = win.find("claude/skill/demo-01")
+            x = win.screen[line].index("claude/")
+            if action == "down":
+                return (0, x, line, 0, getattr(C, "BUTTON5_PRESSED", 1 << 30))
+            if action == "up":
+                return (0, x, line, 0, C.BUTTON4_PRESSED)
+            self.assertIn("demo-01", win.screen[line])
+            return (0, x, line, 0, C.BUTTON1_CLICKED)
+        with mock.patch.object(C, "getmouse", side_effect=mouse):
+            out = picker.loop(win, rows, glyphs=theme.UNICODE)
+        self.assertEqual(len(out), 30)
+        self.assertIn("demo-00", win.screen[win.find("claude/skill/demo-")])
+
+    def test_review_old_ncurses_sgr_wheel_and_click(self) -> None:
+        rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+        win = FakeWin([picker.ctrl("a"), "\x1b", *"\x1b[<65;7;4M",
+                       *"\x1b[<0;7;5M", *"\x1b[<0;7;5m", *"\x1b[<64;7;4M", "y"], (14, 80))
+        with mock.patch.object(picker.sys, "stdout"), \
+                mock.patch.dict(vars(picker.curses)):
+            # Force the same missing capability as the macOS system ncurses build.
+            vars(picker.curses).pop("BUTTON5_PRESSED", None)
+            out = picker.loop(win, rows, glyphs=theme.UNICODE)
+        self.assertEqual([r.name for r in out], ["demo-00", *[f"demo-{i:02}" for i in range(2, 30)]])
+        self.assertIn("demo-00", win.screen[win.find("claude/skill/demo-")])
+
+    def test_review_can_revert_every_change_in_dry_run(self) -> None:
+        out, win = self.run_keys(["\t", "\x1b", "\t", "y"], dry_run=True)
+        self.assertEqual(out, [])
+        self.assertIn("0 changes", win.text())
+        self.assertIn("live -> live", win.text())
+
+    def test_review_wheel_keeps_keyboard_toggle_on_a_visible_row(self) -> None:
+        rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+        win = FakeWin([picker.ctrl("a"), "\x1b", picker.curses.KEY_MOUSE, "\t", "y"], (14, 80))
+        def wheel():
+            line = win.find("claude/skill/demo-00")
+            return (0, win.screen[line].index("claude/"), line, 0,
+                    getattr(picker.curses, "BUTTON5_PRESSED", 1 << 30))
+        with mock.patch.object(picker.curses, "getmouse", side_effect=wheel):
+            out = picker.loop(win, rows, glyphs=theme.UNICODE)
+        self.assertEqual(len(out), 29)
+        self.assertTrue(rows[0].changed)
+        self.assertFalse(rows[1].changed)
+
+    def test_review_wheel_moves_selection_relative_to_cursor_not_mouse(self) -> None:
+        rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+        C = picker.curses
+        win = FakeWin([picker.ctrl("a"), "\x1b", *[C.KEY_DOWN] * 7,
+                       *[C.KEY_MOUSE] * 4, "\t", "y"], (14, 80))
+        states = [getattr(C, "BUTTON5_PRESSED", 1 << 30),
+                  getattr(C, "BUTTON5_PRESSED", 1 << 30),
+                  C.BUTTON4_PRESSED, C.REPORT_MOUSE_POSITION]
+        def mouse():
+            first = next(y for y, text in enumerate(win.screen) if "claude/skill/demo-" in text)
+            return (0, win.screen[first].index("claude/"), first + 3, 0, states.pop(0))
+        with mock.patch.object(C, "getmouse", side_effect=mouse):
+            out = picker.loop(win, rows, glyphs=theme.UNICODE)
+        self.assertEqual(len(out), 29)
+        self.assertEqual([r.name for r in rows if not r.changed], ["demo-08"])
+
+    def test_review_refreshes_never_expose_background_including_resize(self) -> None:
+        rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+        out, win = self.run_keys([picker.ctrl("a"), "\x1b", picker.curses.KEY_END,
+                                 (14, 60), "\t", "y"], rows=rows)
+        self.assertEqual(len(out), 29)
+        self.assertFalse(rows[29].changed)
+        opened = next(i for i, frame in enumerate(win.frames) if "Save changes?" in "\n".join(frame))
+        for frame in win.frames[opened:]:
+            text = "\n".join(frame)
+            self.assertIn("Save changes?", text)
+            self.assertNotIn("agent-toggle", text)
+            self.assertNotIn("Type to search", text)
+            first = next(y for y, line in enumerate(frame) if "Save changes?" in line)
+            last = next(y for y, line in enumerate(frame) if theme.UNICODE.bl in line)
+            self.assertTrue(all(not line.strip() for line in frame[:first] + frame[last + 1:]))
 
     def test_esc_dialog_mouse_choices_ignore_outside_clicks(self) -> None:
         for label, expected in (("Yes", [("alpha", False)]), ("No", None)):

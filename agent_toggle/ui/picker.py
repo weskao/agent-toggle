@@ -45,6 +45,7 @@ DETAIL_MIN = 100            # narrower than this: list only, no detail pane
 BODY_TOP = 3                # title, tabs, filter line
 BACKSPACE = (curses.KEY_BACKSPACE, "\x7f", "\b")
 ENTER = ("\n", "\r", curses.KEY_ENTER)
+WHEEL_DOWN = getattr(curses, "BUTTON5_PRESSED", 1 << 30)
 # Commands are Ctrl chords, so every letter and digit is search text. The pane mod
 # (mod/hooks/picker.tsx KEYS) uses the same letters; tests/test_mods.py checks they match.
 KEYS = {"all": "a", "profile": "o", "same": "e", "sort": "s", "type": "t"}
@@ -469,22 +470,32 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
              dry_run: bool = False) -> bool | None:
     """Yes applies, No discards, Esc returns to editing; mouse capture is modal-only."""
     changed = [r for r in v.rows if r.changed]
-    yes, top, hover = True, 0, False
+    yes, top, cur, hover = True, 0, 0, False
     previous_mask = None
+    # macOS ncurses 6.0 cannot decode wheel-down; read SGR mouse reports directly there.
+    sgr = not hasattr(curses, "BUTTON5_PRESSED") and sys.stdout.isatty()
     try:
         try:
             _, previous_mask = curses.mousemask(
                 curses.ALL_MOUSE_EVENTS | getattr(curses, "REPORT_MOUSE_POSITION", 0))
         except (curses.error, AttributeError):
             pass
+        if sgr:
+            sys.stdout.write("\x1b[?1006h")
+            sys.stdout.flush()
         while True:
-            draw(win, v, v.shown(), pal, g, dry_run)
+            win.erase()
             h, w = win.getmaxyx()
-            bw, bh = min(w, 76), min(h, len(changed) + 8)
+            bw = min(w, 76)
+            bh = min(h, max(8, min(24, h * 4 // 5)), len(changed) + 8)
             y0, x0 = (h - bh) // 2, (w - bw) // 2
             inner = max(0, bw - 2)
             page = max(1, bh - 6) if bh >= 7 else int(bh >= 4)
-            top = min(max(0, top), max(0, len(changed) - page))
+            cur = max(0, min(cur, len(changed) - 1))
+            top = max(0, min(top, cur))
+            top = max(top, cur - max(1, page) + 1)
+            top = min(top, max(0, len(changed) - max(1, page)))
+            row_y = y0 + (2 if bh >= 7 else 1)
 
             def put(y, segments):
                 theme.draw_segments(win, y, x0, [(g.v, "accent"),
@@ -498,15 +509,21 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                                 [(g.tl, "accent"), (title, "title"),
                                  (g.h * max(0, inner - theme.cell_width(title)) + g.tr, "accent")], pal)
             if bh >= 7:
-                put(y0 + 1, [(" " + t("picker.save.count", "%s changes", len(changed)), "pending"),
+                put(y0 + 1, [(" " + t("picker.save.count", "%s changes",
+                                      sum(r.changed for r in changed)), "pending"),
                              (f"  {top + 1}-{min(len(changed), top + page)}/{len(changed)}", "muted")])
             for i, row in enumerate(changed[top:top + page]):
                 live = t("picker.state.live", "live")
                 parked = t("picker.state.parked", "parked")
-                before, after = (parked, live) if row.staged else (live, parked)
-                put(y0 + (2 if bh >= 7 else 1) + i, [(" + " if row.staged else " - ",
-                                  "live" if row.staged else "parked"),
-                                 (row.label, "text"), (f"  {before} -> {after}", "pending")])
+                before = live if row.enabled else parked
+                after = live if row.staged else parked
+                mark = ("+" if row.staged else "-") if row.changed else "="
+                segments = [(f" {mark} ", "live" if row.staged else "parked"),
+                            (row.label, "text"), (f"  {before} -> {after}",
+                                                  "pending" if row.changed else "muted")]
+                if top + i == cur:
+                    segments = [(s, "cursor") for s, _ in clip(segments, inner, g.ellipsis)]
+                put(row_y + i, segments)
             if dry_run and bh >= 7:
                 put(y0 + bh - 4, [(" " + t("picker.status.dry_run",
                                           "dry run: Enter only shows the plan"), "warning")])
@@ -522,15 +539,58 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
             theme.draw_segments(win, by, bx, [buttons[0], ("  ", "text"), buttons[1]], pal)
             if bh >= 6:
                 put(y0 + bh - 2, [(" " + t("picker.save.keys",
-                     "Left/Right Tab select · Enter confirm · Esc back · Up/Down scroll"), "muted")])
+                     "Tab/click toggle · Up/Down move · Enter confirm · Esc back"), "muted")])
             if bh >= 4:
                 theme.draw_segments(win, y0 + bh - 1, x0,
                                     [(g.bl + g.h * inner + g.br, "accent")], pal)
             win.refresh()
+            mouse = None
             try:
                 key = win.get_wch()
+                if sgr and key == "\x1b":
+                    sequence = ""
+                    win.timeout(100)
+                    try:
+                        while len(sequence) < 40:
+                            char = win.get_wch()
+                            if not isinstance(char, str):
+                                curses.unget_wch(char)
+                                break
+                            sequence += char
+                            if not "[<".startswith(sequence) and not sequence.startswith("[<"):
+                                break
+                            if sequence.endswith(("M", "m")):
+                                break
+                    except curses.error:
+                        pass
+                    finally:
+                        win.timeout(-1)
+                    if sequence.startswith("[<") and sequence.endswith(("M", "m")):
+                        try:
+                            button, mx, my = map(int, sequence[2:-1].split(";"))
+                        except ValueError:
+                            continue
+                        state = (curses.BUTTON4_PRESSED if button & 127 == 64 else
+                                 WHEEL_DOWN if button & 127 == 65 else
+                                 curses.BUTTON1_RELEASED
+                                 if button & 127 == 0 and sequence.endswith("m") else 0)
+                        mouse = (0, mx - 1, my - 1, 0, state)
+                        key = curses.KEY_MOUSE
+                    else:
+                        for char in reversed(sequence):
+                            curses.unget_wch(char)
             except (curses.error, KeyboardInterrupt):
                 return False
+            if key == curses.KEY_MOUSE:
+                try:
+                    mouse = mouse if mouse is not None else curses.getmouse()
+                except curses.error:
+                    continue
+                _, mx, my, _, state = mouse
+                if state & (curses.BUTTON4_PRESSED | WHEEL_DOWN):
+                    if not (x0 <= mx < x0 + bw and y0 <= my < y0 + bh):
+                        continue
+                    key = curses.KEY_UP if state & curses.BUTTON4_PRESSED else curses.KEY_DOWN
             if key != curses.KEY_MOUSE:
                 hover = False
             if key == "\x1b":
@@ -543,20 +603,24 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                 return True
             if key in ("n", "N"):
                 return False
-            if key in (curses.KEY_LEFT, curses.KEY_RIGHT, "\t", curses.KEY_BTAB):
+            if key == "\t":
+                changed[cur].staged = not changed[cur].staged
+            elif key in (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_BTAB):
                 yes = not yes
             elif key in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE):
-                top += (-1 if key in (curses.KEY_UP, curses.KEY_PPAGE) else 1) * (
+                cur += (-1 if key in (curses.KEY_UP, curses.KEY_PPAGE) else 1) * (
                     max(1, page) if key in (curses.KEY_PPAGE, curses.KEY_NPAGE) else 1)
             elif key == curses.KEY_HOME:
-                top = 0
+                cur = 0
             elif key == curses.KEY_END:
-                top = len(changed)
+                cur = len(changed) - 1
             elif key == curses.KEY_MOUSE:
-                try:
-                    _, mx, my, _, state = curses.getmouse()
-                except curses.error:
-                    continue
+                _, mx, my, _, state = mouse
+                if (state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED)
+                        and x0 < mx < x0 + bw - 1
+                        and row_y <= my < row_y + min(page, len(changed) - top)):
+                    cur = top + my - row_y
+                    changed[cur].staged = not changed[cur].staged
                 hit = (True if my == by and bx <= mx < min(end_yes, w - 1) else
                        False if my == by and end_yes + 2 <= mx < min(end_no, w - 1) else None)
                 hover = hit is not None
@@ -564,11 +628,10 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
                     yes = hit                    # hover moves the cursor, a click confirms
                     if state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
                         return hit
-                if state & curses.BUTTON4_PRESSED:
-                    top -= 1
-                elif state & getattr(curses, "BUTTON5_PRESSED", 0):
-                    top += 1
     finally:
+        if sgr:
+            sys.stdout.write("\x1b[?1006l")
+            sys.stdout.flush()
         if previous_mask is not None:
             curses.mousemask(previous_mask)
 
@@ -604,7 +667,7 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
                 return None
             save = ask_save(win, v, pal, g, dry_run)
             if save is not None:
-                return changed if save else None
+                return [r for r in v.rows if r.changed] if save else None
             continue
         if key == "\x03":                                # Ctrl-C always discards
             return None

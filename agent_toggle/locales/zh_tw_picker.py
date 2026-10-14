@@ -71,7 +71,7 @@ CATALOG: dict[str, str] = {
     "picker.save.count": "%s 項變更",
     "picker.save.yes": "是",
     "picker.save.no": "否",
-    "picker.save.keys": "左右鍵 Tab 選擇 · Enter 確認 · Esc 返回 · 上下鍵捲動",
+    "picker.save.keys": "Tab/點擊 切換 · 上下 移動 · Enter 確認 · Esc 返回",
     "picker.help.filter": "搜尋名稱 / harness / 路徑（可模糊）；直接打任何字母或數字也會開始搜尋",
     "picker.help.edit": "編輯 / 清除篩選",
     "picker.help.harness": "harness 分頁",

@@ -346,10 +346,17 @@ a profile, with the same name rules and project scope as `profile save`; it is
 off under `--dry-run`. Esc closes the prompt.
 
 The exit dialog lists all staged changes, including rows hidden by a filter. Choose
-**Yes** to apply and leave, or **No** to discard and leave. Use Left/Right or Tab
+**Yes** to apply and leave, or **No** to discard and leave. Use Left/Right
 to select, Enter to confirm, Y/N shortcuts, or click either button (hovering selects it and underlines it). Esc in the
 dialog returns to editing. Up/Down, PgUp/PgDn, Home/End and the mouse wheel scroll
-a long change list. The dialog follows the selected language and color mode;
+a long change list. Its height is capped at 80% of the terminal (up to 24 lines,
+with a compact layout on tiny terminals); the confirmation buttons stay visible.
+Up/Down and the mouse wheel move the selected row, just like the main picker;
+the list scrolls when the selection reaches its edge. Tab or a click toggles the
+row's staged enabled/disabled state. While the dialog is open, the background
+picker is completely hidden and each refresh paints only the dialog.
+Reverted rows stay in the review so they can be toggled again; Yes applies only
+the remaining changes. The dialog follows the selected language and color mode;
 with `--dry-run`, Yes only shows the plan.
 
 Nothing happens while the picker is open. Changes are staged, the screen is
