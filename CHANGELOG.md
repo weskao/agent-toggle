@@ -1,3 +1,32 @@
+## [0.14.0] - 2026-10-14
+
+### 🚀 Features
+
+- **ui:** Add save-changes dialog on picker exit
+- **ui:** Show author url in picker title
+- **ui:** Hover highlight on save dialog buttons
+- **ui:** Make author url a link in picker title
+- **ui:** Underline hovered save dialog button
+- **ui:** Make save review bounded and editable
+
+### 🐛 Bug Fixes
+
+- **ui:** Align leave hint with shortcut chips
+- **ui:** Unify picker toggle key across surfaces
+- **picker:** Keep picker visible during review
+
+### 🚜 Refactor
+
+- **picker:** Replace letter commands with ctrl chords
+
+### 📚 Documentation
+
+- **todo:** Add plugin directory submission checklist
+- Update key references to ctrl chords
+
+### 🧪 Testing
+
+- **picker:** Update key sequences to ctrl chords
 ## [0.13.1] - 2026-10-13
 
 ### 🐛 Bug Fixes
