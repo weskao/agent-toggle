@@ -271,10 +271,10 @@ def chips(v: View, g: theme.Glyphs) -> list[tuple[str, str]]:
     ud, lr = ("↑↓", "←→") if g.unicode else ("Up/Dn", "Lt/Rt")
     if v.typing:
         return [("Tab", t("picker.chip.toggle", "toggle")), ("Enter", t("picker.chip.apply", "apply")),
-                ("Esc", t("picker.chip.cancel", "cancel")), ("Bksp", t("picker.chip.edit", "edit")),
+                ("^C", t("picker.chip.cancel", "discard")), ("Bksp", t("picker.chip.edit", "edit")),
                 ("^U", t("picker.chip.clear", "clear filter")), (ud, t("picker.chip.move", "move"))]
     return [("Tab", t("picker.chip.toggle", "toggle")), ("Enter", t("picker.chip.apply", "apply")),
-            ("Esc", t("picker.chip.cancel", "cancel")), ("?", t("picker.chip.help", "help")),
+            ("^C", t("picker.chip.cancel", "discard")), ("?", t("picker.chip.help", "help")),
             ("/", t("picker.chip.filter", "search")), (lr, t("picker.chip.harness", "harness")),
             (chord("type", True), t("picker.chip.type", "type")),
             (chord("sort", True), t("picker.chip.sort", "sort")),
@@ -360,7 +360,7 @@ def draw(win, v: View, shown: list[Row], pal: theme.Palette, g: theme.Glyphs,
         if dry_run:
             status += _sep(g) + t("picker.status.dry_run", "dry run: Enter only shows the plan")
         put(h - 3, [(" " + status, "muted")])
-    keys = [("Ctrl+C", t("picker.chip.leave", "to leave · auto-save")), *chips(v, g)]
+    keys = [("Esc", t("picker.chip.leave", "leave / review")), *chips(v, g)]
     put(h - 1, [(" ", "text"), *theme.key_chips(keys, w - 2, g)])
     win.refresh()
 
@@ -371,7 +371,8 @@ def help_lines(g: theme.Glyphs) -> list[tuple[str, str]]:
         (f"{ud} PgUp/Dn Home/End", t("picker.help.move", "move (Ctrl-P / Ctrl-N too)")),
         ("Tab", t("picker.help.toggle", "toggle the row (live <-> parked), stay on it")),
         ("Enter", t("picker.help.apply", "apply staged changes (--dry-run: plan only)")),
-        ("Esc  Ctrl-C", t("picker.help.cancel", "cancel; nothing is changed")),
+        ("Esc", t("picker.help.cancel", "leave; review staged changes first")),
+        ("Ctrl-C", t("picker.help.discard", "discard changes and leave")),
         ("/", t("picker.help.filter", "search name / harness / path (fuzzy); any letter or digit starts one too")),
         ("Bksp  Ctrl-U", t("picker.help.edit", "edit / clear the filter")),
         (lr, t("picker.help.harness", "harness tab")),
@@ -464,6 +465,109 @@ def ask_profile(win, pal: theme.Palette | None = None, g: theme.Glyphs = theme.A
 
 # ----------------------------------------------------------------------- loop
 
+def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
+             dry_run: bool = False) -> bool | None:
+    """Yes applies, No discards, Esc returns to editing; mouse capture is modal-only."""
+    changed = [r for r in v.rows if r.changed]
+    yes, top = True, 0
+    previous_mask = None
+    try:
+        try:
+            _, previous_mask = curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        except (curses.error, AttributeError):
+            pass
+        while True:
+            draw(win, v, v.shown(), pal, g, dry_run)
+            h, w = win.getmaxyx()
+            bw, bh = min(w, 76), min(h, len(changed) + 8)
+            y0, x0 = (h - bh) // 2, (w - bw) // 2
+            inner = max(0, bw - 2)
+            page = max(1, bh - 6) if bh >= 7 else int(bh >= 4)
+            top = min(max(0, top), max(0, len(changed) - page))
+
+            def put(y, segments):
+                theme.draw_segments(win, y, x0, [(g.v, "accent"),
+                    *clip(segments, inner, g.ellipsis), (g.v, "accent")], pal)
+
+            for y in range(y0 + 1, y0 + bh - 1):
+                put(y, [])
+            title = " " + t("picker.save.title", "Save changes?") + " "
+            title = theme.truncate(title, inner, g.ellipsis)
+            theme.draw_segments(win, y0, x0,
+                                [(g.tl, "accent"), (title, "title"),
+                                 (g.h * max(0, inner - theme.cell_width(title)) + g.tr, "accent")], pal)
+            if bh >= 7:
+                put(y0 + 1, [(" " + t("picker.save.count", "%s changes", len(changed)), "pending"),
+                             (f"  {top + 1}-{min(len(changed), top + page)}/{len(changed)}", "muted")])
+            for i, row in enumerate(changed[top:top + page]):
+                live = t("picker.state.live", "live")
+                parked = t("picker.state.parked", "parked")
+                before, after = (parked, live) if row.staged else (live, parked)
+                put(y0 + (2 if bh >= 7 else 1) + i, [(" + " if row.staged else " - ",
+                                  "live" if row.staged else "parked"),
+                                 (row.label, "text"), (f"  {before} -> {after}", "pending")])
+            if dry_run and bh >= 7:
+                put(y0 + bh - 4, [(" " + t("picker.status.dry_run",
+                                          "dry run: Enter only shows the plan"), "warning")])
+            labels = ["[Y] " + t("picker.save.yes", "Yes"), "[N] " + t("picker.save.no", "No")]
+            buttons = [(f" {g.pointer if selected else ' '} {label} ",
+                        "cursor" if selected else role)
+                       for label, selected, role in zip(labels, (yes, not yes), ("live", "warning"))]
+            total = sum(theme.cell_width(s) for s, _ in buttons) + 2
+            bx = x0 + 1 + max(0, (inner - total) // 2)
+            by = y0 + max(0, bh - (3 if bh >= 6 else 2))
+            end_yes = bx + theme.cell_width(buttons[0][0])
+            end_no = end_yes + 2 + theme.cell_width(buttons[1][0])
+            theme.draw_segments(win, by, bx, [buttons[0], ("  ", "text"), buttons[1]], pal)
+            if bh >= 6:
+                put(y0 + bh - 2, [(" " + t("picker.save.keys",
+                     "Left/Right Tab select · Enter confirm · Esc back · Up/Down scroll"), "muted")])
+            if bh >= 4:
+                theme.draw_segments(win, y0 + bh - 1, x0,
+                                    [(g.bl + g.h * inner + g.br, "accent")], pal)
+            win.refresh()
+            try:
+                key = win.get_wch()
+            except (curses.error, KeyboardInterrupt):
+                return False
+            if key == "\x1b":
+                return None
+            if key == "\x03":
+                return False
+            if key in ENTER:
+                return yes
+            if key in ("y", "Y"):
+                return True
+            if key in ("n", "N"):
+                return False
+            if key in (curses.KEY_LEFT, curses.KEY_RIGHT, "\t", curses.KEY_BTAB):
+                yes = not yes
+            elif key in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_PPAGE, curses.KEY_NPAGE):
+                top += (-1 if key in (curses.KEY_UP, curses.KEY_PPAGE) else 1) * (
+                    max(1, page) if key in (curses.KEY_PPAGE, curses.KEY_NPAGE) else 1)
+            elif key == curses.KEY_HOME:
+                top = 0
+            elif key == curses.KEY_END:
+                top = len(changed)
+            elif key == curses.KEY_MOUSE:
+                try:
+                    _, mx, my, _, state = curses.getmouse()
+                except curses.error:
+                    continue
+                if state & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
+                    if my == by and bx <= mx < min(end_yes, w - 1):
+                        return True
+                    if my == by and end_yes + 2 <= mx < min(end_no, w - 1):
+                        return False
+                elif state & curses.BUTTON4_PRESSED:
+                    top -= 1
+                elif state & getattr(curses, "BUTTON5_PRESSED", 0):
+                    top += 1
+    finally:
+        if previous_mask is not None:
+            curses.mousemask(previous_mask)
+
+
 def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
          dry_run: bool = False, glyphs: theme.Glyphs | None = None,
          harness: str | None = None) -> list[Row] | None:
@@ -489,7 +593,15 @@ def loop(win, rows: list[Row], color: bool = False, project: Path | None = None,
             return None
         v.note = ""
 
-        if key in ("\x1b", "\x03"):                       # Esc / Ctrl-C
+        if key == "\x1b":
+            changed = [r for r in v.rows if r.changed]
+            if not changed:
+                return None
+            save = ask_save(win, v, pal, g, dry_run)
+            if save is not None:
+                return changed if save else None
+            continue
+        if key == "\x03":                                # Ctrl-C always discards
             return None
         if key in ENTER:            # only the rows on offer: a hidden harness is never touched
             return [r for r in v.rows if r.changed]

@@ -280,9 +280,59 @@ class KeysTest(ScreenCase):
 
     def test_enter_applies_and_esc_or_ctrl_c_cancel(self) -> None:
         self.assertEqual(self.run_keys(["\n"])[0], [])
-        self.assertIsNone(self.run_keys(["\t", "\x1b"])[0])
+        self.assertIsNone(self.run_keys(["\t", "\x1b", "n"])[0])
         self.assertIsNone(self.run_keys(["\t", "\x03"])[0])
         self.assertIsNone(self.run_keys(["\t", KeyboardInterrupt()])[0])
+
+    def test_esc_reviews_all_changes_even_when_filtered_then_saves(self) -> None:
+        out, win = self.run_keys(["\t", picker.curses.KEY_DOWN, "\t", "/", "z", "\x1b", "\n"])
+        self.assertEqual(self.names(out), [("alpha", False), ("beta", True)])
+        self.assertIn("Save changes?", win.text())
+        self.assertIn("claude/skill/alpha", win.text())
+        self.assertIn("claude/skill/beta", win.text())
+        self.assertIn("live -> parked", win.text())
+        self.assertIn("parked -> live", win.text())
+
+    def test_esc_dialog_keyboard_choices_and_return_to_editing(self) -> None:
+        for choice in ([picker.curses.KEY_RIGHT, "\n"], ["\t", "\n"], ["n"]):
+            self.rows = demo_rows()
+            self.assertIsNone(self.run_keys(["\t", "\x1b", *choice])[0])
+        self.rows = demo_rows()
+        out, _ = self.run_keys(["\t", "\x1b", "\x1b", "\t", "\x1b"])
+        self.assertIsNone(out)
+        self.assertFalse(any(r.changed for r in self.rows))
+
+    def test_esc_dialog_mouse_choices_ignore_outside_clicks(self) -> None:
+        for label, expected in (("Yes", [("alpha", False)]), ("No", None)):
+            self.rows = demo_rows()
+            win = FakeWin(["\t", "\x1b", picker.curses.KEY_MOUSE, picker.curses.KEY_MOUSE])
+            def click():
+                line = next(y for y, text in enumerate(win.screen) if "[Y] Yes" in text)
+                return (0, win.screen[line].index(label), line, 0, picker.curses.BUTTON1_CLICKED)
+            with mock.patch.object(picker.curses, "getmouse", side_effect=lambda:
+                    click() if len(win.keys) == 0 else (0, 0, 0, 0, picker.curses.BUTTON1_CLICKED)):
+                out = picker.loop(win, self.rows, glyphs=theme.UNICODE)
+            self.assertEqual(None if out is None else self.names(out), expected)
+
+    def test_esc_dialog_scrolls_and_resizes_in_both_languages(self) -> None:
+        self.addCleanup(i18n.set_language, "en")
+        for lang, title in (("en", "Save changes?"), ("zh-TW", "儲存變更？")):
+            i18n.set_language(lang)
+            rows = [model.Row("claude", "skill", f"demo-{i:02}", True) for i in range(30)]
+            out, win = self.run_keys([picker.ctrl("a"), "\x1b", (14, 60),
+                                      picker.curses.KEY_END, "y"], rows=rows)
+            self.assertEqual(len(out), 30)
+            self.assertIn(title, win.text())
+            self.assertIn("demo-29", win.text())
+            self.assertNotIn("demo-00", win.text())
+            self.assertTrue(all(len(line) <= 60 for line in win.screen))
+            self.rows = demo_rows()
+            for height in (4, 7, 8):
+                self.rows = demo_rows()
+                out, win = self.run_keys(["\t", "\x1b", "y"], size=(height, 30))
+                self.assertEqual(self.names(out), [("alpha", False)])
+                self.assertIn("alpha", win.text())
+                self.assertNotIn("1-0/", win.text())
 
     def test_moving(self) -> None:
         C = picker.curses
@@ -350,7 +400,7 @@ class KeysTest(ScreenCase):
         out, _ = self.run_keys(["/", *"skills-disabled", "\t", "\n"], rows=demo_rows())
         self.assertEqual([r.name for r in out], ["beta"])
         # a plain hit is never labelled fuzzy
-        _, win = self.run_keys(["/", "a", "l", "\x1b"])
+        _, win = self.run_keys(["/", "a", "l", "\x03"])
         self.assertNotIn("fuzzy match", win.screen[2])
 
     def test_emoji_search_icon_only_where_it_renders(self) -> None:
@@ -445,7 +495,7 @@ class KeysTest(ScreenCase):
         out, win = self.run_keys(["\t", "\n"], size=(5, 40))
         self.assertEqual([r.name for r in out], ["alpha"])
         self.assertIn("of 5 shown", win.frames[0][-3])
-        self.assertIn("Ctrl+C to leave · auto-save", win.frames[0][-1])
+        self.assertIn("Esc leave / review", win.frames[0][-1])
 
     def test_resize_redraws_at_the_new_size(self) -> None:
         _, win = self.run_keys([(30, 120), (12, 50), (4, 30), "\x1b"])
@@ -458,22 +508,22 @@ class KeysTest(ScreenCase):
 
 class LayoutTest(ScreenCase):
     def test_title_bar_summary(self) -> None:
-        _, win = self.run_keys(["\t", "\x1b"])
+        _, win = self.run_keys(["\t", "\x03"])
         self.assertIn("agent-toggle  v", win.frames[0][0])
         self.assertIn("5 resources · ~6.3k tok live", win.frames[0][0])
         self.assertIn("1 staged (-1.2k tok)", win.screen[0])
 
     def test_leave_hint_shares_the_key_chip_row_and_style(self) -> None:
         self.addCleanup(i18n.set_language, i18n.LANGUAGE)
-        for language, label, toggle in (("en", "to leave · auto-save", "toggle"),
-                                        ("zh-TW", "離開 · 自動儲存", "切換")):
+        for language, label, toggle in (("en", "leave / review", "toggle"),
+                                        ("zh-TW", "離開／檢視變更", "切換")):
             i18n.set_language(language)
             for width in (30, 40, 60, 80, 120):
                 for keys, key in ((["\x1b"], "Tab"), (["/", "\x1b"], "Tab")):
                     with self.subTest(language=language, width=width, key=key):
                         _, win = self.run_keys(keys, size=(24, width))
                         footer = win.screen[-1]
-                        self.assertIn(f"Ctrl+C {label}", footer)
+                        self.assertIn(f"Esc {label}", footer)
                         self.assertEqual(win.screen[-2], "")
                         if width >= 60:
                             self.assertIn(f"{key} {toggle}", footer)
@@ -529,9 +579,9 @@ class LayoutTest(ScreenCase):
         for text in ("beta", "harness", "claude", "○ parked", "path", "/x/skills-disabled/beta",
                      "since", "2026-09-19 10:00:00", "mechanism", "move", "~300 tok if restored"):
             self.assertIn(text, pane)
-        _, win = self.run_keys(["\t", picker.curses.KEY_UP, "\x1b"], size=(24, 120))
+        _, win = self.run_keys(["\t", picker.curses.KEY_UP, "\x03"], size=(24, 120))
         self.assertIn("staged → parked", win.text())
-        _, win = self.run_keys([down, "\x1b"], size=(24, 80))
+        _, win = self.run_keys([down, "\x03"], size=(24, 80))
         self.assertNotIn("mechanism", win.text())
         self.assertNotIn("│", "\n".join(win.screen[3:-2]))
 
@@ -540,7 +590,7 @@ class LayoutTest(ScreenCase):
             _, win = self.run_keys(["\x1b"], size=(24, width))
             self.assertTrue(all(len(line) <= width for line in win.screen), width)
             self.assertRegex(win.text(), r"●\s+alpha")
-            self.assertIn("Ctrl+C to leave · auto-save", win.screen[-1])
+            self.assertIn("Esc leave / review", win.screen[-1])
             if width >= 60:
                 self.assertIn("Tab toggle", win.screen[-1])
         _, win = self.run_keys(["\x1b"], size=(24, 90))
@@ -599,7 +649,7 @@ class LayoutTest(ScreenCase):
             out, win = self.run_keys(["\t", "\n"], color=True)
             m["init_pair"].assert_not_called()
             self.assertEqual([r.name for r in out], ["alpha"])
-            self.run_keys(["\x1b"], color=False)
+            self.run_keys(["\x03"], color=False)
             m["init_pair"].assert_not_called()
 
     def test_ascii_glyphs(self) -> None:
@@ -615,7 +665,7 @@ class LayoutTest(ScreenCase):
         _, win = self.run_keys(["\x1b"], size=(24, 100))
         self.assertIn("技能", win.text())
         self.assertIn("全部", win.screen[1])
-        self.assertIn("Ctrl+C 離開 · 自動儲存", win.screen[-1])
+        self.assertIn("Esc 離開／檢視變更", win.screen[-1])
 
 
 class SettingsTest(ScreenCase):
@@ -640,14 +690,14 @@ class SettingsTest(ScreenCase):
         out, _ = self.run_keys(["\t", "\n"])
         self.assertEqual([r.name for r in out], ["zeta"])
         settings.set("picker_harness", "codex")
-        _, win = self.run_keys(["\x1b"])
+        _, win = self.run_keys(["\x03"])
         self.assertNotIn("alpha", win.text())
         settings.set("picker_type", "command")
-        _, win = self.run_keys(["\x1b"])
+        _, win = self.run_keys(["\x03"])
         self.assertIn("type: Commands", win.screen[2])
         # a saved value with no rows behind it starts on All
         settings.set("picker_type", "mcp")
-        _, win = self.run_keys(["\x1b"])
+        _, win = self.run_keys(["\x03"])
         self.assertIn("type: All", win.screen[2])
 
     def test_pick_keeps_its_contract(self) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from ..i18n import t
 from .model import (
     SORTS,
     Row,
@@ -90,7 +91,22 @@ def loop(rows: list[Row], stdin, stdout, project: Path | None = None,
         cmd = line.strip()
         low = cmd.lower()
         if low in ("q", "quit"):
-            return None
+            changed = [r for r in kept if r.changed]
+            if not changed:
+                return None
+            for row in changed:
+                state = t("picker.state.live", "live") if row.staged else t("picker.state.parked", "parked")
+                stdout.write(encodable(ansi("pending", f"{row.label} -> {state}", color) + "\n", stdout))
+            if dry_run:
+                stdout.write(encodable(t("picker.status.dry_run", "dry run: Enter only shows the plan") + "\n", stdout))
+            while True:
+                stdout.write(encodable(t("picker.save.title", "Save changes?") + " [y/n]: ", stdout))
+                stdout.flush()
+                answer = stdin.readline().strip().lower()
+                if answer in ("y", "yes", "是"):
+                    return changed
+                if answer in ("", "n", "no", "否"):
+                    return None
         if low in ("a", "apply"):
             return [r for r in kept if r.changed]
         if low == "s":

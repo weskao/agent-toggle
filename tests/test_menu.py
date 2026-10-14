@@ -123,6 +123,15 @@ class MenuTest(SandboxCase):
         self.assertIsNone(self.run_menu("1\n")[0])          # EOF without apply
         self.assertIsNone(self.run_menu("")[0])
 
+    def test_quit_reviews_filtered_changes_and_requires_explicit_yes(self) -> None:
+        for answer, expected in (("y", ["alpha"]), ("n", None), ("", None)):
+            changes, text = self.run_menu(f"1\n/gam\nq\n{answer}\n")
+            self.assertEqual(None if changes is None else [r.name for r in changes], expected)
+            self.assertIn("Save changes?", text)
+            self.assertIn("claude/skill/alpha", text)
+        changes, _ = self.run_menu("1\nq\ninvalid\ny\n")
+        self.assertEqual([r.name for r in changes], ["alpha"])
+
     def test_apply_with_nothing_staged_is_an_empty_list(self) -> None:
         self.assertEqual(self.run_menu("a\n")[0], [])
 

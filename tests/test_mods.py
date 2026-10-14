@@ -179,7 +179,7 @@ class PickerModOpsTest(SandboxCase):
     def test_tab_after_search_spaces_toggles_the_mod(self) -> None:
         out, _ = self.run_keys([*"mods", " ", " ", "\t", "\n"])
         self.assertEqual([(r.name, r.staged) for r in out], [("big@mk", False)])
-        out, win = self.run_keys([*"mods", " ", "\t", *"pa", "\x1b"])
+        out, win = self.run_keys([*"mods", " ", "\t", *"pa", "\x03"])
         self.assertIn("pane@mk", win.text())
         self.assertNotIn("big@mk", win.text())
 

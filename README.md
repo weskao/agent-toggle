@@ -314,7 +314,8 @@ What is on screen:
 | `Tab` | toggle the highlighted row (live / parked) and stay on it, including while searching |
 | `Space` | enter a space in the search (separates search terms) |
 | `Enter` | apply every staged change (with `--dry-run`: show the plan) |
-| `Esc` / `Ctrl-C` | cancel; nothing is applied |
+| `Esc` | leave; if changes are staged, review them in a centered Save changes? dialog |
+| `Ctrl-C` | discard staged changes and leave |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End`, `Ctrl-P` / `Ctrl-N` | move |
 | `/` | start a search; any letter or digit starts one too. Terms are ANDed, case-insensitive, and match the harness/type/name, the group (`mod` or `mods` finds every mod) and the path; when nothing matches, letters-in-order (fuzzy) is tried: `ctxmd` finds `context-md`, and the bar says `≈ fuzzy match` |
 | `Backspace` / `Ctrl-U` | delete one character / clear the filter |
@@ -344,6 +345,13 @@ them like any other change, so `ui --dry-run` previews a profile and a stray
 a profile, with the same name rules and project scope as `profile save`; it is
 off under `--dry-run`. Esc closes the prompt.
 
+The exit dialog lists all staged changes, including rows hidden by a filter. Choose
+**Yes** to apply and leave, or **No** to discard and leave. Use Left/Right or Tab
+to select, Enter to confirm, Y/N shortcuts, or click either button. Esc in the
+dialog returns to editing. Up/Down, PgUp/PgDn, Home/End and the mouse wheel scroll
+a long change list. The dialog follows the selected language and color mode;
+with `--dry-run`, Yes only shows the plan.
+
 Nothing happens while the picker is open. Changes are staged, the screen is
 torn down, and only then do the real operations run, so their output (which
 companion files moved, which were kept because they are shared) is readable
@@ -358,7 +366,8 @@ numbers (`1 3 5-7`) to tick or untick, `n <number>` to toggle every type with th
 row's name, `/text` to filter (`/` alone clears it),
 `s` / `h` / `t` to sort and cycle the harness and type filters, `p` to list profiles,
 `p <number|name>` to stage one and `p save <name>` to save the live state, `a` to
-apply, `q` (or end of input) to cancel.
+apply, `q` to review staged changes with a `y/n` save prompt (no changes: exit
+immediately). End of input discards changes.
 
 ### Mods
 
