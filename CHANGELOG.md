@@ -1,14 +1,3 @@
-## [Unreleased]
-
-### 🚀 Features
-
-- **update:** `agent-toggle update` (also `--update`) now installs the newest release tag through update-kit (`uv tool install --force --no-sources` / `pipx install --force`), then updates the Claude Code plugin (when installed) and the shims; it never prompts and exits `0` updated or current, `1` check or install failed, `2` dev or unmanaged install
-- **update:** The background check is one stderr hint line (`agent-toggle vX.Y.Z is available ... run `agent-toggle update``), printed only on an interactive terminal and never under `--json`; still gated by `update_check` / `AGENT_TOGGLE_UPDATE_CHECK`
-
-### ⚠ BREAKING CHANGES
-
-- **update:** `update` installs instead of only listing commands and has no `--json` envelope; the arrow-key update panel, `Skip until next version` and the PyPI check with `~/.agent-toggle/update-check.json` are removed (releases are found with `git ls-remote`, cached 24 h in `~/.update-kit/state.json`); new dependency `update-kit>=0.1,<0.2`
-
 ## [0.14.0] - 2026-10-14
 
 ### 🚀 Features
