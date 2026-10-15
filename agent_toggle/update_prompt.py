@@ -13,8 +13,6 @@ import sys
 from collections.abc import Sequence
 from functools import cached_property
 
-import update_kit
-
 from . import __version__, i18n, settings
 from .backends import plugin_cli
 from .ui import theme
@@ -61,6 +59,8 @@ def _run(cmd, **kw):
 
 
 def cmd_update() -> int:
+    # imported here, like telegram_kit: a checkout run (`python3 agent_toggle.py`) or a stale env lacks it
+    import update_kit
     return update_kit.update(app=DIST, repo=REPO, dist=DIST, lang=i18n.LANGUAGE,
                              after=_LazySteps(), out=sys.stderr, run=_run)
 
@@ -69,6 +69,7 @@ def hint(*, json_mode: bool = False) -> None:
     """One stderr line when a newer release exists: only on a terminal, never under --json,
     off with the `update_check` setting (env AGENT_TOGGLE_UPDATE_CHECK wins). Never raises."""
     try:
+        import update_kit
         if json_mode or not settings.get("update_check") or not update_kit.should_hint(sys.stderr):
             return
         latest = update_kit.check(repo=REPO, current=__version__)
