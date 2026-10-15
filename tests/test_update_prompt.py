@@ -34,10 +34,24 @@ class CmdUpdateTest(unittest.TestCase):
                 mock.patch.object(i18n, "LANGUAGE", "zh-TW"), \
                 mock.patch.object(update_kit, "update", return_value=2) as upd:
             self.assertEqual(update_prompt.cmd_update(), 2)
-        kw = upd.call_args.kwargs
-        self.assertEqual((kw["app"], kw["repo"], kw["dist"], kw["lang"], kw["after"]),
+            kw = upd.call_args.kwargs
+            after = list(kw["after"])
+        self.assertEqual((kw["app"], kw["repo"], kw["dist"], kw["lang"], after),
                          ("agent-toggle", "weskao/agent-toggle", "agent-toggle", "zh-TW", [["a"]]))
         self.assertIs(kw["out"], sys.stderr)
+
+    def test_plugin_steps_are_not_computed_unless_the_install_reads_them(self) -> None:
+        with mock.patch.object(update_prompt, "after_steps", return_value=[["a"]]) as steps, \
+                mock.patch.object(update_kit, "install_kind", return_value=("dev", "/src")), \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(update_prompt.cmd_update(), 2)
+        steps.assert_not_called()
+
+    def test_the_lazy_steps_compute_once_on_first_read(self) -> None:
+        with mock.patch.object(update_prompt, "after_steps", return_value=[["a"], ["b"]]) as steps:
+            lazy = update_prompt._LazySteps()
+            self.assertEqual([list(lazy), list(lazy), len(lazy)], [[["a"], ["b"]], [["a"], ["b"]], 2])
+        steps.assert_called_once()
 
     def test_steps_run_off_stdout_and_never_prompt(self) -> None:
         with mock.patch.object(update_prompt.plugin_cli, "claude_bin", return_value="/x/claude"), \
@@ -50,6 +64,15 @@ class CmdUpdateTest(unittest.TestCase):
         for call in (first, second):
             self.assertIs(call.kwargs["stdout"], sys.stderr)
             self.assertEqual(call.kwargs["stdin"], subprocess.DEVNULL)
+            self.assertEqual(call.kwargs["env"]["AGENT_TOGGLE_UPDATE_CHECK"], "0")
+
+
+class RunEnvTest(unittest.TestCase):
+    def test_an_env_from_update_kit_is_merged_not_duplicated(self) -> None:
+        with mock.patch.object(update_prompt.subprocess, "run") as sub:
+            update_prompt._run(["uv", "tool", "install"], cwd="/h", env={"X": "1"})
+        env = sub.call_args.kwargs["env"]
+        self.assertEqual((env["X"], env["AGENT_TOGGLE_UPDATE_CHECK"]), ("1", "0"))
 
 
 class HintTest(unittest.TestCase):

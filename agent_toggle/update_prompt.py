@@ -7,8 +7,11 @@ No prompts: the old arrow-key panel and its skip-version bookkeeping are gone.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from collections.abc import Sequence
+from functools import cached_property
 
 import update_kit
 
@@ -32,16 +35,34 @@ def after_steps() -> list[list[str]]:
     return [*steps, [DIST, "install-shims"]]
 
 
+class _LazySteps(Sequence):
+    """after_steps(), computed on first use: update_kit only reads `after` once an install
+    will happen, so a dev refusal / "already up to date" skips `claude plugin list` (0.8 s)."""
+
+    @cached_property
+    def _steps(self) -> list[list[str]]:
+        return after_steps()
+
+    def __len__(self) -> int:
+        return len(self._steps)
+
+    def __getitem__(self, i):
+        return self._steps[i]
+
+
 def _run(cmd, **kw):
-    """update_kit's subprocess runner: their output stays off stdout and no step may prompt."""
+    """update_kit's subprocess runner: their output stays off stdout and no step may prompt,
+    and a step like `install-shims` must not re-check for updates and print the hint."""
     if cmd[0] == "claude":
         cmd = [plugin_cli.claude_bin() or "claude", *cmd[1:]]
+    # update_kit passes its own env (no-prompt git vars) for the install step: merge, don't replace
+    kw["env"] = {**kw.get("env", os.environ), "AGENT_TOGGLE_UPDATE_CHECK": "0"}
     return subprocess.run(cmd, stdout=sys.stderr, stdin=subprocess.DEVNULL, **kw)
 
 
 def cmd_update() -> int:
     return update_kit.update(app=DIST, repo=REPO, dist=DIST, lang=i18n.LANGUAGE,
-                             after=after_steps(), out=sys.stderr, run=_run)
+                             after=_LazySteps(), out=sys.stderr, run=_run)
 
 
 def hint(*, json_mode: bool = False) -> None:

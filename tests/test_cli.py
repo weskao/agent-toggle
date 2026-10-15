@@ -225,7 +225,8 @@ class UpdateHintTest(CliCase):
                 seen = {}
 
                 def fake(**kw):
-                    seen.update(kw, to_stderr=kw["out"] is sys.stderr)   # run_cli swaps stderr
+                    seen.update(kw, after=list(kw["after"]),   # lazy: read while after_steps is mocked
+                                to_stderr=kw["out"] is sys.stderr)   # run_cli swaps stderr
                     kw["out"].write("kit says hi\n")
                     return code
                 with mock.patch.object(update_kit, "update", side_effect=fake), \
