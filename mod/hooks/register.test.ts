@@ -143,6 +143,17 @@ describe('agent-toggle pane', () => {
     expect(((await ui.drawn()) as any).props.props.error).toBe('not found')
   })
 
+  test('a CLI that crashes shows the exception line of its traceback, not its first line', async ($, on) => {
+    const trace = 'Traceback (most recent call last):\n  File "cli.py", line 4, in <module>\nModuleNotFoundError: No module named \'update_kit\'\n'
+    on('process.run', () => ({ value: { ...done(1, ''), stderr: trace } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    mock.env(on, {})
+    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
+    for (let i = 0; i < 500; i++) await Promise.resolve()
+    expect(((await ui.drawn()) as any).props.props.error).toBe("ModuleNotFoundError: No module named 'update_kit'")
+  })
+
   test('a toggled row flips before the CLI answers, and back when it fails', async ($, on) => {
     let release = () => {}
     const gate = new Promise<void>(r => (release = r))

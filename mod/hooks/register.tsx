@@ -29,6 +29,12 @@ function tellUpdate($: Engine, stderr: string) {
   $.ui.toast(`${line}: run /agent-toggle update for the commands`)
 }
 
+// The stderr line that says why: a Python traceback names its exception on the last line, anything else on the first.
+const reason = (stderr: string) => {
+  const lines = stderr.trim().split('\n')
+  return (lines[0]!.startsWith('Traceback') ? lines.at(-1)! : lines[0]!).trim()
+}
+
 // Runs the CLI (argv, no shell), parses its JSON; on failure stores `error` and returns null.
 async function cli($: Engine, argv: string[]): Promise<Result | null> {
   try {
@@ -40,7 +46,7 @@ async function cli($: Engine, argv: string[]): Promise<Result | null> {
     } catch {}
     if (run.exitCode === 0 && json) return json
     // a failed disable/enable prints its reason as JSON on stdout, not stderr
-    const why = run.stderr.split('\n')[0] || String(json?.results?.[0]?.detail ?? '')
+    const why = reason(run.stderr) || String(json?.results?.[0]?.detail ?? '')
     await update($, error, () => why || (json ? `exit ${run.exitCode}` : 'could not parse agent-toggle output'))
     return null
   } catch (err) {
@@ -237,7 +243,7 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
       ])
     for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
     if (out.needs_new_session) lines.push(reload($, out.results ?? []))
-    if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${run.stderr.trim().split('\n')[0]}`}`)
+    if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${reason(run.stderr)}`}`)
     return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
   } catch (err) {
     return `${bad} ${String(err)}`
