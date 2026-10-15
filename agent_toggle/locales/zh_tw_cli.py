@@ -27,9 +27,9 @@ CATALOG: dict[str, str] = {
     "help.cost.summary": "每個項目的預估啟動 token 數，由大到小",
     "help.cost.desc": "估算每個項目啟動時載入多少 token（字元數/4，±25%），"
                       "以及暫存項目已省下多少。",
-    "help.update.summary": "檢查新版本；顯示更新方式",
-    "help.update.desc": "立即向 PyPI 查詢（忽略快取與已略過的版本）；有新版本時，印出更新 CLI、"
-                        "Claude Code 外掛（若已安裝）與 shim 的指令。不會執行任何指令。",
+    "help.update.summary": "安裝最新版本，並更新外掛與 shim",
+    "help.update.desc": "安裝最新的發行標籤（uv tool / pipx），完成後以新版更新 Claude Code 外掛（若已安裝）"
+                        "並重新安裝 shim。不會提問；`--update` 等同 `update`。開發版安裝請改用 git pull（結束碼 2）。",
     "help.completion.summary": "印出 shell 自動補完腳本",
     "help.completion.desc": "在 stdout 印出某個 shell 的 Tab 補完腳本；"
                             "存到該 shell 載入補完的位置（見 README「Shell completion」）。",
@@ -85,16 +85,4 @@ CATALOG: dict[str, str] = {
     "help.opt.help": "顯示說明（`help <command>` 看單一指令）",
     "help.arguments": "參數",
     "help.options": "選項",
-    # update prompt
-    "update.available": "agent-toggle %s 已推出（目前版本 %s）",
-    "update.keys": "↑↓ 選擇 · ⏎ 確認 · q/Ctrl+C 略過",
-    "update.keys_ascii": "上/下 選擇，Enter 確認，q/Ctrl+C 略過",
-    "update.choose": "請選擇 1-3（Enter = 1，q/Ctrl+C = 略過）：",
-    "update.now": "立即更新",
-    "update.skip": "略過",
-    "update.skip_detail": "下次執行再問",
-    "update.skip_version": "略過到下一個版本",
-    "update.skip_version_detail": "有更新的版本時再問",
-    "update.notes": "版本說明：%s",
-    "update.failed": "更新未完成 — 請自行執行：%s",
 }

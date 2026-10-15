@@ -192,7 +192,7 @@ agent_toggle/
   output.py          text and JSON renderers; one envelope for every command
   config.py, settings.py   `config` command; ~/.agent-toggle/config.json settings
   i18n.py, locales/  en / zh-TW interface chrome
-  update_check.py, update_prompt.py   PyPI update check and its prompt
+  update_prompt.py   `update` / `--update` and the stderr hint, through update-kit
   spinner.py         stderr spinner
   ui/
     picker.py        curses picker
@@ -551,11 +551,11 @@ and should be proven early.
 | **Name collisions** | A name may exist as both a skill and a command; the type is always explicit, and `cost`/picker rows show type. No "guess the type" convenience. |
 | **Exit codes** | `0` ok, `1` partial failure, `2` usage error, `3` locked, `4` unsupported pair. Shims branch on them. |
 | **Shell completion** | `agent-toggle completion bash\|zsh\|fish\|powershell` prints a static script built from the argparse parser (`agent_toggle/completions.py`, stdlib only); the release also uploads all four as an artifact. |
-| **Telemetry / update checks** | No telemetry, no analytics, nothing about your resources leaves the machine. The one network call is a default-on update check: `GET https://pypi.org/pypi/agent-toggle/json` on a background thread (0.8 s timeout), cached 10 minutes in `~/.agent-toggle/update-check.json` (`0600`, atomic write, never follows a symlink). Redirects must be https, the body is capped at 1 MB, version strings are validated and control characters stripped before anything is printed. It sends nothing beyond a normal HTTP GET with the User-Agent `agent-toggle-update-check`. Opt out with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting. A newer release is reported on stderr only (never stdout or the exit code); on a TTY it offers `Update now`, which runs `uv tool upgrade agent-toggle` (fixed argv, no shell). |
+| **Telemetry / update checks** | No telemetry, no analytics, nothing about your resources leaves the machine. The one network use is update-kit's `git ls-remote --tags --refs https://github.com/weskao/agent-toggle.git` (`GIT_TERMINAL_PROMPT=0`): the stderr hint on an interactive terminal only (1.5 s timeout, cached 24 h in `~/.update-kit/state.json`) and `agent-toggle update`, which installs the newest `vX.Y.Z` tag with a fixed argv (no shell). Opt out of the hint with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting. A newer release is reported on stderr only (never stdout or the exit code). |
 | **Cache** | None. `cost` reads ~200 frontmatter blocks (chars ÷ 4) — milliseconds. The only slow call is `claude plugin list --json`, run once per invocation. Add a cache only after a measured `cost` run exceeds ~1 s; then key it by file mtime, one entry per path. |
 | **Import / export** | Profiles are the format (§5.7). No `export` bundle of `~/.agent-toggle/`: state is machine-local, backups hold secrets. Bug reports attach `status --json` (§7). |
 | **Multi-machine sync** | Non-goal (§1). No server, no account, no telemetry (the only network call is the opt-out update check, see Telemetry). Same set on two machines → commit `~/.agent-toggle/profiles/` to dotfiles or symlink the directory. `state.json`, `log.jsonl`, `mcp-backups/` are machine-local and must never be synced; `SECURITY.md` says so and warns against placing `~/.agent-toggle` in a cloud-synced folder. |
-| **i18n** | `en` and `zh-TW` for the interface chrome only (config menu, help, update prompt, picker); command output stays English. Chosen by the `language` setting or `AGENT_TOGGLE_LANG`; a missing translation falls back to English. The shim descriptions keep the zh-TW trigger phrases because they drive skill matching, not UI text. |
+| **i18n** | `en` and `zh-TW` for the interface chrome only (config menu, help, update messages, picker); command output stays English. Chosen by the `language` setting or `AGENT_TOGGLE_LANG`; a missing translation falls back to English. The shim descriptions keep the zh-TW trigger phrases because they drive skill matching, not UI text. |
 | **Logging** | `-v` prints every path decision (today's companion report style); default stays terse; `--json` is never mixed with text. |
 | **Documentation** | README = install + 10-line usage; `docs/DESIGN.md` (this file); `docs/harnesses.md` = the survey table kept current; `CONTRIBUTING.md` = "how to add a harness in one table row" with the fixture-home recipe. |
 

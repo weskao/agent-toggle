@@ -1,7 +1,6 @@
 """CLI dispatch, status views, and the sandbox / packaging invariants."""
 from __future__ import annotations
 
-import io
 import json
 import os
 import shutil
@@ -11,13 +10,13 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+import update_kit
 from base import SandboxCase
 from test_cli_surface import CliCase
 from test_project import ProjectCase
 
-from agent_toggle import __version__, cli, fs, ops, settings, store, update_check, update_prompt
+from agent_toggle import __version__, cli, fs, ops, settings, store, update_prompt
 from agent_toggle.output import Result
-from agent_toggle.ui import theme
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -158,13 +157,12 @@ class SandboxInvariantTest(SandboxCase):
         self.assertEqual(Path(agent_toggle.__file__).resolve().parent, REPO / "agent_toggle")
 
 
-PYPI_99 = json.dumps({"info": {"version": "99.0.0"}})
-HINT = f"agent-toggle 99.0.0 is available (you have {__version__})"
+HINT = f"agent-toggle v99.0.0 is available (you have {__version__}) — run `agent-toggle update`"
 
 
-class UpdateCheckTest(CliCase):
-    """The update check: started before dispatch, offered in main()'s finally. No network:
-    fetch_pypi is patched; AGENT_TOGGLE_UPDATE_CHECK=0 (tests/base.py) is lifted here only."""
+class UpdateHintTest(CliCase):
+    """The one-line hint and `update` / `--update`. No network: update_kit.check / update are
+    patched; AGENT_TOGGLE_UPDATE_CHECK=0 (tests/base.py) is lifted here only."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -172,37 +170,38 @@ class UpdateCheckTest(CliCase):
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("AGENT_TOGGLE_UPDATE_CHECK", None)
-        for target, kw in ((update_check, {"fetch_pypi": mock.Mock(return_value=PYPI_99)}),
-                           (update_prompt, {"is_interactive": mock.Mock(return_value=False)}),
-                           (fs, {"WIN": False})):     # the panel/upgrade flow; Windows has its own test
-            patch = mock.patch.multiple(target, **kw)
-            patch.start()
-            self.addCleanup(patch.stop)
+        self.tty = mock.patch.object(update_kit, "should_hint", return_value=True)
+        self.tty.start()
+        self.addCleanup(self.tty.stop)
+        self.check = mock.patch.object(update_kit, "check", return_value="v99.0.0")
+        self.check_mock = self.check.start()
+        self.addCleanup(self.check.stop)
 
-    def test_hint_on_stderr_off_a_tty(self) -> None:
+    def test_hint_on_stderr_on_a_tty(self) -> None:
         rc, out, err = self.run_cli("status")
         self.assertEqual(rc, 0)
-        self.assertEqual(err.splitlines()[-3:], [HINT, "  uv tool upgrade agent-toggle",
-                                                 "  agent-toggle install-shims"])
+        self.assertEqual(err.splitlines()[-1], HINT)
         self.assertNotIn("99.0.0", out)
+
+    def test_no_hint_off_a_tty(self) -> None:
+        update_kit.should_hint.return_value = False
+        self.assertNotIn("99.0.0", self.run_cli("status")[2])
+        self.check_mock.assert_not_called()
 
     def test_opt_out_by_env_and_by_setting(self) -> None:
         with mock.patch.dict(os.environ, {"AGENT_TOGGLE_UPDATE_CHECK": "0"}):
             self.assertNotIn("99.0.0", self.run_cli("status")[2])
         settings.set("update_check", False)
         self.assertNotIn("99.0.0", self.run_cli("status")[2])
-        update_check.fetch_pypi.assert_not_called()
+        self.check_mock.assert_not_called()
 
-    def test_json_stdout_is_one_document_and_never_prompts(self) -> None:
-        update_prompt.is_interactive.return_value = True
-        with mock.patch.object(update_prompt, "ask") as ask:
-            rc, out, err = self.run_cli("status", "--json")
+    def test_json_stdout_is_one_document_without_a_hint(self) -> None:
+        rc, out, err = self.run_cli("status", "--json")
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["command"], "status")     # the WHOLE stdout
-        self.assertIn(HINT, err)
-        ask.assert_not_called()
+        self.assertNotIn("99.0.0", err)
 
-    def test_every_exit_path_offers_and_keeps_its_exit_code(self) -> None:
+    def test_every_exit_path_hints_and_keeps_its_exit_code(self) -> None:
         with fs.lock():
             locked = self.run_cli("disable", "skill", "x")
         self.assertEqual(locked[0], 3)
@@ -215,67 +214,29 @@ class UpdateCheckTest(CliCase):
             self.assertIn(HINT, err, argv)
         self.assertIn(HINT, locked[2])
 
-    def test_starts_before_dispatch_and_offers_after(self) -> None:
-        calls: list[str] = []
-        real_start, real_main = update_prompt.start, cli._main
-        with mock.patch.object(update_prompt, "start",
-                               side_effect=lambda: calls.append("start") or real_start()), \
-                mock.patch.object(cli, "_main",
-                                  side_effect=lambda *a: calls.append("dispatch") or real_main(*a)), \
-                mock.patch.object(update_prompt, "offer",
-                                  side_effect=lambda *a, **k: calls.append("offer")):
-            self.assertEqual(self.run_cli("--version")[0], 0)
-        self.assertEqual(calls, ["start", "dispatch", "offer"])
+    def test_update_and_completion_never_hint(self) -> None:
+        with mock.patch.object(update_kit, "update", return_value=0):
+            self.assertNotIn("99.0.0", self.run_cli("update")[2])
+        self.assertNotIn("99.0.0", self.run_cli("completion", "bash")[2])
 
-    def test_tty_upgrade_failure_warns_and_keeps_the_exit_code(self) -> None:
-        update_prompt.is_interactive.return_value = True
-        failed = subprocess.CompletedProcess([], 1)
-        with mock.patch.object(update_prompt, "ask", return_value=update_check.UPDATE_NOW), \
-                mock.patch.object(update_prompt.subprocess, "run", return_value=failed) as run:
-            rc, out, err = self.run_cli("--version")      # runs no other subprocess
-        self.assertEqual((rc, out.strip()), (0, f"agent-toggle {__version__}"))
-        run.assert_called_once_with(["uv", "tool", "upgrade", "agent-toggle"], check=False,
-                                    stdout=mock.ANY, stdin=subprocess.DEVNULL, env=mock.ANY)
-        self.assertIn("did not finish", run.call_args.kwargs["stdout"].getvalue())  # = stderr
-        self.assertIn("upgrade did not finish — run it yourself: uv tool upgrade agent-toggle"
-                      "\n  agent-toggle install-shims", err)
+    def test_update_and_dash_dash_update_exit_with_update_kits_code(self) -> None:
+        for argv in (("update",), ("--update",), ("--json", "--update")):
+            for code in (0, 1, 2):
+                seen = {}
 
-    def test_windows_tty_only_hints_and_never_upgrades(self) -> None:
-        update_prompt.is_interactive.return_value = True
-        with mock.patch.object(fs, "WIN", True), \
-                mock.patch.object(update_prompt, "ask") as ask, \
-                mock.patch.object(update_prompt.subprocess, "run") as run:
-            rc, _, err = self.run_cli("--version")     # agent-toggle.exe cannot replace itself
-        self.assertEqual(rc, 0)
-        self.assertIn(HINT, err)
-        ask.assert_not_called()
-        run.assert_not_called()
+                def fake(**kw):
+                    seen.update(kw, to_stderr=kw["out"] is sys.stderr)   # run_cli swaps stderr
+                    kw["out"].write("kit says hi\n")
+                    return code
+                with mock.patch.object(update_kit, "update", side_effect=fake), \
+                        mock.patch.object(update_prompt, "after_steps", return_value=[["x"]]):
+                    rc, out, err = self.run_cli(*argv)
+                self.assertEqual((rc, out, err), (code, "", "kit says hi\n"), argv)
+                self.assertEqual((seen["app"], seen["repo"], seen["dist"], seen["after"], seen["to_stderr"]),
+                                 ("agent-toggle", "weskao/agent-toggle", "agent-toggle", [["x"]], True))
 
-    def test_tty_skip_version_and_ctrl_c(self) -> None:
-        update_prompt.is_interactive.return_value = True
-        with mock.patch.object(update_prompt, "ask", side_effect=KeyboardInterrupt):
-            self.assertEqual(self.run_cli("status")[0], 0)                 # Ctrl-C = Skip
-        with mock.patch.object(update_prompt, "ask",
-                               return_value=update_check.SKIP_VERSION) as ask:
-            self.run_cli("status")
-            self.run_cli("status")                                        # 99.0.0 not asked again
-        self.assertEqual(ask.call_count, 1)
-
-    def test_panel_keys(self) -> None:
-        found = update_check.UpdateAvailable(__version__, "99.0.0")
-        cases = {(): update_check.SKIP, ("quit",): update_check.SKIP,
-                 ("enter",): update_check.UPDATE_NOW, ("down", "enter"): update_check.SKIP,
-                 ("up", "enter"): update_check.SKIP_VERSION, ("3",): update_check.SKIP_VERSION,
-                 ("x", "down", "down", "down", "enter"): update_check.UPDATE_NOW}
-        for keys, want in cases.items():
-            buf = io.StringIO()
-            self.assertEqual(update_prompt.choose(found, keys, buf, False, theme.UNICODE), want)
-        text = buf.getvalue()
-        for part in ("✨ " + HINT, "› 1) Update now", "uv tool upgrade agent-toggle",
-                     "ask again next run", "3) Skip until next version",
-                     "Release notes: https://github.com/weskao/agent-toggle/releases/tag/v99.0.0",
-                     "↑↓ select · ⏎ confirm · q/Ctrl+C skip"):
-            self.assertIn(part, text)
+    def test_update_help_describes_the_new_behaviour(self) -> None:
+        self.assertIn("newest release", self.run_cli("help", "update")[1])
 
 
 class SettingsApplyTest(CliCase):
@@ -327,14 +288,12 @@ class SettingsApplyTest(CliCase):
         self.assertEqual(self.run_cli("install-shims", "--harness", "codex")[0], 0)   # explicit
         self.assertTrue((self.tmp / ".codex" / "skills" / "agent-toggle" / "SKILL.md").is_file())
 
-    def test_ctrl_c_during_the_command_skips_the_update_offer(self) -> None:
-        started = object()
-        with mock.patch.object(update_prompt, "start", return_value=started), \
-                mock.patch.object(update_prompt, "offer") as offer, \
+    def test_ctrl_c_during_the_command_skips_the_update_hint(self) -> None:
+        with mock.patch.object(update_prompt, "hint") as hint, \
                 mock.patch.object(cli, "_main", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
             cli.main(["status"])
-        self.assertIsNone(offer.call_args.args[0])
+        hint.assert_not_called()
 
     def test_an_item_shared_with_an_enabled_harness_is_not_hidden(self) -> None:
         (self.home / "skills" / "a").mkdir(parents=True)
@@ -353,9 +312,8 @@ class SettingsApplyTest(CliCase):
         settings.set("harness.opencode", False)               # every owner off: hidden again
         self.assertIn("1 hidden by settings", self.run_cli("list")[1])
 
-    def test_ctrl_c_while_offering_the_update_keeps_the_exit_code(self) -> None:
-        with mock.patch.object(update_prompt, "start", return_value=None), \
-                mock.patch.object(update_prompt, "offer", side_effect=KeyboardInterrupt):
+    def test_ctrl_c_while_checking_for_the_update_keeps_the_exit_code(self) -> None:
+        with mock.patch.object(update_prompt, "hint", side_effect=KeyboardInterrupt):
             self.assertEqual(cli.main(["status"]), 0)
 
     def test_hidden_by_settings_is_a_json_warning_and_a_cost_text_note(self) -> None:

@@ -27,7 +27,11 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 # telegram-kit is core (stdlib-only) so a plain reinstall can't drop the Telegram settings
-dependencies = ["telegram-kit>=0.2.2,<0.3"]
+dependencies = ["telegram-kit>=0.2.2,<0.3", "update-kit>=0.1,<0.2"]
+
+[tool.uv.sources]
+# CI sets UV_NO_SOURCES=1 (no sibling checkout) and resolves update-kit from the index
+update-kit = { path = "../../Documents/Workspace/update-kit", editable = true }
 
 [project.urls]
 Homepage = "https://github.com/weskao/agent-toggle"

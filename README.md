@@ -169,7 +169,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `status` | health check: harnesses found, types each supports, parked counts, gitignore, untracked parked items, stale live twins, shared dirs, and state entries whose parked item is gone (a `stale` row with the fix command; read-only, still exit `0`) |
 | `list [type]` | what is currently disabled (`--project <dir>` filters to one project) |
 | `cost [--type T]` | estimated startup tokens per item, biggest first (read-only; `--harness H` filters; `--project <dir>` prices a repo's `.claude/` and `.mcp.json` instead of user scope) |
-| `update` | check PyPI now (ignores the cache and a skipped version) and print the commands that update the CLI, the Claude Code plugin (when installed) and the shims; runs none of them. `/agent-toggle update` in Claude Code does the same; opening the pane toasts a newer release once |
+| `update` (also `--update`) | install the newest release tag (`uv tool install --force --no-sources git+<repo>@<tag>`, or `pipx install --force` for a pipx install), then, with the new version, update the Claude Code plugin (when installed) and the shims. Never asks. Exit `0` updated or already current, `1` the check or install failed (offline, rate limit), `2` a dev install (use `git pull`) or an install it cannot manage (the manual command is printed). Messages go to stderr; `--json` has no JSON for it. The `/agent-toggle` pane command has no `update`: run it in a terminal |
 | `install-shims` | write the skill shim into every installed harness that is on in the settings (an off one is skipped unless named with `--harness`); refuses to overwrite a file it did not write (`--dry-run` shows the plan); reports stale legacy `<dir>-disabled/` lines in a harness-home `.gitignore` (`--gitignore` removes them, `--no-gitignore` skips the check); on a terminal, then asks y/n for each problem `doctor` can fix (see [Fixing](#fixing)) |
 | `disable <type> <name>...` | park one or more items (`--dry-run` shows the plan; `--project <dir>` for a repo's own `.claude/` and `.mcp.json`) |
 | `enable <type> <name>...` | put them back (`--dry-run` shows the plan; `--project <dir>` likewise) |
@@ -454,33 +454,37 @@ invalid value in either is ignored with one warning on stderr.
 - `default_harness` is what `disable` / `enable` act on without `--harness`, even when that
   harness is switched off (with one warning on stderr);
   `disable` / `enable --project` without `--harness` still default to `claude`.
-- `language` translates the config menu, help, update prompt and picker chrome; command output stays English.
+- `language` translates the config menu, help, update messages and picker chrome; command output stays English.
 - telegram-kit is a regular dependency now, so reinstalling keeps the Telegram settings working;
   `agent-toggle[telegram]` still resolves.
 
-## Update check
+## Update
 
-On every invocation (unless disabled) agent-toggle checks PyPI for a newer release. It starts
-before the command and is offered after it, on every exit path; it overlaps the command and waits at most 0.8 s afterwards.
+`agent-toggle update` (or `agent-toggle --update`) is a self-update through
+update-kit (a small stdlib-only helper library): it asks the repository for its newest `vX.Y.Z`
+tag (`git ls-remote --tags`), and when that is newer than the running version it installs it with
+`uv tool install --force --no-sources git+<repo>@<tag>` (`pipx install --force` for a pipx install).
+It then runs, with the new binary and in order: when the Claude Code plugin is installed,
+`claude plugin marketplace update agent-toggle` and `claude plugin update agent-toggle@agent-toggle`,
+then `agent-toggle install-shims`. A failing step prints a warning and makes the exit code `1`.
+It never prompts and writes to stderr only.
 
-- **On a terminal** (stdin and stderr are TTYs, no `--json`): a panel on stderr, "agent-toggle X
-  is available (you have Y)", with `Update now`, `Skip` and `Skip until next version`, a release
-  notes link, and `↑` `↓` `Enter` `q`. `Update now` runs, in order and stopping at the first
-  failure: `uv tool upgrade agent-toggle` (`pipx upgrade agent-toggle` for a pipx install), then,
-  when the Claude Code plugin is installed, `claude plugin marketplace update agent-toggle` and
-  `claude plugin update agent-toggle@agent-toggle`, then `agent-toggle install-shims`. A failure
-  gives a yellow warning listing the commands to run yourself.
-- **Windows**: a running `agent-toggle.exe` cannot be replaced, so there is no `Update now`; the
-  commands are printed instead (as below), to run once agent-toggle has exited.
-- **Off a terminal** (or `--json`): a stderr line, `agent-toggle X is available (you have Y)`,
-  then those commands, one per line.
-- It never changes the exit code or stdout, so `--json` output stays one document.
+| Exit | Meaning |
+|---|---|
+| `0` | updated, or already up to date |
+| `1` | could not check (offline, rate limit) or the install failed |
+| `2` | a dev install (`git pull` instead), or an install kind it cannot manage (the manual command is printed) |
 
-It is one `GET https://pypi.org/pypi/agent-toggle/json` on a background thread with a 0.8 s
-timeout, cached for 10 minutes in `~/.agent-toggle/update-check.json`. Nothing is sent beyond a
-normal HTTP request with the User-Agent `agent-toggle-update-check`. See `SECURITY.md`
-for the hardening. To turn it off, set `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
-to off (the settings menu's "Check for updates").
+On Windows a running `agent-toggle.exe` cannot be replaced, so the install runs detached after
+agent-toggle exits (log in `%USERPROFILE%\.update-kit\`).
+
+**The hint.** After a command, on an interactive terminal only (stderr is a TTY, never under
+`--json`, pipes, launchd or timers), agent-toggle prints one stderr line when a newer release
+exists, `agent-toggle vX.Y.Z is available (you have A) — run `agent-toggle update``. The check is
+`git ls-remote` with a 1.5 s timeout, cached for 24 hours (failures too) in
+`~/.update-kit/state.json`. It never changes the exit code or stdout. To turn it off, set
+`AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting to off (the settings menu's
+"Check for updates").
 
 ## Help
 
@@ -872,7 +876,6 @@ bookkeeping.
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
 | `config.json` | [settings](#settings--config-menu) and the Telegram chat id (mode `0600`, atomic write, unknown keys kept) |
-| `update-check.json` | the [update check](#update-check)'s 10-minute cache (mode `0600`, atomic write) |
 
 A killed run loses at most the one item in flight. If that was a flag write or a
 dir move (with its companions), its `pending` record (the full entry, a flag's

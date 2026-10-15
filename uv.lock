@@ -7,6 +7,7 @@ name = "agent-toggle"
 source = { editable = "." }
 dependencies = [
     { name = "telegram-kit" },
+    { name = "update-kit" },
 ]
 
 [package.optional-dependencies]
@@ -21,6 +22,7 @@ windows = [
 requires-dist = [
     { name = "telegram-kit", specifier = ">=0.2.2,<0.3" },
     { name = "telegram-kit", marker = "extra == 'telegram'", specifier = ">=0.2.2,<0.3" },
+    { name = "update-kit", editable = "../../Documents/Workspace/update-kit" },
     { name = "windows-curses", marker = "sys_platform == 'win32' and extra == 'windows'" },
 ]
 provides-extras = ["windows", "telegram"]
@@ -32,6 +34,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0c/2f/cde074208fc1349be6a20a9bfe1a21a3fc38c5c2075e04156ffa0d8e2c3b/telegram_kit-0.2.2.tar.gz", hash = "sha256:4706da2d145db427ee7a41a382316886e449d52bec6381390186c197a156276d", size = 21395, upload-time = "2026-10-03T20:39:02.228Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/59/841180442f43848a3bb6dd21ad617bb69f15a78be0c7a10947073acd7513/telegram_kit-0.2.2-py3-none-any.whl", hash = "sha256:a73ab2ae1c81a03be359ff50975a311aef4c803b2eda674b8272102616ce305a", size = 10750, upload-time = "2026-10-03T20:39:01.199Z" },
+]
+
+[[package]]
+name = "update-kit"
+source = { editable = "../../Documents/Workspace/update-kit" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.15.21" },
 ]
 
 [[package]]

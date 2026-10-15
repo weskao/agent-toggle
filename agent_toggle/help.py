@@ -137,12 +137,13 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             examples=["config", "config test", "config sync-ci --dry-run"]),
         "update": Cmd(
             "update",
-            t("help.update.summary", "check for a newer release; show how to update"),
-            t("help.update.desc", "Ask PyPI now (ignoring the cache and a skipped version) and, "
-                                  "when a newer release exists, print the commands that update "
-                                  "the CLI, the Claude Code plugin (if installed) and the shims. "
-                                  "Runs none of them."),
-            examples=["update", "update --json"]),
+            t("help.update.summary", "install the newest release; refresh the plugin and shims"),
+            t("help.update.desc", "Install the newest release tag (uv tool or pipx), then, with the "
+                                  "new version, update the Claude Code plugin (if installed) and "
+                                  "reinstall the shims. Never asks; `--update` is the same. A dev "
+                                  "install says to git pull (exit 2). Exit 1 when the check or "
+                                  "the install fails."),
+            examples=["update"]),
         "completion": Cmd(
             "completion bash|zsh|fish|powershell",
             t("help.completion.summary", "print the shell completion script"),

@@ -11,9 +11,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import update_kit
 from base import SandboxCase
 
-from agent_toggle import __version__, cli, fs
+from agent_toggle import __version__, cli, fs, update_prompt
 
 ENVELOPE_KEYS = {"ok", "command", "results", "warnings", "needs_new_session"}
 ROW_KEYS = {"harness", "type", "name", "action", "status", "detail"}
@@ -236,6 +237,11 @@ class SpellingTest(CliCase):
             self.assertIn(__version__, out)
 
     def test_every_command_accepts_a_leading_double_dash(self) -> None:
+        for target, name, kw in ((update_kit, "update", {"return_value": 0}),   # never install / hit git
+                                 (update_prompt, "after_steps", {"return_value": []})):
+            patch = mock.patch.object(target, name, **kw)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.write("skills/demo-skill/SKILL.md")
         self.run_cli("profile", "save", "work")
         proj = self.tmp / "proj"

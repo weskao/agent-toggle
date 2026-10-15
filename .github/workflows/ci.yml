@@ -18,6 +18,9 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      # pyproject's [tool.uv.sources] points update-kit at a sibling checkout CI does not have
+      UV_NO_SOURCES: "1"
     strategy:
       fail-fast: false
       matrix:

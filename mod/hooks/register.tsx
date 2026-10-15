@@ -78,7 +78,7 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
 const ACTIONS = ['open', 'close', 'toggle']
 type Action = 'open' | 'close' | 'toggle'
 const isAction = (s: string): s is Action => ACTIONS.includes(s)
-const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]'
+const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]'
 const TOOL = 'mcp__agent-toggle__pane'
 
 async function pane($: Engine, action: Action): Promise<string> {
@@ -213,7 +213,7 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
 
 // `/agent-toggle <verb> ...` runs the CLI instead of opening the pane; any other argument still opens it.
 // `--` spellings too: the CLI accepts both (CLAUDE.md "Every command has two spellings").
-const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor|update)$/i
+const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor)$/i
 
 // Runs `/agent-toggle <args>` as the CLI (argv, no shell) and answers with one line per result row.
 async function runArgs($: Engine, words: string[]): Promise<string> {
@@ -256,7 +256,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'agent-toggle',
       description: 'Toggle Claude Code resources in a pane',
-      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]',
+      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
     }).catch(() => {})
     await watch($)
 
