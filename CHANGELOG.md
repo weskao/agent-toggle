@@ -1,3 +1,22 @@
+## [0.15.0] - 2026-10-15
+
+### 🚀 Features
+
+- **update:** [**breaking**] Self-update through update-kit
+
+### 🐛 Bug Fixes
+
+- **update:** Compute plugin steps lazily and keep the update hint out of child steps
+- **update:** Defer update-kit import
+- **hooks:** Show traceback exception
+
+### 💼 Other
+
+- **deps:** Resolve update-kit from PyPI
+
+### 📚 Documentation
+
+- **changelog:** Drop hand-written Unreleased block
 ## [0.14.0] - 2026-10-14
 
 ### 🚀 Features
