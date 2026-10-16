@@ -7,6 +7,10 @@ rules, plugins (mods included), MCP servers — across Claude Code, Codex, Grok 
 OpenClaw, Copilot, Vibe, Devin and Antigravity — and show what each one costs at
 session start.
 
+It ships in two forms: a **CLI** (`agent-toggle`, all harnesses) and a **Claude Code mod**
+(the `/agent-toggle` pane, claude harness only; see [Claude Code pane mod](#claude-code-pane-mod)).
+Both drive the same toggle engine and state.
+
 **Nothing is ever deleted.** Everything is parked and recorded, and `enable`
 puts it back where it came from.
 
