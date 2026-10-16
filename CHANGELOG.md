@@ -1,3 +1,16 @@
+## [0.16.0] - 2026-10-16
+
+### 🚀 Features
+
+- **update:** Restore the interactive update prompt
+
+### 💼 Other
+
+- **deps:** [**breaking**] Bump update-kit to 0.2.1
+
+### 📚 Documentation
+
+- Clarify cli and claude code mod forms
 ## [0.15.0] - 2026-10-15
 
 ### 🚀 Features
