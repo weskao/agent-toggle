@@ -27,7 +27,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 # telegram-kit is core (stdlib-only) so a plain reinstall can't drop the Telegram settings
-dependencies = ["telegram-kit>=0.2.2,<0.3", "update-kit>=0.1,<0.2"]
+dependencies = ["telegram-kit>=0.2.2,<0.3", "update-kit>=0.2.1,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/weskao/agent-toggle"
