@@ -26,7 +26,7 @@ function tellUpdate($: Engine, stderr: string) {
   const line = stderr.match(/^agent-toggle \S+ is available .*$/m)?.[0]
   if (!line || line === told) return
   told = line
-  $.ui.toast(`${line}: run /agent-toggle update for the commands`)
+  $.ui.toast(`${line}: run agent-toggle update in a terminal`)
 }
 
 // The stderr line that says why: a Python traceback names its exception on the last line, anything else on the first.

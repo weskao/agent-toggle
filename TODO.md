@@ -170,16 +170,15 @@ mentioned there. The repo is already public, and `claude plugin validate .` and
 
 - [x] `update` / `--update` call `update_kit.update` (install the newest tag, then the plugin and
       shims), exit with its code, never prompt
-- [x] the interactive update panel, skip-version memory and the PyPI check
-      (`update_check.py`) are gone; one stderr hint on a TTY, gated by `update_check`
+- [x] the interactive update panel, skip-version memory and the PyPI check (`update_check.py`)
+      are back after every non-`update` command; `Update now` runs `update` (the newest tag)
 - [x] CI test job sets `UV_NO_SOURCES=1`
 - [ ] publish update-kit 0.1.x to PyPI (manual): until then CI's `pip install -e .` and the
       release smoke test cannot resolve `update-kit>=0.1,<0.2`, and `uv lock --check` in the lint
       job cannot find the sibling path source
-- [ ] `mod/hooks/register.tsx` `tellUpdate` toasts a newer release from the CLI's stderr line, but
-      the hint only prints on a TTY and the mod runs the CLI without one: drop it, or have the mod
-      call `update_kit.check` through a CLI flag (`update` itself was removed from the mod's verbs: it
-      prints no JSON and self-installs)
+- [x] `mod/hooks/register.tsx` `tellUpdate` toasts a newer release again (the restored check hints
+      on stderr off a TTY too) and points at `agent-toggle update` in a terminal (`update` is not a
+      mod verb: it prints no JSON and self-installs)
 
 ## Housekeeping
 

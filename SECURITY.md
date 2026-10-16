@@ -44,17 +44,21 @@ it reports names and paths, never backed-up values.
 
 ## Network use: the update check
 
-agent-toggle has no telemetry and never uploads your resources, paths or state. Its only
-network use is the update hint and `agent-toggle update`, both through update-kit:
+agent-toggle has no telemetry and never uploads your resources, paths or state. Its network
+use is a default-on update check, and `agent-toggle update` when you run it (or pick `Update now`):
 
-- `git ls-remote --tags --refs https://github.com/weskao/agent-toggle.git`, with
-  `GIT_TERMINAL_PROMPT=0`; nothing is sent beyond what git sends to list tags.
-- The hint runs only on an interactive terminal, with a 1.5 s timeout, and the answer (failures
-  too) is cached for 24 hours in `~/.update-kit/state.json`.
-- Only strict `vX.Y.Z` tags are considered, and the install command is a fixed argument list
-  with no shell (`uv tool install --force --no-sources git+<repo>@<tag>`).
+- The check is `GET https://pypi.org/pypi/agent-toggle/json`, on a background thread with a 0.8 s
+  timeout; nothing is sent beyond a normal HTTP GET with the User-Agent `agent-toggle-update-check`.
+- The answer is cached for 10 minutes in `~/.agent-toggle/update-check.json` (mode `0600`,
+  written atomically, never following a symlink).
+- Redirects are followed over https only; the response body is capped at 1 MB; version
+  strings are validated, and control characters are stripped before anything is printed.
 - A newer release is reported on stderr only; it never changes stdout or the exit code.
-- Opt out of the hint with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
+- `update` (and `Update now`) goes through update-kit: `git ls-remote --tags --refs
+  https://github.com/weskao/agent-toggle.git` with `GIT_TERMINAL_PROMPT=0`, only strict `vX.Y.Z`
+  tags, and the install is a fixed argument list with no shell
+  (`uv tool install --force --no-sources git+<repo>@<tag>`).
+- Opt out of the check with `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
   (`agent-toggle config`).
 
 Settings live in `~/.agent-toggle/config.json` (mode `0600`, atomic). The Telegram bot

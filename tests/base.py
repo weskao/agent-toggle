@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import update_kit
+
 from agent_toggle import fs
 from agent_toggle.backends import plugin_cli
 
@@ -30,6 +32,15 @@ CAN_SYMLINK = _can_symlink()
 # Never hit the network for an update check, in-process or in a subprocess that
 # inherits this environment (SandboxCase.setUp only touches HOME/TERM/..., so it stays).
 os.environ["AGENT_TOGGLE_UPDATE_CHECK"] = "0"
+
+
+def _no_tags(*_a, **_kw):
+    raise update_kit.UpdateError("tests never list release tags")
+
+
+# update_kit.update() reinstalls the real tool (a dev install too) once it has a tag; without
+# one it stops before installing, and update_kit.check() makes no git call. Patch it to get one.
+update_kit.latest_tag = _no_tags
 
 
 class SandboxCase(unittest.TestCase):

@@ -140,9 +140,10 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             t("help.update.summary", "install the newest release; refresh the plugin and shims"),
             t("help.update.desc", "Install the newest release tag (uv tool or pipx), then, with the "
                                   "new version, update the Claude Code plugin (if installed) and "
-                                  "reinstall the shims. Never asks; `--update` is the same. A dev "
-                                  "install says to git pull (exit 2). Exit 1 when the check or "
-                                  "the install fails."),
+                                  "reinstall the shims. Never asks; `--update` is the same. Always "
+                                  "the newest tag: a dev or unmanaged install is replaced by it. "
+                                  "Exit 1 when the check or the install fails, 2 when neither uv "
+                                  "nor pipx is found."),
             examples=["update"]),
         "completion": Cmd(
             "completion bash|zsh|fish|powershell",

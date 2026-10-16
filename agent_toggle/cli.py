@@ -36,7 +36,7 @@ Usage:
     failure, 2 usage error, 3 locked, 4 unsupported pair / harness missing.
     Settings: $HOME/.agent-toggle/config.json (see `config`); env overrides
     AGENT_TOGGLE_UPDATE_CHECK / _COLOR / _LANG / _DEFAULT_HARNESS.
-    Update hint: on by default, a terminal's stderr only; AGENT_TOGGLE_UPDATE_CHECK=0 turns it off.
+    Update check: on by default, stderr only; AGENT_TOGGLE_UPDATE_CHECK=0 turns it off.
 """
 from __future__ import annotations
 
@@ -723,9 +723,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return its exit code (the process exit code).
 
-    Settings apply first; the update hint is printed in a `finally`, so every way out
-    (a command, --help/--version, a usage error, Locked, CliError) gets it. It writes
-    to stderr only and never changes the exit code."""
+    Settings apply first; the update check starts before dispatch and is offered in a
+    `finally`, so every way out (a command, --help/--version, a usage error, Locked,
+    CliError) gets it. It writes to stderr only and never changes the exit code."""
     argv = normalize_argv(sys.argv[1:] if argv is None else argv)
     try:
         language, color = settings.get("language"), settings.get("color")
@@ -734,17 +734,16 @@ def main(argv: list[str] | None = None) -> int:
     i18n.set_language(language)
     color = scan_color(argv, color)     # --color > env > setting > auto
     i = _command_index(argv)
-    hint = True
+    # `update` is the update; `completion` may run on every shell start (eval "$(...)")
+    started = None if argv[i:i + 1] in (["update"], ["completion"]) else update_prompt.start()
     try:
         return _main(argv, color)
     except KeyboardInterrupt:
-        hint = False                    # never ask anything after the user hit Ctrl-C
+        started = None                  # never prompt after the user hit Ctrl-C
         raise
     finally:
-        # `update` is the update; `completion` may run on every shell start (eval "$(...)")
-        if hint and argv[i:i + 1] not in (["update"], ["completion"]):
-            with contextlib.suppress(KeyboardInterrupt):
-                update_prompt.hint(json_mode="--json" in argv)
+        with contextlib.suppress(KeyboardInterrupt):     # Ctrl-C while waiting on the check
+            update_prompt.offer(started, json_mode="--json" in argv, color_mode=color)
 
 
 def _main(argv: list[str], color: str) -> int:
