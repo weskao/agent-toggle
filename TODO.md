@@ -180,6 +180,13 @@ mentioned there. The repo is already public, and `claude plugin validate .` and
       on stderr off a TTY too) and points at `agent-toggle update` in a terminal (`update` is not a
       mod verb: it prints no JSON and self-installs)
 
+## Project-aware profile loading (planned)
+
+- [ ] detect the project type (python, web, flutter, ...) from marker files, or let the user
+      set the project path explicitly in config
+- [ ] on the AI agent hook (session start), load the matching profile list (1 to N profiles)
+      when a related setting exists; do nothing when none is configured
+
 ## Housekeeping
 
 - [x] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
