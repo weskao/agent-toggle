@@ -187,6 +187,24 @@ mentioned there. The repo is already public, and `claude plugin validate .` and
 - [ ] on the AI agent hook (session start), load the matching profile list (1 to N profiles)
       when a related setting exists; do nothing when none is configured
 
+## Project + global scope together (planned)
+
+Today a command sees one scope: user (global), or a project only with an explicit
+`--project <dir>`.
+
+- [ ] detect the current project from the cwd (nearest dir with `.claude/` or `.mcp.json`,
+      else the git root); `--project <dir>` still overrides it
+- [ ] inside a project, load both scopes: the project's skills / plugins / MCP / agents /
+      commands / rules plus the global ones; outside a project, global only (today's behaviour)
+- [ ] CLI: `status`, `list` and `cost` label each row `project` or `global`; `--json` gains a
+      `scope` field; a name present in both scopes needs `--project` or `--global` to toggle
+- [ ] UI picker (curses and numbered menu): a scope column or group headers, and the toggle
+      acts on the row's own scope
+- [ ] Claude mod pane (`mod/hooks/picker.tsx`): pass the session cwd, show both scopes with
+      the same labels, toggle by row scope
+- [ ] tests: a fixture project under a fixture home shows both scopes, the same names outside
+      the project show global only; update `docs/toggle-paths.md` and README
+
 ## Housekeeping
 
 - [x] re-run `agent-toggle install-shims` after upgrading so the installed shim picks
