@@ -28,7 +28,7 @@ from .output import use_color
 from .ui import theme
 
 DIST = "agent-toggle"
-REPO = "weskao/agent-toggle"
+REPO = update_check.REPO
 PLUGIN = "agent-toggle@agent-toggle"
 UPDATE = [DIST, "update"]
 RELEASE_NOTES = "https://github.com/weskao/agent-toggle/releases/tag/v%s"
@@ -93,12 +93,12 @@ def cache_path() -> Path:
 
 
 def start() -> update_check.Started | None:
-    """Kick off the PyPI check on a daemon thread, unless the `update_check` setting
-    (env AGENT_TOGGLE_UPDATE_CHECK wins) is off. Never raises."""
+    """Kick off the release check (update_kit) on a daemon thread, unless the `update_check`
+    setting (env AGENT_TOGGLE_UPDATE_CHECK wins) is off. Never raises."""
     try:
         if not settings.get("update_check"):
             return None
-        return update_check.start(DIST, __version__, cache_path=cache_path())
+        return update_check.start(__version__, cache_path=cache_path())
     except Exception:  # noqa: BLE001 - a hint must never fail the command
         return None
 
@@ -112,7 +112,7 @@ def is_interactive() -> bool:
 
 def _available(found: update_check.UpdateAvailable) -> str:
     return t("update.available", "agent-toggle %s is available (you have %s)",
-             _clean(found.latest), _clean(found.current))
+             _clean(found.latest).removeprefix("v"), _clean(found.current))
 
 
 def hint(found: update_check.UpdateAvailable) -> str:

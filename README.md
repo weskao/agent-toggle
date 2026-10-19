@@ -464,7 +464,7 @@ invalid value in either is ignored with one warning on stderr.
 
 ## Update check
 
-On every invocation (unless disabled) agent-toggle checks PyPI for a newer release. It starts
+On every invocation (unless disabled) agent-toggle checks the repository's release tags for a newer release. It starts
 before the command and is offered after it, on every exit path; it overlaps the command and waits at most 0.8 s afterwards.
 `update` and `completion` skip it.
 
@@ -479,9 +479,9 @@ before the command and is offered after it, on every exit path; it overlaps the 
   then `  agent-toggle update`.
 - It never changes the exit code or stdout, so `--json` output stays one document.
 
-It is one `GET https://pypi.org/pypi/agent-toggle/json` on a background thread with a 0.8 s
-timeout, cached for 10 minutes in `~/.agent-toggle/update-check.json`. Nothing is sent beyond a
-normal HTTP request with the User-Agent `agent-toggle-update-check`. See `SECURITY.md`
+The lookup is update-kit's: one `git ls-remote --tags --refs` of the repository on a background
+thread, cached for 10 minutes in `~/.update-kit/state.json`. Only the version you chose to skip is
+kept in `~/.agent-toggle/update-check.json`. Nothing is sent beyond a normal git request. See `SECURITY.md`
 for the hardening. To turn it off, set `AGENT_TOGGLE_UPDATE_CHECK=0` or the `update_check` setting
 to off (the settings menu's "Check for updates").
 
@@ -897,7 +897,7 @@ bookkeeping.
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
 | `config.json` | [settings](#settings--config-menu) and the Telegram chat id (mode `0600`, atomic write, unknown keys kept) |
-| `update-check.json` | the [update check](#update-check)'s 10-minute cache (mode `0600`, atomic write) |
+| `update-check.json` | the [update check](#update-check)'s skipped version (mode `0600`, atomic write) |
 
 A killed run loses at most the one item in flight. If that was a flag write or a
 dir move (with its companions), its `pending` record (the full entry, a flag's

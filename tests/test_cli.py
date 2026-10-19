@@ -159,13 +159,13 @@ class SandboxInvariantTest(SandboxCase):
         self.assertEqual(Path(agent_toggle.__file__).resolve().parent, REPO / "agent_toggle")
 
 
-PYPI_99 = json.dumps({"info": {"version": "99.0.0"}})
+TAG_99 = "v99.0.0"     # update_kit.check returns the release tag
 HINT = f"agent-toggle 99.0.0 is available (you have {__version__})"
 
 
 class UpdateCheckTest(CliCase):
     """The update check: started before dispatch, offered in main()'s finally; and `update` /
-    `--update`. No network: fetch_pypi and update_kit.update are patched;
+    `--update`. No network: update_kit.check and update_kit.update are patched;
     AGENT_TOGGLE_UPDATE_CHECK=0 (tests/base.py) is lifted here only."""
 
     def setUp(self) -> None:
@@ -174,9 +174,9 @@ class UpdateCheckTest(CliCase):
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("AGENT_TOGGLE_UPDATE_CHECK", None)
-        for target, kw in ((update_check, {"fetch_pypi": mock.Mock(return_value=PYPI_99)}),
-                           (update_prompt, {"is_interactive": mock.Mock(return_value=False)}),
-                           (update_kit, {"update": mock.Mock(return_value=0)}),   # never install
+        for target, kw in ((update_prompt, {"is_interactive": mock.Mock(return_value=False)}),
+                           (update_kit, {"check": mock.Mock(return_value=TAG_99),
+                                         "update": mock.Mock(return_value=0)}),   # never install
                            (fs, {"WIN": False})):     # the panel/upgrade flow; Windows has its own test
             patch = mock.patch.multiple(target, **kw)
             patch.start()
@@ -193,7 +193,7 @@ class UpdateCheckTest(CliCase):
             self.assertNotIn("99.0.0", self.run_cli("status")[2])
         settings.set("update_check", False)
         self.assertNotIn("99.0.0", self.run_cli("status")[2])
-        update_check.fetch_pypi.assert_not_called()
+        update_kit.check.assert_not_called()
 
     def test_json_stdout_is_one_document_and_never_prompts(self) -> None:
         update_prompt.is_interactive.return_value = True
@@ -291,7 +291,7 @@ class UpdateCheckTest(CliCase):
             self.assertNotIn("99.0.0", self.run_cli("update")[2])
             self.assertNotIn("99.0.0", self.run_cli("completion", "bash")[2])
         ask.assert_not_called()
-        update_check.fetch_pypi.assert_not_called()
+        update_kit.check.assert_not_called()
 
     def test_update_and_dash_dash_update_exit_with_update_kits_code(self) -> None:
         for argv in (("update",), ("--update",), ("--json", "--update")):

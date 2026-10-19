@@ -47,12 +47,13 @@ it reports names and paths, never backed-up values.
 agent-toggle has no telemetry and never uploads your resources, paths or state. Its network
 use is a default-on update check, and `agent-toggle update` when you run it (or pick `Update now`):
 
-- The check is `GET https://pypi.org/pypi/agent-toggle/json`, on a background thread with a 0.8 s
-  timeout; nothing is sent beyond a normal HTTP GET with the User-Agent `agent-toggle-update-check`.
-- The answer is cached for 10 minutes in `~/.agent-toggle/update-check.json` (mode `0600`,
+- The check is update-kit's: `git ls-remote --tags --refs` of the repository on a background
+  thread; nothing is sent beyond a normal git request. The answer is cached for 10 minutes in
+  `~/.update-kit/state.json`.
+- The version you chose to skip is kept in `~/.agent-toggle/update-check.json` (mode `0600`,
   written atomically, never following a symlink).
-- Redirects are followed over https only; the response body is capped at 1 MB; version
-  strings are validated, and control characters are stripped before anything is printed.
+- Only strict version tags are accepted, and control characters are stripped before anything
+  is printed.
 - A newer release is reported on stderr only; it never changes stdout or the exit code.
 - `update` (and `Update now`) goes through update-kit: `git ls-remote --tags --refs
   https://github.com/weskao/agent-toggle.git` with `GIT_TERMINAL_PROMPT=0`, only strict `vX.Y.Z`
