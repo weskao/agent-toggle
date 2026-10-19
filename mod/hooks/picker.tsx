@@ -4,7 +4,7 @@ import type { Row } from '../types'
 
 // The curses picker's look and keys (agent_toggle/ui/picker.py), drawn by the engine.
 // Runs in a surface module: no `$`, so a toggle is posted to register.tsx's `ui.message` hook.
-type Props = { rows: Row[]; busy: boolean; error: string; wheel: number }
+type Props = { rows: Row[]; busy: boolean; error: string; wheel: number; version?: string }
 type State = { cursor: number; top: number; query: string; typing: boolean; sort: 'name' | 'cost'; wheel: number; frame: number }
 type Item = { head: string; count: number } | { row: Row }
 
@@ -117,6 +117,7 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
 
   const topCost = Math.max(0, ...rows.map(r => (r.enabled ? r.tokens : r.save)))
   const live = props.rows.reduce((n, r) => n + (r.enabled ? r.tokens : 0), 0)
+  const ver = props.version ? ` v${props.version}` : ''
   const summary = `${props.rows.length} resources · ~${tok(live)} tok live`
   const chips: Array<[string, string]> = [['Tab', 'toggle'], ['/', 'search'], [`^${KEYS.sort.toUpperCase()}`, 'sort'], [`^${KEYS.same.toUpperCase()}`, 'same name'], ['↑↓', 'move'], ['^U', 'clear']]
 
@@ -171,8 +172,9 @@ const Picker: ClientModule<Props, State> = (props, surface) => {
     <Box flexDirection="column">
       <Text key="title" wrap="truncate">
         <Text bold> agent-toggle</Text>
+        {ver && <Text dimColor> v{props.version}</Text>}
         <Text dimColor> · <Link href={AUTHOR} /></Text>
-        <Text dimColor>{summary.padStart(Math.max(0, w - 13 - AUTHOR.length - 3))}</Text>
+        <Text dimColor>{summary.padStart(Math.max(0, w - 13 - ver.length - AUTHOR.length - 3))}</Text>
       </Text>
       <Text key="search" wrap="truncate">
         <Text color="cyan">/ </Text>

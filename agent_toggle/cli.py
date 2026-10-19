@@ -298,7 +298,7 @@ def cmd_cost(state: dict, out: Result, harness: str | None = None,
     if len(shown) > len(items):
         _say_hidden(out, f"{len(shown) - len(items)} hidden by settings (agent-toggle config)")
     out.row(harness, type_, None, "cost", "ok", "total", show=False, items=len(items),
-            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA,
+            total_tokens=live, saved_tokens=saved, formula=cost.FORMULA, version=__version__,
             **({"project": str(proj)} if proj else {}))
 
 

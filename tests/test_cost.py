@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest import mock
 
+from agent_toggle import __version__
 from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
@@ -119,6 +120,7 @@ class CostCommandTest(CliCase):
         total = self.results("cost")[-1]
         self.assertEqual(total["total_tokens"], sum(tokens))
         self.assertEqual(total["formula"]["chars_per_token"], 4)
+        self.assertEqual(total["version"], __version__)
 
     def test_parked_costs_zero_and_reports_would_save(self) -> None:
         self.assertEqual(self.run_cli("disable", "skill", "big")[0], 0)

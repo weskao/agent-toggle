@@ -226,7 +226,7 @@ Flags accepted by every command, before or after the subcommand:
 
 Extra row fields: `list` rows carry `at`, `mechanism`, `companions`; `cost` rows
 carry `enabled`, `tokens`, `would_save`, `chars`, and the final `total` row
-carries `total_tokens`, `saved_tokens`, `formula`. Rows for a
+carries `total_tokens`, `saved_tokens`, `formula`, `version`. Rows for a
 directory shared with another harness (see below) carry `shared_with`, the other
 harnesses that read it: `disable` / `enable` rows relative to the harness you
 asked, plus `owner`, the harness whose park dir and state entry hold the item;

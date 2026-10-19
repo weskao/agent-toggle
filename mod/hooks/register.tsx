@@ -9,6 +9,8 @@ const busy = atom({ plugin: 'agent-toggle', key: 'busy' } as const, false)
 const error = atom({ plugin: 'agent-toggle', key: 'error' } as const, '')
 // the wheel ticks over the picker, summed: picker.tsx moves its cursor by the change
 const wheel = atom({ plugin: 'agent-toggle', key: 'wheel' } as const, 0)
+// the CLI's own version, from the cost summary row: the pane header shows it
+const version = atom({ plugin: 'agent-toggle', key: 'version' } as const, '')
 
 type Result = { ok?: boolean; needs_new_session?: boolean; results?: Array<Record<string, unknown>> }
 
@@ -146,6 +148,8 @@ async function refresh($: Engine) {
     save: Number(r.would_save) || 0,
     mod: r.mod === true,
   }))
+  const v = (out.results ?? []).find(r => r.type == null && r.name == null)?.version
+  if (typeof v === 'string') await update($, version, () => v)
   await update($, rows, () => list)
 }
 
@@ -308,12 +312,12 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Button, Text } = ui
-    const [all, isBusy, err, w] = await Promise.all([read($, rows), read($, busy), read($, error), read($, wheel)])
+    const [all, isBusy, err, w, ver] = await Promise.all([read($, rows), read($, busy), read($, error), read($, wheel), read($, version)])
 
     // terminal and desktop: the picker itself, drawn with its own keys and scrolling (picker.tsx)
     if ('Client' in ui && (e.surface === 'terminal' || e.surface === 'desktop')) { // the table reports Client on every surface, so the surface decides
       const need = all.length + GROUPS.length + 5 // rows, a heading per group, the chrome
-      return <ui.Client key="picker" module="./picker.tsx" width="100%" height={Math.min(e.props.scroll?.bodyRows ?? 24, need)} props={{ rows: all, busy: isBusy, error: err, wheel: w }} />
+      return <ui.Client key="picker" module="./picker.tsx" width="100%" height={Math.min(e.props.scroll?.bodyRows ?? 24, need)} props={{ rows: all, busy: isBusy, error: err, wheel: w, version: ver }} />
     }
 
     // mobile and vscode draw no Client: one Button per row, the surface scrolls
@@ -321,7 +325,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text dimColor>
-          {shown.length} resources{isBusy ? '  working...' : ''}
+          {ver && `v${ver}  `}{shown.length} resources{isBusy ? '  working...' : ''}
         </Text>
         {err !== '' && <Text color="red">{err}  (run `agent-toggle doctor`)</Text>}
         {shown.map(r => (
