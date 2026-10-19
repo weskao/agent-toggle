@@ -4,7 +4,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 type T = Parameters<TestBody>[0]
 type On = Parameters<TestBody>[1]
 
-const PANE = { title: 'agent-toggle', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 20 }, view: {} } as const
+const PANE = { title: 'Agent Toggle', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 20 }, view: {} } as const
 const skills = (n: number) => Array.from({ length: n }, (_, i) => ({ type: 'skill', name: `s${String(i).padStart(2, '0')}`, enabled: true, tokens: 10, would_save: 10, mod: false }))
 
 // Opens the pane over a faked `cost --json` holding `n` skills; returns the drawn picker.

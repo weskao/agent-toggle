@@ -94,7 +94,7 @@ async function pane($: Engine, action: Action): Promise<string> {
     return 'agent-toggle pane closed.'
   }
   await update($, rows, () => [])
-  const opened = await $.ui.open({ id: PANE, title: 'agent-toggle' })
+  const opened = await $.ui.open({ id: PANE, title: 'Agent Toggle' })
   if (!opened.isPlaced) $.ui.toast('agent-toggle: no surface could place the pane')
   await update($, error, () => '')
   await update($, busy, () => false) // state survives a hot reload: a cut-off call would leave busy true and drop every press

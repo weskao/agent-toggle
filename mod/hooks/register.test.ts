@@ -9,7 +9,7 @@ const cost = (...rows: object[]) => JSON.stringify({ ok: true, command: 'cost', 
 const COST = cost(row('skill', 'a', true, 100), row('skill', 'b', false, 50))
 const done = (exitCode: number, stdout: string) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
 const OK = done(0, JSON.stringify({ ok: true, results: [{ status: 'ok' }] }))
-const PANE = { title: 'agent-toggle', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 20 }, view: {} } as const
+const PANE = { title: 'Agent Toggle', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 20 }, view: {} } as const
 
 // Opens the pane against a faked CLI: every run answers `list` except a disable/enable, which answers `toggle`.
 async function open($: T, on: On, list = COST, toggle = OK, env: Record<string, string> = {}) {
