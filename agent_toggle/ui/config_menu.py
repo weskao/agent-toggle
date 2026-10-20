@@ -17,8 +17,8 @@ import contextlib
 import io
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .. import __version__, config, doctor, fs, harnesses, i18n, settings, undo
 from ..i18n import t

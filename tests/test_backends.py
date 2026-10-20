@@ -345,7 +345,7 @@ class CopilotMcpTest(CliCase):
 
     def test_enable_says_to_restore_a_vanished_key_or_file_first(self) -> None:
         self.disable()
-        self.cfg.write_bytes('{"other": 1}\n'.encode("utf-8"))
+        self.cfg.write_bytes(b'{"other": 1}\n')
         self.assert_refused(self.enable(), "restore mcp-config.json", b'{"other": 1}\n')
         self.assertIn("mcpServers", self.enable()[1]["results"][0]["detail"])
         self.cfg.unlink()

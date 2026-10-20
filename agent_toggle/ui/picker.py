@@ -498,7 +498,7 @@ def ask_save(win, v: View, pal: theme.Palette, g: theme.Glyphs,
             top = min(top, max(0, len(changed) - max(1, page)))
             row_y = y0 + (2 if bh >= 7 else 1)
 
-            def put(y, segments):
+            def put(y, segments, x0=x0, inner=inner):
                 theme.draw_segments(win, y, x0, [(g.v, "accent"),
                     *clip(segments, inner, g.ellipsis), (g.v, "accent")], pal)
 
