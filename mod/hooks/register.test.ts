@@ -370,6 +370,20 @@ describe('agent-toggle pane', () => {
     })
   })
 
+  test('undo runs without --harness, and an error row with no type or name still shows its reason', async ($, on) => {
+    const argvs: string[][] = []
+    on('process.run', (_$, e) => {
+      argvs.push([...e.argv])
+      return { value: done(2, JSON.stringify({ ok: false, results: [{ type: null, name: null, status: 'error', detail: 'nothing to undo' }] })) }
+    })
+    mock.env(on, {})
+    const r = await $.command.run({ command: 'agent-toggle', args: 'undo', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect({ argvs, text: r.text }).toEqual({
+      argvs: [['agent-toggle', 'undo', '--json']],
+      text: '❌ agent-toggle exited 2\nerror - nothing to undo',
+    })
+  })
+
   test('a toggle from arguments refreshes an open pane', async ($, on) => {
     const { argvs, tick } = await open($, on)
     await tick()

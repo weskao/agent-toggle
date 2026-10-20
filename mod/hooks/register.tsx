@@ -228,8 +228,9 @@ const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor)$/i
 // Runs `/agent-toggle <args>` as the CLI (argv, no shell) and answers with one line per result row.
 async function runArgs($: Engine, words: string[]): Promise<string> {
   const argv = ['agent-toggle', ...words, '--json']
-  // like the pane: without --harness the CLI falls back to the user's settings default_harness
-  if (!words.some(w => w === '--harness' || w.startsWith('--harness='))) argv.push('--harness', 'claude')
+  // like the pane: without --harness the CLI falls back to the user's settings default_harness;
+  // undo reverses a whole batch across harnesses and rejects --harness (exit 2)
+  if (!/^(?:--)?undo$/i.test(words[0]!) && !words.some(w => w === '--harness' || w.startsWith('--harness='))) argv.push('--harness', 'claude')
   const emoji = await emojiOk($)
   const bad = emoji ? '❌' : '[FAILED]'
   try {
@@ -240,7 +241,7 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
     } catch {}
     if (!out) return `${bad} agent-toggle exited ${run.exitCode}: ${run.stderr.trim() || run.stdout.trim() || 'no output'}`
     const lines = (out.results ?? [])
-      .filter(r => r.type != null || r.name != null) // cost/list end with a summary row
+      .filter(r => r.type != null || r.name != null || r.status === 'error') // cost/list end with a summary row
       .flatMap(r => [
         [r.status, r.type, r.name, r.detail && `- ${r.detail}`].filter(v => v != null && v !== '').join(' '),
         ...(Array.isArray(r.commands) ? r.commands.map(c => `  ${c}`) : []), // `update`: the commands to run
