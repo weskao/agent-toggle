@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from json.decoder import WHITESPACE, scanstring
 from pathlib import Path
-from typing import Sequence
 
 from agent_toggle import fs
 

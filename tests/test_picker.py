@@ -414,10 +414,10 @@ class KeysTest(ScreenCase):
         for label, expected in (("Yes", [("alpha", False)]), ("No", None)):
             self.rows = demo_rows()
             win = FakeWin(["\t", "\x1b", picker.curses.KEY_MOUSE, picker.curses.KEY_MOUSE])
-            def click():
+            def click(win=win, label=label):
                 line = next(y for y, text in enumerate(win.screen) if "[Y] Yes" in text)
                 return (0, win.screen[line].index(label), line, 0, picker.curses.BUTTON1_CLICKED)
-            with mock.patch.object(picker.curses, "getmouse", side_effect=lambda:
+            with mock.patch.object(picker.curses, "getmouse", side_effect=lambda win=win:
                     click() if len(win.keys) == 0 else (0, 0, 0, 0, picker.curses.BUTTON1_CLICKED)):
                 out = picker.loop(win, self.rows, glyphs=theme.UNICODE)
             self.assertEqual(None if out is None else self.names(out), expected)

@@ -298,7 +298,7 @@ class UpdateCheckTest(CliCase):
             for code in (0, 1, 2):
                 seen = {}
 
-                def fake(**kw):
+                def fake(seen=seen, code=code, **kw):
                     seen.update(kw, after=list(kw["after"]),   # lazy: read while after_steps is mocked
                                 to_stderr=kw["out"] is sys.stderr)   # run_cli swaps stderr
                     kw["out"].write("kit says hi\n")

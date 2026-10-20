@@ -15,8 +15,9 @@ import filecmp
 import json
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
 from . import fs, ops, store
 from .backends.flag_json import jsonc_loads
