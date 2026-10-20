@@ -8,13 +8,12 @@ import time
 import unittest
 from unittest import mock
 
-from agent_toggle import __version__
 from base import CAN_SYMLINK
 from test_cli_surface import CliCase, snapshot
 from test_conformance import FIXTURES
 from test_project import ProjectCase
 
-from agent_toggle import cost, fs
+from agent_toggle import __version__, cost, fs
 from agent_toggle.backends import plugin_cli
 from agent_toggle.harnesses import build
 
