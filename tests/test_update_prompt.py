@@ -37,6 +37,18 @@ class AfterStepsTest(unittest.TestCase):
         self.assertEqual(self.steps("claude", ["other@x"]), [shims])
         self.assertEqual(self.steps(None, []), [shims])
 
+    def test_the_mod_is_updated_from_whichever_marketplace_it_was_installed_from(self) -> None:
+        shims = ["agent-toggle", "install-shims"]
+        self.assertEqual(self.steps("claude", ["agent-toggle@weskao-agent-plugins"]), [
+            ["claude", "plugin", "marketplace", "update", "weskao-agent-plugins"],
+            ["claude", "plugin", "update", "agent-toggle@weskao-agent-plugins"], shims])
+
+    def test_one_install_per_scope_is_updated_once_and_other_plugins_are_left_alone(self) -> None:
+        ids = ["agent-toggle@agent-toggle", "agent-toggle@agent-toggle", "agent-toggle-x@agent-toggle"]
+        self.assertEqual(self.steps("claude", ids), [
+            ["claude", "plugin", "marketplace", "update", "agent-toggle"],
+            ["claude", "plugin", "update", "agent-toggle@agent-toggle"], ["agent-toggle", "install-shims"]])
+
 
 class OfferTest(unittest.TestCase):
     """What the panel's answer does: Update now is `update` (update_kit, newest tag)."""

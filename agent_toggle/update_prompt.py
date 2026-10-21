@@ -29,7 +29,6 @@ from .ui import theme
 
 DIST = "agent-toggle"
 REPO = update_check.REPO
-PLUGIN = "agent-toggle@agent-toggle"
 UPDATE = [DIST, "update"]
 RELEASE_NOTES = "https://github.com/weskao/agent-toggle/releases/tag/v%s"
 ANSWERS = (update_check.UPDATE_NOW, update_check.SKIP, update_check.SKIP_VERSION)
@@ -48,9 +47,13 @@ def after_steps() -> list[list[str]]:
     installed, then the shims."""
     steps: list[list[str]] = []
     # bare "claude": what a person pastes; _run() resolves it, as claude is often off PATH
-    if plugin_cli.claude_bin() and any(p["id"] == PLUGIN for p in plugin_cli.list_plugins(lambda _msg: None)):
-        steps += [["claude", "plugin", "marketplace", "update", DIST],
-                  ["claude", "plugin", "update", PLUGIN]]
+    if plugin_cli.claude_bin():
+        # any marketplace the mod came from; one id lists once per scope
+        installed = sorted({p["id"] for p in plugin_cli.list_plugins(lambda _msg: None)
+                            if p["id"].partition("@")[0] == DIST})
+        for pid in installed:
+            steps += [["claude", "plugin", "marketplace", "update", pid.partition("@")[2]],
+                      ["claude", "plugin", "update", pid]]
     return [*steps, [DIST, "install-shims"]]
 
 
