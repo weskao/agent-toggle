@@ -134,6 +134,9 @@ installs above, type this at the prompt of a Claude Code terminal session (2.1.2
 ```
 
 Answer `y` to add the marketplace, pick a scope (user is the default), then run `/agent-toggle`.
+The same mod is also listed in the `weskao-agent-plugins` marketplace
+(`claude plugin marketplace add weskao/weskao-agent-plugins`, then
+`claude plugin install agent-toggle@weskao-agent-plugins`); install it from one of the two, not both.
 
 See [Claude Code pane mod](#claude-code-pane-mod).
 
@@ -493,9 +496,9 @@ tag (`git ls-remote --tags`) and always installs that tag with
 `uv tool install --force --no-sources git+<repo>@<tag>` (`pipx install --force` for a pipx install).
 A dev checkout, a branch or commit install, or an unmanaged install is replaced by the tag too
 (with uv, else pipx); only an install made from exactly that tag is already up to date.
-It then runs, with the new binary and in order: when the Claude Code plugin is installed,
-`claude plugin marketplace update agent-toggle` and `claude plugin update agent-toggle@agent-toggle`,
-then `agent-toggle install-shims`. A failing step prints a warning and makes the exit code `1`.
+It then runs, with the new binary and in order: when the Claude Code plugin is installed (from any
+marketplace), `claude plugin marketplace update <marketplace>` and
+`claude plugin update agent-toggle@<marketplace>`, then `agent-toggle install-shims`. A failing step prints a warning and makes the exit code `1`.
 It never prompts and writes to stderr only.
 
 | Exit | Meaning |
@@ -977,8 +980,9 @@ CLI (`cost --json`, `disable|enable --json`) and works for the claude harness on
 `agent-toggle ui` stays the cross-harness UI.
 
 Install it with `/plugin install agent-toggle --marketplace weskao/agent-toggle` (see
-[Install](#install)); `claude plugin update agent-toggle@agent-toggle` picks up a new release. To
-run your own checkout instead (edits reload as you save):
+[Install](#install)); `/agent-toggle update` picks up a new release: it runs `agent-toggle update`,
+which updates the CLI, this mod and the shims together (restart Claude Code to load the new mod).
+The mod and the CLI share one version. To run your own checkout instead (edits reload as you save):
 
 ```sh
 claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
@@ -1110,8 +1114,10 @@ prints a `::notice::` and exits 0, so it never adds a second red X.
 ## Releasing
 
 A release is a git tag `vX.Y.Z` (where `X.Y.Z` must match `agent_toggle.__version__`).
-Bump `version` in `mod/.claude-plugin/plugin.json` to the same value by hand; nothing checks it,
-and without it `claude plugin update` does not hand marketplace installs the new mod.
+`version` in `mod/.claude-plugin/plugin.json` must be the same value (the mod ships in lockstep;
+without the bump `claude plugin update` does not hand marketplace installs the new mod).
+`tests/test_mod_version.py` and the release workflow both fail on a mismatch.
+The `weskao-agent-plugins` marketplace lists the mod without a version, so it needs no bump there.
 Pushing the tag triggers `.github/workflows/release.yml`:
 
 1. **Build** job checks that the tag matches `__version__`, builds a wheel and
