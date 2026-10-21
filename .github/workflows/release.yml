@@ -30,6 +30,12 @@ jobs:
             echo "::error::tag ${TAG} does not match __version__ v${version}"
             exit 1
           fi
+          # the pane mod ships in lockstep: without its own bump `claude plugin update` never fetches it
+          mod=$(python -c "import json; print(json.load(open('mod/.claude-plugin/plugin.json'))['version'])")
+          if [ "v${mod}" != "${TAG}" ]; then
+            echo "::error::tag ${TAG} does not match mod/.claude-plugin/plugin.json v${mod}"
+            exit 1
+          fi
       - run: pip install build
       - run: python -m build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
