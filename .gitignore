@@ -8,4 +8,5 @@ build/
 completions/
 .ruff_cache/
 .codegraph/
-.claude/
+.claude/*
+!.claude/rules/
