@@ -287,8 +287,30 @@ describe('agent-toggle pane', () => {
 
   test('an unknown argument shows the usage and touches no pane', async ($, on) => {
     const s = panes(on)
-    expect(await cmd($, 'clsoe')).toBe('usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]')
+    expect(await cmd($, 'clsoe')).toBe('usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]')
     expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 0, closed: [] })
+  })
+
+  test('update runs the CLI update (the CLI and the mod move together) and says to restart', async ($, on) => {
+    const argvs: string[][] = []
+    on('process.run', (_$, e) => {
+      argvs.push([...e.argv])
+      return { value: { ...done(0, ''), stderr: 'agent-toggle 0.17.0 installed\n' } }
+    })
+    let opened = 0
+    on('ui.open', () => (opened++, { value: { isPlaced: true } }))
+    mock.env(on, {})
+    for (const args of ['update', '--update']) {
+      expect(await cmd($, args)).toBe('agent-toggle 0.17.0 installed\nRestart Claude Code to load the updated mod.')
+    }
+    expect({ argvs, opened }).toEqual({ argvs: [['agent-toggle', 'update'], ['agent-toggle', 'update']], opened: 0 })
+  })
+
+  test('a failed update says why and does not ask for a restart', async ($, on) => {
+    on('process.run', () => ({ value: { ...done(1, ''), stderr: 'no network\n' } }))
+    mock.env(on, {})
+    const r = await $.command.run({ command: 'agent-toggle', args: 'update', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect(r.text).toBe('❌ agent-toggle update exited 1: no network')
   })
 
   test('the model opens and closes the pane through its pane tool', async ($, on) => {

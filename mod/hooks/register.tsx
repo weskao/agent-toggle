@@ -86,7 +86,7 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
 const ACTIONS = ['open', 'close', 'toggle']
 type Action = 'open' | 'close' | 'toggle'
 const isAction = (s: string): s is Action => ACTIONS.includes(s)
-const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]'
+const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]'
 const TOOL = 'mcp__agent-toggle__pane'
 
 async function pane($: Engine, action: Action): Promise<string> {
@@ -225,6 +225,18 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
 // `--` spellings too: the CLI accepts both (CLAUDE.md "Every command has two spellings").
 const VERB = /^(?:--)?(disable|enable|undo|list|status|cost|doctor)$/i
 
+// `/agent-toggle update`: the CLI updates itself, then this mod and the shims, so the two never differ in version.
+async function runUpdate($: Engine): Promise<string> {
+  const bad = (await emojiOk($)) ? '❌' : '[FAILED]'
+  try {
+    const run = await $.process.run(['agent-toggle', 'update'])
+    if (run.exitCode !== 0) return `${bad} agent-toggle update exited ${run.exitCode}${run.stderr.trim() && `: ${reason(run.stderr)}`}`
+    return `${run.stderr.trim()}\nRestart Claude Code to load the updated mod.`
+  } catch (err) {
+    return `${bad} agent-toggle update: ${err instanceof Error ? err.message : String(err)}`
+  }
+}
+
 // Runs `/agent-toggle <args>` as the CLI (argv, no shell) and answers with one line per result row.
 async function runArgs($: Engine, words: string[]): Promise<string> {
   const argv = ['agent-toggle', ...words, '--json']
@@ -267,7 +279,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'agent-toggle',
       description: 'Toggle Claude Code resources in a pane',
-      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor]',
+      argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]',
     }).catch(() => {})
     await watch($)
 
@@ -276,6 +288,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'agent-toggle' }, async ($, e) => {
     const words = e.args.trim().split(/\s+/)
+    if (/^(?:--)?update$/i.test(words[0] ?? '')) return { text: await runUpdate($) }
     if (VERB.test(words[0] ?? '')) {
       const text = await runArgs($, words)
       if (/^(?:--)?(disable|enable|undo)$/i.test(words[0]!)) await repaint($)
