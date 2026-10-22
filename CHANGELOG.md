@@ -1,3 +1,31 @@
+## [0.17.0] - 2026-10-22
+
+### 🚀 Features
+
+- Show version in cost and pane
+- **mod:** Add /agent-toggle update subcommand
+
+### 🐛 Bug Fixes
+
+- **mod:** Capitalize pane title
+- **mod:** Drop --harness on undo, show error reason
+- **update:** Update mod from any marketplace
+
+### 🚜 Refactor
+
+- **test:** Consolidate package imports
+
+### 📚 Documentation
+
+- Outline project-aware profile loading
+- Add project scope roadmap
+- Move file-scoped guidance to .claude/rules
+- Document marketplace install and update
+
+### ⚙️ Miscellaneous Tasks
+
+- **lint:** Enable ruff UP, B023, B904
+- **release:** Keep mod version in lockstep
 ## [0.16.2] - 2026-10-19
 
 ### 🚜 Refactor
