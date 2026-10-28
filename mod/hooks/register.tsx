@@ -82,7 +82,7 @@ async function exclusive($: Engine, fn: () => Promise<void>) {
   }
 }
 
-// What `/agent-toggle <action>` and the model's `pane` tool both do; an empty argument opens.
+// What `/agent-toggle <action>` and the model's `pane` tool both do; an empty argument toggles.
 const ACTIONS = ['open', 'close', 'toggle']
 type Action = 'open' | 'close' | 'toggle'
 const isAction = (s: string): s is Action => ACTIONS.includes(s)
@@ -90,8 +90,9 @@ const USAGE = 'usage: /agent-toggle [open | close | toggle | disable|enable <typ
 const TOOL = 'mcp__agent-toggle__pane'
 
 async function pane($: Engine, action: Action): Promise<string> {
-  const isOpen = action === 'toggle' && (await $.ui.panes()).some(p => p.id === PANE)
-  if (action === 'close' || isOpen) {
+  // a pane behind another tab is brought to the front, not closed
+  const isShown = action === 'toggle' && (await $.ui.panes()).some(p => p.id === PANE && p.isShown)
+  if (action === 'close' || isShown) {
     await $.ui.close({ id: PANE })
     return 'agent-toggle pane closed.'
   }
@@ -294,7 +295,7 @@ export const register: Register = on => {
       if (/^(?:--)?(disable|enable|undo)$/i.test(words[0]!)) await repaint($)
       return { text }
     }
-    const action = words[0].toLowerCase() || 'open'
+    const action = words[0].toLowerCase() || 'toggle'
     return { text: isAction(action) ? await pane($, action) : USAGE }
   })
 

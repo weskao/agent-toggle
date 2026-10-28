@@ -18,7 +18,7 @@ async function open($: T, on: On, n: number) {
   })
   on('ui.toast', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await $.command.run({ command: 'agent-toggle', args: 'open', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
   const lines = async () => (await ui.findAll({ in: 'picker', type: 'Text' })).map(t => t.text)
   return { ui, lines, toggled }
