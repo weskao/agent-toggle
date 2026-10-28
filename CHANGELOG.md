@@ -1,3 +1,8 @@
+## [0.18.0] - 2026-10-28
+
+### 🚀 Features
+
+- **mod:** [**breaking**] Bare /agent-toggle toggles the pane
 ## [0.17.0] - 2026-10-22
 
 ### 🚀 Features
