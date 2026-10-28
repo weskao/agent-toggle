@@ -27,7 +27,7 @@ async function open($: T, on: On, list = COST, toggle = OK, env: Record<string, 
     return { value: undefined }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await $.command.run({ command: 'agent-toggle', args: 'open', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
   const tick = async () => {
     for (let i = 0; i < 500; i++) await Promise.resolve() // lets a toggle and its refresh finish
@@ -148,7 +148,7 @@ describe('agent-toggle pane', () => {
     on('process.run', () => ({ value: { ...done(1, ''), stderr: trace } }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
     mock.env(on, {})
-    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await $.command.run({ command: 'agent-toggle', args: 'open', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     for (let i = 0; i < 500; i++) await Promise.resolve()
     expect(((await ui.drawn()) as any).props.props.error).toBe("ModuleNotFoundError: No module named 'update_kit'")
@@ -164,7 +164,7 @@ describe('agent-toggle pane', () => {
     })
     on('ui.toast', () => ({ value: undefined }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
-    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await $.command.run({ command: 'agent-toggle', args: 'open', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     const first = async () => ((await ui.drawn()) as any).props.props.rows[0]
     const pressed = ui.key({ key: 'tab' })
@@ -188,7 +188,7 @@ describe('agent-toggle pane', () => {
     })
     on('ui.toast', () => ({ value: undefined }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
-    await $.command.run({ command: 'agent-toggle', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await $.command.run({ command: 'agent-toggle', args: 'open', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     const ui = await $.ui.mount({ plugin: 'agent-toggle', surface: 'terminal', component: 'Pane', requestId: 'agent-toggle', props: PANE })
     const pressed = ui.key({ key: 'e', ctrl: true }) // the cursor starts on skill/demo
     for (let i = 0; i < 500; i++) await Promise.resolve()
@@ -273,10 +273,24 @@ describe('agent-toggle pane', () => {
     expect({ text, closed: s.closed, opened: s.opened, runs: s.runs }).toEqual({ text: 'agent-toggle pane closed.', closed: ['agent-toggle'], opened: 0, runs: 0 })
   })
 
-  test('no argument and open both open the pane', async ($, on) => {
+  test('no argument toggles the pane: opens a closed one, closes an open one', async ($, on) => {
     const s = panes(on)
-    expect([await cmd($, ''), await cmd($, 'OPEN')]).toEqual(['agent-toggle pane opened.', 'agent-toggle pane opened.'])
-    expect(s.opened).toBe(2)
+    expect([await cmd($, ''), await cmd($, '')]).toEqual(['agent-toggle pane opened.', 'agent-toggle pane closed.'])
+    expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 1, closed: ['agent-toggle'] })
+  })
+
+  test('open always opens, even with the pane already up', async ($, on) => {
+    const s = panes(on)
+    expect([await cmd($, 'open'), await cmd($, 'OPEN')]).toEqual(['agent-toggle pane opened.', 'agent-toggle pane opened.'])
+    expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 2, closed: [] })
+  })
+
+  test('a toggle brings a pane behind another tab to the front instead of closing it', async ($, on) => {
+    const s = panes(on)
+    await cmd($, 'open')
+    s.hidden.add('agent-toggle')
+    expect(await cmd($, '')).toBe('agent-toggle pane opened.')
+    expect({ opened: s.opened, closed: s.closed }).toEqual({ opened: 2, closed: [] })
   })
 
   test('toggle opens a closed pane and closes an open one', async ($, on) => {
@@ -417,10 +431,11 @@ describe('agent-toggle pane', () => {
 
 // Fakes the pane surface and the CLI: tracks which panes are open, opens and closes, and CLI runs.
 function panes(on: On) {
-  const s = { open: new Set<string>(), opened: 0, closed: [] as string[], runs: 0 }
-  on('ui.open', (_$, e) => (s.open.add(e.id), (s.opened += 1), { value: { isPlaced: true } }))
+  // hidden: open panes another tab sits in front of; an open brings one to the front
+  const s = { open: new Set<string>(), hidden: new Set<string>(), opened: 0, closed: [] as string[], runs: 0 }
+  on('ui.open', (_$, e) => (s.open.add(e.id), s.hidden.delete(e.id), (s.opened += 1), { value: { isPlaced: true } }))
   on('ui.close', (_$, e) => (s.open.delete(e.id), s.closed.push(e.id), { value: undefined }))
-  on('ui.panes', () => ({ value: [...s.open].map(id => ({ id, title: id, isShown: true })) as never }))
+  on('ui.panes', () => ({ value: [...s.open].map(id => ({ id, title: id, isShown: !s.hidden.has(id) })) as never }))
   on('process.run', () => ((s.runs += 1), { value: done(0, COST) }))
   return s
 }

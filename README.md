@@ -988,8 +988,9 @@ The mod and the CLI share one version. To run your own checkout instead (edits r
 claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
 ```
 
-- `/agent-toggle` or `/agent-toggle open` opens the pane, `/agent-toggle close` closes it,
-  `/agent-toggle toggle` does whichever applies; any other argument that is not a CLI command (below) prints the usage. Ctrl-X X
+- `/agent-toggle` (or `/agent-toggle toggle`) closes the pane when it is shown and opens it otherwise
+  (a pane behind another tab comes to the front); `/agent-toggle open` always opens, `/agent-toggle close`
+  always closes; any other argument that is not a CLI command (below) prints the usage. Ctrl-X X
   also closes it. Claude can do the same when you ask it to open or close agent-toggle: the mod
   registers a `pane` tool (`mcp__agent-toggle__pane`, `action`: `open` | `close` | `toggle`),
   e.g. "open agent-toggle", "close the agent-toggle pane", "toggle the agent-toggle pane".
