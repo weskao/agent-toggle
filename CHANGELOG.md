@@ -1,3 +1,17 @@
+## [0.19.0] - 2026-11-02
+
+### 🚀 Features
+
+- **mod:** Improve MCP backup server toggle behavior
+- **mcp:** [**breaking**] Keep disabled Claude MCP servers listed
+
+### 🐛 Bug Fixes
+
+- **mod:** Use /mcp enable for kept MCP servers
+
+### 🧪 Testing
+
+- **mod:** Cover keepOff session-start edge cases
 ## [0.18.0] - 2026-10-28
 
 ### 🚀 Features
