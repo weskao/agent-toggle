@@ -438,6 +438,66 @@ describe('agent-toggle pane', () => {
     expect(ran).toEqual(['mcp disable demo-mcp'])
   })
 
+  // session start with files on a fake disk; returns the slash commands and toasts it produced
+  const startWith = async ($: T, on: On, home: string, files: Record<string, string>, cwd = '/work/new') => {
+    mock.env(on, { HOME: home })
+    const clock = mock.clock(on)
+    const ran: string[] = []
+    const toasts: string[] = []
+    on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
+    on('fs.read', (_$, e) => (e.path in files ? { value: files[e.path]! } : { deny: 'ENOENT' }))
+    on('command.run', { command: 'mcp' }, (_$, e) => (ran.push(`${e.command} ${e.args}`), { text: '' }))
+    on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }))
+    on('tool.register', () => ({ value: { tool: 'pane' } }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd, surface: 'terminal', isInteractive: true })
+    await clock.advance(0)
+    return { ran, toasts }
+  }
+  const parked = (...names: string[]) => JSON.stringify({ version: 3, disabled: Object.fromEntries(names.map(n => [`claude:mcp:${n}`, { harness: 'claude', type: 'mcp', name: n, connector: true }])) })
+
+  test('at session start nothing is disabled when every kept-off server is already marked in this project', async ($, on) => {
+    const r = await startWith($, on, '/home/u', {
+      '/home/u/.agent-toggle/state.json': parked('demo-mcp'),
+      '/home/u/.claude.json': JSON.stringify({ projects: { '/work/new': { disabledMcpServers: ['demo-mcp'] } } }),
+    })
+    expect(r.ran).toEqual([])
+  })
+
+  test('at session start a project ~/.claude.json does not list yet gets /mcp disable for every kept-off server', async ($, on) => {
+    const r = await startWith($, on, '/home/u', {
+      '/home/u/.agent-toggle/state.json': parked('demo-mcp', 'example-mcp'),
+      '/home/u/.claude.json': JSON.stringify({ projects: { '/work/other': { disabledMcpServers: ['demo-mcp'] } } }),
+    })
+    expect(r.ran).toEqual(['mcp disable demo-mcp', 'mcp disable example-mcp'])
+  })
+
+  test('at session start no state file queues nothing and does not break the start', async ($, on) => {
+    expect((await startWith($, on, '/home/u', {})).ran).toEqual([])
+  })
+
+  test('at session start a state file that does not parse queues nothing and does not break the start', async ($, on) => {
+    const r = await startWith($, on, '/home/u', { '/home/u/.agent-toggle/state.json': '{not json', '/home/u/.claude.json': '{}' })
+    expect(r.ran).toEqual([])
+    expect(r.toasts).toEqual([])
+  })
+
+  test('a /mcp disable the session refuses is toasted, not thrown', async ($, on) => {
+    mock.env(on, { HOME: '/home/u' })
+    const clock = mock.clock(on)
+    const toasts: string[] = []
+    on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
+    on('fs.read', (_$, e) => ({ value: e.path.endsWith('state.json') ? parked('demo-mcp') : '{}' }))
+    // no command.run stand-in: the call rejects, as it does when the session refuses the command
+    on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }))
+    on('tool.register', () => ({ value: { tool: 'pane' } }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/work/new', surface: 'terminal', isInteractive: true })
+    await clock.advance(0)
+    expect(toasts.length).toBe(1)
+    expect(toasts[0]).toContain('agent-toggle: /mcp disable demo-mcp failed')
+  })
+
   test('a change `agent-toggle ui` applied on Enter is reloaded at the next poll; a file from before is not', async ($, on) => {
     mock.env(on, { HOME: '/home/u' })
     const clock = mock.clock(on)
