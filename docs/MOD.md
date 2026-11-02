@@ -81,7 +81,11 @@ ui.message (the Client's post)            # input, not fact
   └─ needs_new_session → reload(): one $.command.run per kind, deferred a tick:
        skill/command → /reload-skills, plugin → /reload-plugins, mcp → /mcp disable|enable <name>;
        agent/rule have none ("takes effect in a new session"). /mcp disable also lists the
-       server in the session project's disabledMcpServers; the CLI's enable clears it
+       server in the session project's disabledMcpServers; the CLI's enable clears it.
+       A row with `backup` (removed / re-added config) gets /mcp disable only while $.tool.list()
+       has an `mcp__<name>__` tool (checked again when it runs), /mcp enable only after a /mcp
+       disable this session; else no command, note "<name>: loads|unloads when Claude Code
+       reloads MCP config". A connector row (no backup) always gets the command
   └─ $.ui.toast(ok ? "<state> <type>: <name> (<reload or note>)" : error)
   └─ refresh()
 

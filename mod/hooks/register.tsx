@@ -108,24 +108,60 @@ async function pane($: Engine, action: Action): Promise<string> {
 // The slash command that makes a toggled resource take effect in this session; agents and rules have none (a new
 // session). MCP is `/mcp enable|disable <name>` instead: it connects or disconnects the server too.
 const RELOAD: Record<string, string> = { skill: 'reload-skills', command: 'reload-skills', plugin: 'reload-plugins' }
-type Done = { type?: unknown; name?: unknown; action?: unknown; status?: unknown }
+type Done = { type?: unknown; name?: unknown; action?: unknown; status?: unknown; backup?: unknown }
+
+// The prefix Claude Code gives a configured server's tools (its own normalizer, checked in 2.1.316: any other
+// character becomes `_`; the extra trimming it does for `claude.ai ` connectors never meets a backup row).
+const toolPrefix = (server: string) => `mcp__${server.replace(/[^a-zA-Z0-9_-]/g, '_')}__`
+
+// The MCP servers this session ran `/mcp disable` for: still listed in the session, so `/mcp enable` can find them.
+// A module variable: it resets with the session (and, harmlessly, on a hot reload).
+const offHere = new Set<string>()
+
+// `/mcp enable|disable <name>` acts only on a server the session already lists ("not found" otherwise). A row with a
+// `backup` was removed from (or re-added to) the config by the CLI, which Claude Code picks up on its own when it
+// reloads its MCP config: disable only while the session still has the server's tools, enable only after a disable
+// here. Any other server (a claude.ai connector) stays listed, so it always gets the command.
+async function knows($: Engine, r: Done): Promise<boolean> {
+  const name = String(r.name)
+  if (typeof r.backup !== 'string') return true
+  if (r.action === 'enable') return offHere.delete(name)
+  return connected($, name)
+}
+
+const connected = async ($: Engine, name: string) => (await $.tool.list().catch(() => [])).some(t => t.name.startsWith(toolPrefix(name)))
 
 // Queues one slash command per kind the CLI's ok disable/enable rows touched (what needs_new_session counts) and
 // answers the note for the person. Deferred a tick: `$.command.run` rejects inside a hook the turn is waiting on
 // (`/agent-toggle disable ...` is one), and runs once the session is idle; a refusal is toasted.
-function reload($: Engine, rows: Done[]): string {
-  const cmds = new Set<string>()
+async function reload($: Engine, rows: Done[]): Promise<string> {
+  // a command with a name: a backup server's disable, re-checked when it runs (Claude Code may have dropped it by then)
+  const cmds = new Map<string, string | undefined>()
+  const notes: string[] = []
   let later = false
   for (const r of rows) {
     if (r.status !== 'ok' || (r.action !== 'disable' && r.action !== 'enable')) continue
-    const cmd = r.type === 'mcp' ? `mcp ${r.action} ${r.name}` : RELOAD[String(r.type)]
-    cmd ? cmds.add(cmd) : (later = true)
+    if (r.type === 'mcp') {
+      if (!(await knows($, r))) {
+        notes.push(`${r.name}: ${r.action === 'enable' ? 'loads' : 'unloads'} when Claude Code reloads MCP config`)
+        continue
+      }
+      const recheck = r.action === 'disable' && typeof r.backup === 'string'
+      if (r.action === 'disable') offHere.add(String(r.name))
+      cmds.set(`mcp ${r.action} ${r.name}`, recheck ? String(r.name) : undefined)
+      continue
+    }
+    const cmd = RELOAD[String(r.type)]
+    cmd ? cmds.set(cmd, undefined) : (later = true)
   }
-  for (const c of cmds) {
+  for (const [c, recheck] of cmds) {
     const [command, ...args] = c.split(' ')
-    $.clock.after(0, () => void $.command.run({ command: command!, args: args.join(' ') }).catch(err => $.ui.toast(`agent-toggle: /${c} failed - ${String(err)}`)))
+    $.clock.after(0, async () => {
+      if (recheck !== undefined && !(await connected($, recheck))) return void offHere.delete(recheck)
+      await $.command.run({ command: command!, args: args.join(' ') }).catch(err => $.ui.toast(`agent-toggle: /${c} failed - ${String(err)}`))
+    })
   }
-  return later ? 'takes effect in a new session' : [...cmds].map(c => `/${c}`).join(', ')
+  return later ? 'takes effect in a new session' : [...[...cmds.keys()].map(c => `/${c}`), ...notes].join(', ')
 }
 
 // Bumped by each toggle: a refresh that started before one would draw that row's old state.
@@ -174,7 +210,7 @@ async function poll($: Engine, file: string) {
   if (first || !at) return
   try {
     const sig = JSON.parse(await $.fs.read(file)) as { results?: Done[] }
-    $.ui.toast(`agent-toggle ui: ${reload($, sig.results ?? [])}`)
+    $.ui.toast(`agent-toggle ui: ${await reload($, sig.results ?? [])}`)
     await repaint($)
   } catch (err) {
     $.ui.toast(`agent-toggle: ${file} - ${String(err)}`)
@@ -208,7 +244,7 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
       const emoji = await emojiOk($)
       const tag = (glyph: string, text: string) => (emoji ? `${glyph} ${text}` : text)
       if (out) {
-        const note = out.needs_new_session ? reload($, out.results ?? []) : ''
+        const note = out.needs_new_session ? await reload($, out.results ?? []) : ''
         $.ui.toast(`${row.enabled ? tag('⛔', '[DISABLED]') : tag('✅', '[ENABLED]')} ${type}: ${row.name}${note && ` (${note})`}`)
       } else {
         await update($, rows, flip(moved))
@@ -260,7 +296,7 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
         ...(Array.isArray(r.commands) ? r.commands.map(c => `  ${c}`) : []), // `update`: the commands to run
       ])
     for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
-    if (out.needs_new_session) lines.push(reload($, out.results ?? []))
+    if (out.needs_new_session) lines.push(await reload($, out.results ?? []))
     if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${reason(run.stderr)}`}`)
     return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
   } catch (err) {

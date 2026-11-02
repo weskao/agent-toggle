@@ -1030,6 +1030,11 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `/reload-skills` and `/reload-plugins` only re-read what is on disk. `/mcp disable` also
   leaves the per-project mark that `enable` clears (see
   [MCP backups are verbatim](#mcp-backups-are-verbatim)).
+  `/mcp` only reaches a server the session already lists. A server the CLI removes or restores
+  from its backup gets `/mcp disable` only while the session still has its tools, and
+  `/mcp enable` only after a `/mcp disable` in the same session. Otherwise nothing is queued and
+  the note says `example-mcp: loads when Claude Code reloads MCP config` (or `unloads`): Claude
+  Code picks the config change up by itself. claude.ai connectors always get the command.
 - `agent-toggle ui` in another terminal applies on Enter and writes the Claude rows it changed to
   `~/.agent-toggle/reload.json`. Every open session running the mod checks that file's mtime every
   5 s (one `stat`) and queues the same reloads, toasting `agent-toggle ui: /reload-skills`. A file

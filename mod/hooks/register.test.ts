@@ -362,11 +362,66 @@ describe('agent-toggle pane', () => {
     const ran: string[] = []
     const clock = mock.clock(on)
     on('command.run', { command: 'mcp' }, (_$, e) => (ran.push(`${e.command} ${e.args}`), { text: '' }))
-    on('process.run', () => ({ value: done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'mcp', name: 'x', action: 'disable', status: 'ok' }] })) }))
+    on('process.run', () => ({ value: done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [{ type: 'mcp', name: 'x', action: 'disable', status: 'ok', connector: true }] })) }))
     const r = await $.command.run({ command: 'agent-toggle', args: 'disable mcp x', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
     await clock.advance(0) // the /mcp run is deferred past the hook that reported it
     expect(r.text).toBe('ok mcp x\n/mcp disable x')
     expect(ran).toEqual(['mcp disable x'])
+  })
+
+  // A server restored from or saved to a backup (its row carries `backup`): the CLI re-adds / removes its config entry.
+  // hooks are registered once, before the first $ call; each run sets the CLI row and the tool lists it answers with
+  const mcpRun = ($: T, on: On) => {
+    let ran: string[] = []
+    let tools: string[][] = []
+    let result = {}
+    const clock = mock.clock(on)
+    on('command.run', { command: 'mcp' }, (_$, e) => (ran.push(`${e.command} ${e.args}`), { text: '' }))
+    on('tool.list', () => ({ value: (tools.shift() ?? []).map(n => ({ name: n, description: '', mcp: true })) }))
+    on('process.run', () => ({ value: done(0, JSON.stringify({ ok: true, needs_new_session: true, results: [result] })) }))
+    return async (action: string, name: string, extra: object, lists: string[][]) => {
+      ran = []
+      tools = lists
+      result = { type: 'mcp', name, action, status: 'ok', ...extra }
+      const r = await $.command.run({ command: 'agent-toggle', args: `${action} mcp ${name}`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+      await clock.advance(0)
+      return { ran, text: r.text }
+    }
+  }
+  const BACKUP = { backup: '/home/u/.agent-toggle/mcp-backups/claude__demo.json', scope: 'user' }
+
+  test('a backup server disabled while connected gets /mcp disable, and its enable in the same session gets /mcp enable', async ($, on) => {
+    const run = mcpRun($, on)
+    const off = await run('disable', 'demo-mcp', BACKUP, [['mcp__demo-mcp__send'], ['mcp__demo-mcp__send']])
+    expect(off.text).toBe('ok mcp demo-mcp\n/mcp disable demo-mcp')
+    expect(off.ran).toEqual(['mcp disable demo-mcp'])
+    const on2 = await run('enable', 'demo-mcp', BACKUP, [])
+    expect(on2.text).toBe('ok mcp demo-mcp\n/mcp enable demo-mcp')
+    expect(on2.ran).toEqual(['mcp enable demo-mcp'])
+  })
+
+  test('a backup server not disabled in this session: enable queues nothing and says it loads on the MCP config reload', async ($, on) => {
+    const run = mcpRun($, on)
+    const r = await run('enable', 'example-mcp', BACKUP, [])
+    expect(r.ran).toEqual([])
+    expect(r.text).toBe('ok mcp example-mcp\nexample-mcp: loads when Claude Code reloads MCP config')
+  })
+
+  test('a backup server the session no longer has gets no /mcp disable, decided either when reported or when run', async ($, on) => {
+    const run = mcpRun($, on)
+    const gone = await run('disable', 'gone-mcp', BACKUP, [['mcp__other__x']])
+    expect(gone.ran).toEqual([])
+    expect(gone.text).toBe('ok mcp gone-mcp\ngone-mcp: unloads when Claude Code reloads MCP config')
+    const late = await run('disable', 'late-mcp', BACKUP, [['mcp__late-mcp__x'], []]) // dropped before the queued run
+    expect(late.ran).toEqual([])
+    const back = await run('enable', 'late-mcp', BACKUP, [])
+    expect(back.ran).toEqual([]) // never disabled here, so not listed for /mcp enable
+  })
+
+  test('a claude.ai connector still gets /mcp enable', async ($, on) => {
+    const run = mcpRun($, on)
+    const r = await run('enable', 'claude.ai Example', { connector: true, projects: [] }, [])
+    expect(r.ran).toEqual(['mcp enable claude.ai Example'])
   })
 
   test('a change `agent-toggle ui` applied on Enter is reloaded at the next poll; a file from before is not', async ($, on) => {
@@ -376,7 +431,7 @@ describe('agent-toggle pane', () => {
     const toasts: string[] = []
     let mtimeMs = 1
     on('fs.stat', (_$, e) => ({ value: { kind: 'file', size: 1, mtimeMs: e.path === '/home/u/.agent-toggle/reload.json' ? mtimeMs : 0, isLink: false } }))
-    const results = [{ harness: 'claude', type: 'skill', name: 'a', action: 'disable', status: 'ok' }, { harness: 'claude', type: 'mcp', name: 'x', action: 'enable', status: 'ok' }]
+    const results = [{ harness: 'claude', type: 'skill', name: 'a', action: 'disable', status: 'ok' }, { harness: 'claude', type: 'mcp', name: 'x', action: 'enable', status: 'ok', connector: true }]
     on('fs.read', () => ({ value: JSON.stringify({ batch: 'b', results }) }))
     on('command.run', (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' }))
     on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }))
