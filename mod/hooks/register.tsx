@@ -110,58 +110,53 @@ async function pane($: Engine, action: Action): Promise<string> {
 const RELOAD: Record<string, string> = { skill: 'reload-skills', command: 'reload-skills', plugin: 'reload-plugins' }
 type Done = { type?: unknown; name?: unknown; action?: unknown; status?: unknown; backup?: unknown }
 
-// The prefix Claude Code gives a configured server's tools (its own normalizer, checked in 2.1.316: any other
-// character becomes `_`; the extra trimming it does for `claude.ai ` connectors never meets a backup row).
-const toolPrefix = (server: string) => `mcp__${server.replace(/[^a-zA-Z0-9_-]/g, '_')}__`
-
-// The MCP servers this session ran `/mcp disable` for: still listed in the session, so `/mcp enable` can find them.
-// A module variable: it resets with the session (and, harmlessly, on a hot reload).
-const offHere = new Set<string>()
-
-// `/mcp enable|disable <name>` acts only on a server the session already lists ("not found" otherwise). A row with a
-// `backup` was removed from (or re-added to) the config by the CLI, which Claude Code picks up on its own when it
-// reloads its MCP config: disable only while the session still has the server's tools, enable only after a disable
-// here. Any other server (a claude.ai connector) stays listed, so it always gets the command.
-async function knows($: Engine, r: Done): Promise<boolean> {
-  const name = String(r.name)
-  if (typeof r.backup !== 'string') return true
-  if (r.action === 'enable') return offHere.delete(name)
-  return connected($, name)
+// Deferred a tick: `$.command.run` rejects inside a hook the turn is waiting on (`/agent-toggle disable ...` is one),
+// and runs once the session is idle; a refusal is toasted.
+function queue($: Engine, cmds: Iterable<string>) {
+  for (const c of cmds) {
+    const [command, ...args] = c.split(' ')
+    $.clock.after(0, () => void $.command.run({ command: command!, args: args.join(' ') }).catch(err => $.ui.toast(`agent-toggle: /${c} failed - ${String(err)}`)))
+  }
 }
 
-const connected = async ($: Engine, name: string) => (await $.tool.list().catch(() => [])).some(t => t.name.startsWith(toolPrefix(name)))
-
 // Queues one slash command per kind the CLI's ok disable/enable rows touched (what needs_new_session counts) and
-// answers the note for the person. Deferred a tick: `$.command.run` rejects inside a hook the turn is waiting on
-// (`/agent-toggle disable ...` is one), and runs once the session is idle; a refusal is toasted.
-async function reload($: Engine, rows: Done[]): Promise<string> {
-  // a command with a name: a backup server's disable, re-checked when it runs (Claude Code may have dropped it by then)
-  const cmds = new Map<string, string | undefined>()
+// answers the note for the person. Claude Code reads its MCP config once, at session start, and `/mcp enable` reaches
+// only a server it listed then: the CLI marks a server off in place, so it stays listed. A server an older version
+// removed (its row carries `backup`) is restored into the config but unknown to this session.
+function reload($: Engine, rows: Done[]): string {
+  const cmds = new Set<string>()
   const notes: string[] = []
   let later = false
   for (const r of rows) {
     if (r.status !== 'ok' || (r.action !== 'disable' && r.action !== 'enable')) continue
-    if (r.type === 'mcp') {
-      if (!(await knows($, r))) {
-        notes.push(`${r.name}: ${r.action === 'enable' ? 'loads' : 'unloads'} when Claude Code reloads MCP config`)
-        continue
-      }
-      const recheck = r.action === 'disable' && typeof r.backup === 'string'
-      if (r.action === 'disable') offHere.add(String(r.name))
-      cmds.set(`mcp ${r.action} ${r.name}`, recheck ? String(r.name) : undefined)
+    if (r.type === 'mcp' && r.action === 'enable' && typeof r.backup === 'string') {
+      notes.push(`${r.name}: loads in a new session`)
       continue
     }
-    const cmd = RELOAD[String(r.type)]
-    cmd ? cmds.set(cmd, undefined) : (later = true)
+    const cmd = r.type === 'mcp' ? `mcp ${r.action} ${r.name}` : RELOAD[String(r.type)]
+    cmd ? cmds.add(cmd) : (later = true)
   }
-  for (const [c, recheck] of cmds) {
-    const [command, ...args] = c.split(' ')
-    $.clock.after(0, async () => {
-      if (recheck !== undefined && !(await connected($, recheck))) return void offHere.delete(recheck)
-      await $.command.run({ command: command!, args: args.join(' ') }).catch(err => $.ui.toast(`agent-toggle: /${c} failed - ${String(err)}`))
-    })
-  }
-  return later ? 'takes effect in a new session' : [...[...cmds.keys()].map(c => `/${c}`), ...notes].join(', ')
+  queue($, cmds)
+  return later ? 'takes effect in a new session' : [...[...cmds].map(c => `/${c}`), ...notes].join(', ')
+}
+
+type Parked = { harness?: unknown; type?: unknown; name?: unknown; connector?: unknown }
+
+// A disable marks the server off in each project ~/.claude.json listed then (disabledMcpServers). A project dir opened
+// later has no mark, so its session loaded the server: `/mcp disable` turns it off and marks the project. A server an
+// older version removed (no `connector`) is not configured, so there is nothing to turn off. A project key spelled
+// unlike the cwd (Windows separators) only costs an extra `/mcp disable`, which answers "already disabled".
+async function keepOff($: Engine, home: string, cwd: string) {
+  try {
+    const state = JSON.parse(await $.fs.read(`${home}/.agent-toggle/state.json`)) as { disabled?: Record<string, Parked> }
+    const names = Object.values(state.disabled ?? {})
+      .filter(e => e.harness === 'claude' && e.type === 'mcp' && e.connector === true && typeof e.name === 'string')
+      .map(e => e.name as string)
+    if (names.length === 0) return
+    const cfg = JSON.parse(await $.fs.read(`${home}/.claude.json`)) as { projects?: Record<string, { disabledMcpServers?: unknown }> }
+    const marks = cfg.projects?.[cwd]?.disabledMcpServers
+    queue($, names.filter(n => !(Array.isArray(marks) && marks.includes(n))).map(n => `mcp disable ${n}`))
+  } catch {} // no state yet, or a file that does not parse: nothing to keep off
 }
 
 // Bumped by each toggle: a refresh that started before one would draw that row's old state.
@@ -210,17 +205,14 @@ async function poll($: Engine, file: string) {
   if (first || !at) return
   try {
     const sig = JSON.parse(await $.fs.read(file)) as { results?: Done[] }
-    $.ui.toast(`agent-toggle ui: ${await reload($, sig.results ?? [])}`)
+    $.ui.toast(`agent-toggle ui: ${reload($, sig.results ?? [])}`)
     await repaint($)
   } catch (err) {
     $.ui.toast(`agent-toggle: ${file} - ${String(err)}`)
   }
 }
 
-async function watch($: Engine) {
-  // where Python's Path.home() looks: USERPROFILE on Windows, HOME elsewhere
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-  if (!home) return
+async function watch($: Engine, home: string) {
   const file = `${home}/.agent-toggle/reload.json`
   await poll($, file)
   $.clock.every(POLL_MS, () => void poll($, file))
@@ -244,7 +236,7 @@ async function toggle($: Engine, row: Row, same?: Row[]) {
       const emoji = await emojiOk($)
       const tag = (glyph: string, text: string) => (emoji ? `${glyph} ${text}` : text)
       if (out) {
-        const note = out.needs_new_session ? await reload($, out.results ?? []) : ''
+        const note = out.needs_new_session ? reload($, out.results ?? []) : ''
         $.ui.toast(`${row.enabled ? tag('⛔', '[DISABLED]') : tag('✅', '[ENABLED]')} ${type}: ${row.name}${note && ` (${note})`}`)
       } else {
         await update($, rows, flip(moved))
@@ -296,7 +288,7 @@ async function runArgs($: Engine, words: string[]): Promise<string> {
         ...(Array.isArray(r.commands) ? r.commands.map(c => `  ${c}`) : []), // `update`: the commands to run
       ])
     for (const w of out.warnings ?? []) lines.push(`${emoji ? '⚠️' : '[WARN]'} ${typeof w === 'string' ? w : JSON.stringify(w)}`)
-    if (out.needs_new_session) lines.push(await reload($, out.results ?? []))
+    if (out.needs_new_session) lines.push(reload($, out.results ?? []))
     if (run.exitCode !== 0) lines.unshift(`${bad} agent-toggle exited ${run.exitCode}${run.stderr.trim() && `: ${reason(run.stderr)}`}`)
     return lines.join('\n') || `agent-toggle ${words[0]}: nothing to report.`
   } catch (err) {
@@ -318,7 +310,12 @@ export const register: Register = on => {
       description: 'Toggle Claude Code resources in a pane',
       argumentHint: '[open | close | toggle | disable|enable <type> <name>... | undo | list | status | cost | doctor | update]',
     }).catch(() => {})
-    await watch($)
+    // where Python's Path.home() looks: USERPROFILE on Windows, HOME elsewhere
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+    if (home) {
+      await watch($, home)
+      await keepOff($, home, e.cwd)
+    }
 
     return next(e)
   })

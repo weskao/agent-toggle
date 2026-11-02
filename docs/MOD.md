@@ -82,16 +82,19 @@ ui.message (the Client's post)            # input, not fact
        skill/command → /reload-skills, plugin → /reload-plugins, mcp → /mcp disable|enable <name>;
        agent/rule have none ("takes effect in a new session"). /mcp disable also lists the
        server in the session project's disabledMcpServers; the CLI's enable clears it.
-       A row with `backup` (removed / re-added config) gets /mcp disable only while $.tool.list()
-       has an `mcp__<name>__` tool (checked again when it runs), /mcp enable only after a /mcp
-       disable this session; else no command, note "<name>: loads|unloads when Claude Code
-       reloads MCP config". A connector row (no backup) always gets the command
+       The CLI marks a server off in place, so the session keeps listing it and /mcp enable
+       reaches it. Only an enable row with `backup` (restored from an older version's backup,
+       unknown to this session) gets no command, note "<name>: loads in a new session"
   └─ $.ui.toast(ok ? "<state> <type>: <name> (<reload or note>)" : error)
   └─ refresh()
 
 clock.every(5 s), started at session.start   # `agent-toggle ui` in another terminal
   └─ $.fs.stat("~/.agent-toggle/reload.json"); mtime unchanged → nothing
   └─ changed → read its claude rows → reload() → toast → refresh an open pane
+
+session.start → keepOff()                     # a project dir opened after an MCP disable
+  └─ ~/.agent-toggle/state.json: claude mcp entries with `connector` (marked off in place)
+  └─ ~/.claude.json projects[cwd].disabledMcpServers lacks one → /mcp disable <name>, deferred a tick
 ```
 
 `cost --json` is used instead of `list --json` because its rows already carry
@@ -123,6 +126,7 @@ dropped, and the picker says `working…`; `error` is the last failure text or `
 ## 6. Hooks module shape (`hooks/register.tsx`)
 
 - `session.start`: `$.command.register({ name: "agent-toggle", description })`. Does **not** open the pane unasked.
+  Then starts the `reload.json` poll and `keepOff()` (above).
 - `command.run { command: "agent-toggle" }`: open pane, `refresh()`, return `{ text: "agent-toggle pane opened." }`.
 - `ui.message`: a `Client` post `{ op: "toggle", type, name, mod }` toggles that row if the list holds it.
 - `ui.scroll` on the pane: a `Client` gets no wheel events, and the picker never overflows its pane, so the
