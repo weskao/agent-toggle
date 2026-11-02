@@ -631,7 +631,9 @@ visible rather than silent.
 
 ## MCP backups are verbatim
 
-- **Claude**: the raw entry from `~/.claude.json`. Never `claude mcp get` —
+- **Claude**: only servers an older agent-toggle removed have one; a disable now marks the
+  server off in place (see [Claude MCP scopes](#claude-mcp-scopes)). The backup is the raw
+  entry from `~/.claude.json`. Never `claude mcp get` —
   that prints a human summary and silently drops auth fields (`headers`,
   `headersHelper`), so a server restored from it fails with 401.
 - **Codex**: the exact `[mcp_servers.<name>]` text block including its
@@ -653,15 +655,20 @@ Both scopes stored in `~/.claude.json` are togglable, and the scope round-trips:
 
 | scope | lives in | toggle |
 |---|---|---|
-| user | top-level `mcpServers` | ✓ |
-| local | `projects/<dir>/mcpServers` | ✓ — project path saved with the backup |
+| user | top-level `mcpServers` | ✓ — the entry stays; recorded in each *existing* project's `disabledMcpServers` |
+| local | `projects/<dir>/mcpServers` | ✓ — as user scope |
 | project | the repo's own `.mcp.json` | ✓ with `--project <dir>` only, see [Project scope](#project-scope) |
 | claude.ai connector | your account | ✓ — recorded in each *existing* project's `disabledMcpServers`; a project first opened later needs the toggle re-run |
 
-`claude mcp remove -s local` only sees the project it runs in, so the project
-path is recorded at disable time and the restore runs back in that directory.
-One name that is local-scope in several projects is refused unless your cwd
-picks the winner — guessing would restore it into the wrong project.
+Claude Code reads its MCP config once, at session start, and `/mcp enable` reaches only a server
+it listed then. A removed server could not load until a new session, so a user- or local-scope
+server is never removed: it stays in `~/.claude.json`, off in every project that existed at
+disable time. A project first opened later loads it, and the mod turns it off at that session's
+start (`/mcp disable`, which also marks the project). Without the mod, re-run the disable.
+
+A server an older agent-toggle removed still comes back from its backup, with
+`claude mcp add-json` run in the project recorded at disable time. A running session did not list
+it, so it loads in a new session.
 
 ## Profiles
 
@@ -1030,11 +1037,12 @@ claude --plugin-dir ./mod    # then run /agent-toggle inside Claude
   `/reload-skills` and `/reload-plugins` only re-read what is on disk. `/mcp disable` also
   leaves the per-project mark that `enable` clears (see
   [MCP backups are verbatim](#mcp-backups-are-verbatim)).
-  `/mcp` only reaches a server the session already lists. A server the CLI removes or restores
-  from its backup gets `/mcp disable` only while the session still has its tools, and
-  `/mcp enable` only after a `/mcp disable` in the same session. Otherwise nothing is queued and
-  the note says `example-mcp: loads when Claude Code reloads MCP config` (or `unloads`): Claude
-  Code picks the config change up by itself. claude.ai connectors always get the command.
+  `/mcp` only reaches a server the session listed at its start. The CLI keeps a disabled server
+  listed, so `/mcp enable` loads it in any session, even one started while it was off. Only a
+  server an older version removed and `enable` restores from its backup gets no command; its note
+  says `example-mcp: loads in a new session`. At session start the mod also runs
+  `/mcp disable <name>` for each server agent-toggle keeps off that the session's project has not
+  marked (a project dir first opened after the disable).
 - `agent-toggle ui` in another terminal applies on Enter and writes the Claude rows it changed to
   `~/.agent-toggle/reload.json`. Every open session running the mod checks that file's mtime every
   5 s (one `stat`) and queues the same reloads, toasting `agent-toggle ui: /reload-skills`. A file

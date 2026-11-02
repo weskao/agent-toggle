@@ -103,13 +103,15 @@ class ClaudeJsonScopeTest(SandboxCase):
         # ambiguous local scope is refused
         with self.assertRaisesRegex(LookupError, "2 projects"):
             mcp_json.claude_mcp_config("dup")
+        # a disable marks it off in every project and never removes either copy, so
+        # nothing has to be guessed
         state = {"version": 2, "disabled": {}}
         fails = mechanisms.toggle_mcp("disable", ["dup"], state, "claude", self.home,
                                       "claude-json")
-        # ambiguity counts as a failure, not a crash
-        self.assertEqual(fails, 1)
-        # nothing recorded for the ambiguous server
-        self.assertFalse(state["disabled"])
+        self.assertEqual(fails, 0)
+        projects = json.loads(fs.claude_json().read_text(encoding="utf-8"))["projects"]
+        self.assertEqual([(d["mcpServers"]["dup"]["command"], d["disabledMcpServers"])
+                          for d in projects.values()], [("a", ["dup"]), ("b", ["dup"])])
 
     def test_mcp_enable_defaults_to_user_scope_for_old_entries(self) -> None:
         """Entries parked before scope tracking have no scope field."""
@@ -150,6 +152,39 @@ class ClaudeJsonScopeTest(SandboxCase):
         # the stale per-project mark is gone; unrelated names stay
         self.assertEqual(projects["/work/a"]["disabledMcpServers"], ["other"])
         self.assertEqual(projects["/work/b"]["disabledMcpServers"], ["other"])
+
+    def test_configured_server_is_marked_off_in_place(self) -> None:
+        """Claude Code builds its MCP list once per session and `/mcp enable` reaches only a
+        listed server: disable keeps the config entry and marks it off per project, so a
+        session started while it is off still lists it and `/mcp enable` loads it there."""
+        entry = {"type": "http", "url": "https://example.invalid/mcp"}
+        self.claude_json({"mcpServers": {"example-mcp": entry}, "projects": {
+            "/work/a": {"disabledMcpServers": ["other"]}, "/work/b": {}}})
+        state = {"version": 3, "disabled": {}}
+        out = Result()
+        fails = mechanisms.toggle_mcp("disable", ["example-mcp"], state, "claude",
+                                      self.home, "claude-json", out)
+        self.assertEqual(fails, 0)
+        cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
+        # the entry stays where it was; no `claude mcp remove`, no backup file
+        self.assertEqual(cfg["mcpServers"]["example-mcp"], entry)
+        self.assertEqual(self.cli_calls, [])
+        self.assertFalse(mechanisms._json_backup_path("claude", "example-mcp").exists())
+        self.assertEqual({p: d.get("disabledMcpServers") for p, d in cfg["projects"].items()},
+                         {"/work/a": ["other", "example-mcp"], "/work/b": ["example-mcp"]})
+        row = out.rows[-1]
+        self.assertEqual((row["status"], row.get("connector"), row.get("backup")), ("ok", True, None))
+        self.assertTrue(state["disabled"]["claude:mcp:example-mcp"]["connector"])
+
+        fails = mechanisms.toggle_mcp("enable", ["example-mcp"], state, "claude",
+                                      self.home, "claude-json", Result())
+        self.assertEqual(fails, 0)
+        cfg = json.loads(fs.claude_json().read_text(encoding="utf-8"))
+        self.assertEqual(cfg["mcpServers"]["example-mcp"], entry)
+        self.assertEqual({p: d.get("disabledMcpServers") for p, d in cfg["projects"].items()},
+                         {"/work/a": ["other"], "/work/b": []})
+        self.assertEqual(state["disabled"], {})
+        self.assertEqual(self.cli_calls, [])
 
 
 FIXTURES = Path(__file__).parent / "fixtures"

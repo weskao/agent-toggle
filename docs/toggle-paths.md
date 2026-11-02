@@ -18,7 +18,7 @@ example `claude:skill:demo-skill`). It also appends a row to
 | skill, agent, command, rule | move | moves the item to `~/.agent-toggle/parked/user/<owner>/<dir>/`, nested path kept; exclusive companion files go to `~/.agent-toggle/companions/` | moves it back to the `origin` in the state entry, restores the companions, removes emptied park dirs |
 | plugin (claude) | native CLI | `claude plugin disable <id> -s <scope>`, run in the install's project; scope and dir recorded; nothing moved | `claude plugin enable <id>` with the recorded scope and dir |
 | plugin (openclaw) | flag | `plugins.entries.<name>.enabled` → `false` in `openclaw.json` | the flag's previous value is written back |
-| MCP (claude) | remove with backup | raw entry from `~/.claude.json` saved to `mcp-backups/`, then `claude mcp remove -s <scope>` | `claude mcp add-json` with the saved entry; local scope runs in the saved project dir; the name leaves every project's `disabledMcpServers` |
+| MCP (claude, user or local scope) | flag, per project | the entry stays in `~/.claude.json`; the name is added to `disabledMcpServers` in every existing project, so a running session still lists it and `/mcp enable` loads it there | the name leaves every project's `disabledMcpServers`; a server an older version removed comes back with `claude mcp add-json` and its saved entry (local scope runs in the saved project dir) |
 | MCP (codex, grok) | remove with backup | the `[mcp_servers.<name>]` text block saved, then cut from `config.toml` | the block is appended back to `config.toml` |
 | MCP (copilot, agy) | remove with backup | the entry is saved, then cut from the JSON config | the entry is put back |
 | MCP (opencode) | flag | `mcp.<name>.enabled` → `false` in `opencode.json` | the flag's previous value is written back |
@@ -101,10 +101,14 @@ dirs that are now empty.
 The backup is verbatim: auth headers are kept. Backups are mode `0600` and live
 in `~/.agent-toggle/mcp-backups/`.
 
+A claude server in `~/.claude.json` is never removed: Claude Code reads its MCP config once, at
+session start, and `/mcp enable` reaches only a server it listed then. Its disable leaves the
+entry in place and marks it off per project, like a connector.
+
 | server | where it lives (enabled) | disable | backup file |
 |---|---|---|---|
-| claude, user scope | `~/.claude.json` → `mcpServers.example-mcp` | `claude mcp remove -s user example-mcp` | `claude__example-mcp.json` |
-| claude, local scope | `~/.claude.json` → `projects["/home/u/work/repo"].mcpServers.example-mcp` | `claude mcp remove -s local example-mcp`, run in that project | `claude__example-mcp.json`; the state entry keeps the project path |
+| claude, user scope | `~/.claude.json` → `mcpServers.example-mcp` | the entry stays; `example-mcp` is added to `projects["<dir>"].disabledMcpServers` for every project in `~/.claude.json` | none (one written by an older version, `claude__example-mcp.json`, is still restored) |
+| claude, local scope | `~/.claude.json` → `projects["/home/u/work/repo"].mcpServers.example-mcp` | as user scope | none (an older version's backup keeps the project path in the state entry) |
 | codex | `~/.codex/config.toml` → `[mcp_servers.example-mcp]` and its sub-tables | the block is cut from the file | `codex__example-mcp.json` |
 | grok | `~/.grok/config.toml` → `[mcp_servers.example-mcp]` | the block is cut from the file | `grok__example-mcp.json` |
 | copilot | `~/.copilot/mcp-config.json` → `mcpServers.example-mcp` | the entry is cut | `copilot__example-mcp.json` |
@@ -115,10 +119,11 @@ in `~/.agent-toggle/mcp-backups/`.
 
 **Enable** depends on the server:
 
-- **claude:** runs `claude mcp add-json -s <scope> example-mcp '<saved entry>'`.
-  Local scope runs it back in the saved project dir. Then the name is removed
-  from every project's `disabledMcpServers` in `~/.claude.json`, where the
-  mod's `/mcp disable example-mcp` would otherwise keep it off.
+- **claude:** removes the name from every project's `disabledMcpServers` in
+  `~/.claude.json`. A server an older version removed is first put back with
+  `claude mcp add-json -s <scope> example-mcp '<saved entry>'` (local scope runs
+  in the saved project dir); a running session did not list it, so it loads in a
+  new session.
 - **codex and grok:** append the saved block to the end of `config.toml`.
 - **copilot, agy and project `.mcp.json`:** put the entry back. For a project
   `.mcp.json`, the name also leaves `disabledMcpServers` for that project and the

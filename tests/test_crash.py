@@ -850,8 +850,10 @@ class PluginCrashTest(CliCrashCase):
 
 
 class ClaudeMcpCrashTest(CliCrashCase):
-    """claude MCP servers: `claude mcp remove|add-json` write ~/.claude.json, so settle
-    reads that file strictly (no CLI call); unreadable -> stuck."""
+    """claude MCP servers an older version removed (`claude mcp remove`, config in a
+    backup): enable's `claude mcp add-json` writes ~/.claude.json, so settle reads that
+    file strictly (no CLI call); unreadable -> stuck. A disable now only marks a server
+    off (no write-ahead), so a pending disable is one an older version left."""
 
     KEY = "claude:mcp:demo-mcp"
     ARGS = ("mcp", "demo-mcp", "--harness", "claude")
@@ -873,8 +875,35 @@ class ClaudeMcpCrashTest(CliCrashCase):
                 "name": "demo-mcp", "backend": "claude-json", "backup": str(self.bp),
                 "scope": "user", "project": None, "at": "2026-01-01T00:00:00+0000", **fields}
 
+    def old_disable(self, landed: bool, name: str = "demo-mcp", project: str | None = None) -> None:
+        """A disable by an older version, killed around its `claude mcp remove`: the
+        backup written, the op pending, the server gone from ~/.claude.json if it landed."""
+        cfg = json.loads(self.cj.read_text(encoding="utf-8"))
+        box = cfg if project is None else cfg["projects"][project]
+        bp = fs.backup_dir() / f"claude__{name}.json"
+        fs.private_dir(fs.backup_dir())
+        bp.write_text(json.dumps(box["mcpServers"][name]), encoding="utf-8")
+        if landed:
+            del box["mcpServers"][name]
+            self.cj.write_text(json.dumps(cfg), encoding="utf-8")
+        self.forge(f"claude:mcp:{name}", "disable", self.entry(
+            name=name, backup=str(bp), scope="local" if project else "user", project=project))
+
+    def old_disabled(self) -> None:
+        """A server an older version disabled: removed, its config in the backup."""
+        self.old_disable(landed=True)
+        store.save_state({"version": 3, "disabled": {self.KEY: self.entry()}})
+
+    def test_a_disable_marks_it_off_and_never_calls_the_cli(self) -> None:
+        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.assertNotIn("pending", self.raw_state())
+        self.assertIn(self.KEY, self.raw_state()["disabled"])
+        self.assertIn("demo-mcp", self.servers())
+        self.assertFalse(self.bp.exists())
+        self.assertEqual(self.cli_calls, [])
+
     def test_kill_after_the_cli_remove_is_recorded_and_restorable(self) -> None:
-        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.old_disable(landed=True)
         self.assertEqual(self.pending()[self.KEY]["entry"]["backend"], "claude-json")
         self.assertNotIn("demo-mcp", self.servers())
         self.assertEqual(self.raw_state()["disabled"], {})
@@ -890,7 +919,7 @@ class ClaudeMcpCrashTest(CliCrashCase):
         self.assertEqual(self.servers()["demo-mcp"], {"command": "demo"})
 
     def test_kill_before_the_cli_remove_rolls_back_and_drops_the_backup(self) -> None:
-        self.kill_in_cli("disable", *self.ARGS, landed=False)
+        self.old_disable(landed=False)
         self.assertTrue(self.bp.exists())
         self.assertTrue(any("never reached disk" in w for w in self.warnings("status")))
         self.run_json(*NEXT)
@@ -898,15 +927,14 @@ class ClaudeMcpCrashTest(CliCrashCase):
         self.assertFalse(self.bp.exists())
 
     def test_kill_after_the_cli_add_drops_the_entry(self) -> None:
-        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
-        self.assertNotIn("pending", self.raw_state())
+        self.old_disabled()
         self.kill_in_cli("enable", *self.ARGS, landed=True)
         self.assertEqual(len(self.doctor_rows("done")), 1)
         self.run_json(*NEXT)
         self.assert_settled(False)
 
     def test_kill_before_the_cli_add_keeps_it_disabled(self) -> None:
-        self.assertEqual(self.run_json("disable", *self.ARGS)[0], 0)
+        self.old_disabled()
         self.kill_in_cli("enable", *self.ARGS, landed=False)
         self.assertEqual(len(self.doctor_rows("undone")), 1)
         self.run_json(*NEXT)
@@ -915,20 +943,21 @@ class ClaudeMcpCrashTest(CliCrashCase):
 
     def test_settle_needs_no_cli(self) -> None:
         from agent_toggle.backends import plugin_cli
-        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.old_disable(landed=True)
         plugin_cli.which = lambda name: None
         self.run_json(*NEXT)
         self.assert_settled(True)
 
-    def test_a_failed_cli_remove_settles_inline(self) -> None:
+    def test_a_failed_cli_add_settles_inline(self) -> None:
+        self.old_disabled()
         self.broken = True
-        rc, env = self.run_json("disable", *self.ARGS)
+        rc, env = self.run_json("enable", *self.ARGS)
         self.assertEqual(rc, 1)
-        self.assert_settled(False)
-        self.assertFalse(self.bp.exists())
+        self.assert_settled(True)
+        self.assertTrue(self.bp.exists())
 
     def test_an_unreadable_claude_json_is_stuck_never_guessed(self) -> None:
-        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.old_disable(landed=True)
         for body in ("{broken", "[]", '{"mcpServers": []}'):
             with self.subTest(body):
                 self.cj.write_text(body, encoding="utf-8")
@@ -941,7 +970,7 @@ class ClaudeMcpCrashTest(CliCrashCase):
                 self.assertTrue(self.bp.exists())
 
     def test_a_gone_server_without_its_backup_is_stuck(self) -> None:
-        self.kill_in_cli("disable", *self.ARGS, landed=True)
+        self.old_disable(landed=True)
         self.bp.unlink()
         stuck = self.doctor_rows("stuck")
         self.assertEqual(len(stuck), 1, stuck)
@@ -955,7 +984,7 @@ class ClaudeMcpCrashTest(CliCrashCase):
         proj.mkdir()
         self.cj.write_text(json.dumps({"mcpServers": {}, "projects": {
             str(proj): {"mcpServers": {"loc-mcp": {"command": "loc"}}}}}), encoding="utf-8")
-        self.kill_in_cli("disable", "mcp", "loc-mcp", "--harness", "claude", landed=True)
+        self.old_disable(landed=True, name="loc-mcp", project=str(proj))
         entry = self.pending()["claude:mcp:loc-mcp"]["entry"]
         self.assertEqual((entry["scope"], entry["project"]), ("local", str(proj)))
         self.run_json(*NEXT)

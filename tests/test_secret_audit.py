@@ -114,6 +114,23 @@ class SecretAuditTest(CliCase):
                 self.assertEqual(stat.S_IMODE(b.stat().st_mode), 0o600, b)
             self.assertEqual(stat.S_IMODE(fs.backup_dir().stat().st_mode) & 0o077, 0)
 
+    def park_claude_legacy(self) -> None:
+        """The claude servers as an older version disabled them: removed from ~/.claude.json,
+        their config in a backup, so enable runs `claude mcp add-json` with it."""
+        cj = json.loads(fs.claude_json().read_text(encoding="utf-8"))
+        state = store.load_state()
+        fs.private_dir(fs.backup_dir())
+        for name, box, proj in (("secret-mcp", cj, None),
+                                ("local-mcp", cj["projects"][str(self.proj)], str(self.proj))):
+            bp = fs.backup_dir() / f"claude__{name}.json"
+            fs.atomic_write(bp, json.dumps(box["mcpServers"].pop(name), indent=2))
+            state["disabled"][f"claude:mcp:{name}"] = {
+                "mechanism": "remove_backup", "harness": "claude", "type": "mcp", "name": name,
+                "backend": "claude-json", "backup": str(bp), "scope": "local" if proj else "user",
+                "project": proj, "at": "2026-01-01T00:00:00+0000"}
+        fs.claude_json().write_text(json.dumps(cj), encoding="utf-8")
+        store.save_state(state)
+
     def batch(self, name: str):
         return mock.patch.object(store, "BATCH", name)
 
@@ -189,6 +206,7 @@ class SecretAuditTest(CliCase):
 
     def test_cli_error_echoing_the_config_is_redacted(self) -> None:
         self.each("disable")
+        self.park_claude_legacy()
         self.cli_rc = 1                              # add-json fails and echoes its config
         for extra in VARIANTS:
             for t in self.TARGETS[:2]:
@@ -205,6 +223,7 @@ class SecretAuditTest(CliCase):
 
     def test_unexpected_exception_traceback_shows_no_value(self) -> None:
         self.each("disable")
+        self.park_claude_legacy()
 
         def boom(cmd, **kw):
             raise RuntimeError("cli crashed")

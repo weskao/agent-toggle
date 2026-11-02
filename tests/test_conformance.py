@@ -98,11 +98,11 @@ class ConformanceTest(CliCase):
         self.assertEqual(self.run_cli("disable", "mcp", "example-mcp")[0], 0)
         self.assertEqual(self.run_cli("enable", "mcp", "example-mcp")[0], 0)
         calls = [c for c, _ in self.cli_calls]
-        self.assertEqual(calls[:3], [["plugin", "disable", "demo-plugin"],
-                                     ["plugin", "enable", "demo-plugin"],
-                                     ["mcp", "remove", "example-mcp", "-s", "user"]])
-        self.assertEqual(calls[3][:4], ["mcp", "add-json", "--scope", "user"])
-        self.assertEqual(json.loads(calls[3][5]), orig)     # restored payload is the original
+        # an MCP server is marked off in place: no `claude mcp remove|add-json`
+        self.assertEqual(calls, [["plugin", "disable", "demo-plugin"],
+                                 ["plugin", "enable", "demo-plugin"]])
+        cfg = json.loads((self.tmp / ".claude.json").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["mcpServers"]["example-mcp"], orig)
 
     def test_dry_run_writes_nothing(self) -> None:
         for harness, type_ in PAIRS:

@@ -23,6 +23,14 @@ def mode(p: Path) -> int:
     return p.stat().st_mode & 0o777
 
 
+def codex_toml(home: Path) -> None:
+    """A codex config whose MCP server carries a token: its disable writes a backup."""
+    (home / ".codex").mkdir()
+    (home / ".codex" / "config.toml").write_text(
+        '[mcp_servers.example-mcp]\ncommand = "example"\n\n'
+        '[mcp_servers.example-mcp.env]\nTOKEN = "Bearer test-token-000"\n', encoding="utf-8")
+
+
 class LockTest(SandboxCase):
     def setUp(self) -> None:
         super().setUp()
@@ -121,16 +129,12 @@ class PrivateModeTest(SandboxCase):
         self.assertEqual([x.name for x in self.tmp.glob(".out.json*")], [])
 
     def test_mcp_disable_writes_0600_backup_and_state(self) -> None:
-        raw = {"type": "http", "headers": {"Authorization": "Bearer test-token-000"}}
-        saved = mechanisms.claude_mcp_config
-        self.addCleanup(setattr, mechanisms, "claude_mcp_config", saved)
-        mechanisms.claude_mcp_config = lambda name: (raw, "user", None)
-        self.cli_rc = 0                      # stubbed `claude mcp remove` succeeds
+        codex_toml(self.tmp)
         state = {"version": 3, "disabled": {}}
-        fails = mechanisms.toggle_mcp("disable", ["example-mcp"], state, "claude",
-                                      self.home, "claude-json")
+        fails = mechanisms.toggle_mcp("disable", ["example-mcp"], state, "codex",
+                                      self.tmp / ".codex", "toml")
         self.assertEqual(fails, 0)
-        entry = state["disabled"]["claude:mcp:example-mcp"]
+        entry = state["disabled"]["codex:mcp:example-mcp"]
         self.assertEqual(entry["mechanism"], "remove_backup")
         self.assertEqual(mode(Path(entry["backup"])), 0o600)
         store.save_state(state)
@@ -159,12 +163,8 @@ class PrivateModeTest(SandboxCase):
 class PrivateDirTest(SandboxCase):
     def test_state_backup_dirs_and_log_are_private_under_open_umask(self) -> None:
         self.addCleanup(os.umask, os.umask(0))
-        raw = {"type": "http", "headers": {"Authorization": "Bearer test-token-000"}}
-        saved = mechanisms.claude_mcp_config
-        self.addCleanup(setattr, mechanisms, "claude_mcp_config", saved)
-        mechanisms.claude_mcp_config = lambda name: (raw, "user", None)
-        self.cli_rc = 0
-        self.assertEqual(cli.main(["disable", "mcp", "example-mcp"]), 0)
+        codex_toml(self.tmp)
+        self.assertEqual(cli.main(["disable", "mcp", "example-mcp", "--harness", "codex"]), 0)
         for d in (fs.state_dir(), fs.backup_dir()):
             self.assertEqual(mode(d), 0o700, d)
         self.assertEqual(mode(fs.log_file()), 0o600)

@@ -18,7 +18,6 @@ from .backends.mcp_json import (
     _finite,
     _no_dup,
     _not_json,
-    claude_mcp_config,
     claudeai_connector_names,
     project_mcp_backup,
     project_mcp_remove,
@@ -1042,7 +1041,13 @@ def toggle_mcp(action: str, names: list[str], state: dict,
             fails += fail(name, refused)
             continue
 
-        if backend == "claude-json" and name in claudeai_connector_names():
+        connector = backend == "claude-json" and name in claudeai_connector_names()
+        # A configured server is marked off per project like a connector, never removed:
+        # Claude Code builds its MCP list once per session and `/mcp enable` reaches only a
+        # listed server, so a removed one could not load until a new session.
+        if connector or backend == "claude-json" and (
+                (entry or {}).get("connector")
+                or action == "disable" and name in live_mcp(home, backend)):
             ok, detail = toggle_claudeai_connector(action, name, dry_run)
             if not ok:
                 fails += fail(name, str(detail))
@@ -1057,15 +1062,17 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                     }
                 _ok(out, dry_run, harness, "mcp", action, name,
                     f"disabled across {n} project(s) "
-                    f"(claude.ai connector -- account stays connected, "
-                    f"just parked per-project; new project dirs need a re-run)",
+                    + ("(claude.ai connector -- account stays connected, "
+                       "just parked per-project; new project dirs need a re-run)" if connector
+                       else "(config kept in ~/.claude.json; the mod marks new project dirs)"),
                     connector=True, projects=detail)
             else:
                 if not dry_run:
                     state["disabled"].pop(key, None)
                 _ok(out, dry_run, harness, "mcp", action, name,
                     f"restored across {n} project(s) "
-                    f"(open a NEW session for it to load)",
+                    + ("(open a NEW session for it to load)" if connector
+                       else f"(`/mcp enable {name}` loads it in a running session)"),
                     connector=True, projects=detail)
             if not dry_run:
                 log(action, "mcp", name, "ok", json.dumps(detail), harness=harness,
@@ -1076,35 +1083,23 @@ def toggle_mcp(action: str, names: list[str], state: dict,
         scope, project = "user", None
 
         if action == "disable":
-            if backend == "claude-json":
-                try:
-                    found = claude_mcp_config(name)
-                except LookupError as e:
-                    fails += fail(name, str(e))
-                    continue
-                if found is None:
-                    hint = ("not in ~/.claude.json (user or local scope) -- "
-                            "a repo's own .mcp.json needs --project <dir>")
-                    if not dry_run:      # a dry run never shells out to claude
-                        ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
-                        if ok and "claude.ai config" in cfg:
-                            hint = ("account-level claude.ai connector -- disable it "
-                                    "at claude.ai (Settings -> Connectors)")
-                    fails += fail(name, hint)
-                    continue
-                raw, scope, project = found
-                if dry_run and not claude_bin():
-                    fails += fail(name, "claude CLI not found")
-                    continue
-                saved = json.dumps(raw, indent=2, ensure_ascii=False)
-            else:  # toml
-                config = home / "config.toml"
-                # plan first, back up, THEN edit: the block is never only in memory
-                block = codex_mcp_remove(config, name, True) if config.exists() else None
-                if block is None:
-                    fails += fail(name, f"no [mcp_servers.{name}] in {config}")
-                    continue
-                saved = json.dumps({"toml": block}, ensure_ascii=False, indent=2)
+            if backend == "claude-json":         # a configured server was marked off above
+                hint = ("not in ~/.claude.json (user or local scope) -- "
+                        "a repo's own .mcp.json needs --project <dir>")
+                if not dry_run:      # a dry run never shells out to claude
+                    ok, cfg = run_cli(claude_bin(), ["mcp", "get", name])
+                    if ok and "claude.ai config" in cfg:
+                        hint = ("account-level claude.ai connector -- disable it "
+                                "at claude.ai (Settings -> Connectors)")
+                fails += fail(name, hint)
+                continue
+            config = home / "config.toml"
+            # plan first, back up, THEN edit: the block is never only in memory
+            block = codex_mcp_remove(config, name, True) if config.exists() else None
+            if block is None:
+                fails += fail(name, f"no [mcp_servers.{name}] in {config}")
+                continue
+            saved = json.dumps({"toml": block}, ensure_ascii=False, indent=2)
 
             where = f" [{scope}{f': {project}' if project else ''}]"
             if not dry_run:
@@ -1123,25 +1118,14 @@ def toggle_mcp(action: str, names: list[str], state: dict,
                             bp.unlink(missing_ok=True)
                     fails += fail(name, f"state not saved, nothing changed: {e}")
                     continue
-                if backend == "claude-json":
-                    ok, res = run_cli(claude_bin(), ["mcp", "remove", name, "-s", scope],
-                                      cwd=project)
-                    err = None if ok else redact(res, raw)[:100]
-                else:
-                    try:
-                        codex_mcp_remove(config, name)
-                        err = None
-                    except fs.WriteError as e:      # config rolled back
-                        err = str(e)
-                if err is not None:     # settled from the file: untouched -> backup dropped
-                    settle(state, key, out, inline=True)
-                    fails += fail(name, err)
+                try:
+                    codex_mcp_remove(config, name)
+                except fs.WriteError as e:      # config rolled back; settled from the file:
+                    settle(state, key, out, inline=True)    # untouched -> backup dropped
+                    fails += fail(name, str(e))
                     continue
                 state["disabled"][key] = new
                 end(state, key)
-                # claude local scope logs its real scope + cwd; undo treats every
-                # scope but `project` (a --project change) as user scope, which is right
-                # for local: the replay finds the user-keyed entry and its own cwd.
                 log(action, "mcp", name, "ok", str(bp), harness=harness, batch=batch,
                     project=project, scope=scope)
             _ok(out, dry_run, harness, "mcp", action, name,

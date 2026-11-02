@@ -5,7 +5,7 @@ import json
 
 from test_cli_surface import CliCase
 
-from agent_toggle import fs, mechanisms
+from agent_toggle import fs
 
 
 class AllTypeTest(CliCase):
@@ -42,9 +42,6 @@ class AllTypeTest(CliCase):
 
     def test_mcp_with_the_same_name_is_included(self) -> None:
         self.claude_json({"mcpServers": {"dup": {"command": "dup-server"}}})
-        saved = mechanisms.claude_mcp_config
-        self.addCleanup(setattr, mechanisms, "claude_mcp_config", saved)
-        mechanisms.claude_mcp_config = lambda name: ({"command": "dup-server"}, "user", None)
         rc, env = self.run_json("disable", "all", "dup")
         self.assertEqual(rc, 0)
         self.assertIn(("mcp", "ok"), [(r["type"], r["status"]) for r in env["results"]])
