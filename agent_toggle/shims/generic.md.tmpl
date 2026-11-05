@@ -97,4 +97,9 @@ paste the JSON. Branch on the exit code:
 | 3 | locked | another run is active; retry later |
 | 4 | unsupported pair / harness missing | tell the user; do not retry |
 
+A `disable` row failing because the item is already off (`... is already false in <file>`,
+or the harness CLI says it is already disabled) while `list` shows no record of it: it was
+turned off outside agent-toggle, so `enable` has nothing to restore from. To bring it under
+agent-toggle (with the user's go-ahead): `enable` it by hand first, then `disable` it here.
+
 Rollback is `undo` or `enable <type> <name> --harness __HARNESS__`. State lives in `~/.agent-toggle/`.
