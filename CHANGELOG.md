@@ -1,3 +1,13 @@
+## [0.20.0] - 2026-11-23
+
+### 🚀 Features
+
+- **profile:** Bind a profile to a project and apply it
+- **mod:** Apply the bound profile at session start
+
+### 📚 Documentation
+
+- **shims:** Explain disabling an item already off
 ## [0.19.0] - 2026-11-02
 
 ### 🚀 Features
