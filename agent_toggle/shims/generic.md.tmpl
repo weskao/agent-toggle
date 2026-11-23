@@ -23,7 +23,7 @@ Commands: `status` (run first; shows which types this harness supports),
 `doctor` (read-only health check), `update` (installs the newest release, then refreshes the plugin and shims; run it only when the user asks to update), `list [type]`, `cost [--type T]` (startup
 token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name), `enable <type> <name>...`,
 `enable --all`, `undo` (reverse the last batch), `profile save|apply|diff|delete <name>`,
-`profile rename <old> <new>`, `profile list` (see Profiles); add `--dry-run` to preview. `<type>` = `skill` / `agent` /
+`profile rename <old> <new>`, `profile list`, `profile bind|unbind|auto` (see Profiles); add `--dry-run` to preview. `<type>` = `skill` / `agent` /
 `command` / `rule` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
 A row with `shared_with` means another harness reads the same directory: the
 change affects them too, so say so. `ui` is an interactive picker for the user, not for you.
@@ -41,6 +41,9 @@ A profile is a saved snapshot of which items are live, one file per name in
 | update ("update work with what I have now") | `profile save <name>`: overwrites it with the live state |
 | rename | `profile rename <old> <new>` (refuses a name that exists) |
 | delete | `profile delete <name>` (removes the file; `undo` does not restore it) |
+| load one per project ("use work in this repo") | `profile bind <name> --dir <project>`; every dir with no binding of its own: `profile bind <name> --global`. Only the Claude Code mod applies it at session start; elsewhere run `profile auto` |
+| stop that | `profile unbind --dir <project>` or `profile unbind --global` |
+| apply the bound one now | `profile auto --dir <project>` |
 
 Ask instead of guessing: use your harness's question tool (multiple choice) if it
 has one, else a short numbered list the user answers by number. Run `profile list --json` first.

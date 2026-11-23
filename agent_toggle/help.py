@@ -79,20 +79,33 @@ def commands(default_harness: str = "claude") -> dict[str, Cmd]:
             options=[_dry_run()],
             examples=["undo --dry-run", "undo"]),
         "profile": Cmd(
-            "profile save|apply|diff|list|delete|rename [name|file] [new] [--out file] [--dry-run] "
-            "[--project dir]",
-            t("help.profile.summary", "save / apply / diff / list / delete / rename named sets of live items"),
+            "profile save|apply|diff|list|delete|rename|bind|unbind|auto [name|file] [new] "
+            "[--out file] [--dry-run] [--project dir] [--dir dir] [--global]",
+            t("help.profile.summary", "save / apply / diff / list / delete / rename named sets "
+                                      "of live items; bind one to a project"),
             t("help.profile.desc", "A profile records which items are live, so a whole "
-                                   "setup can be switched in one step."),
-            args=[("save|apply|diff|list|delete|rename", t("help.arg.profile_action", "what to do")),
+                                   "setup can be switched in one step. `bind` ties a saved "
+                                   "profile to a project dir (or, with --global, to every dir "
+                                   "that has none); `auto` applies the one bound to a dir, as "
+                                   "the Claude Code plugin does when a session starts there."),
+            args=[("save|apply|diff|list|delete|rename|bind|unbind|auto",
+                   t("help.arg.profile_action", "what to do")),
                   ("name|file", t("help.arg.profile_target", "a profile name or a JSON file")),
                   ("new", t("help.arg.profile_new", "rename: the new name"))],
             options=[("--out file", t("help.opt.out", "save: write the profile here instead")),
                      ("--dry-run", t("help.opt.profile_dry_run",
-                                     "apply: show the plan; change nothing")),
-                     _project()],
+                                     "apply / auto: show the plan; change nothing")),
+                     _project(),
+                     ("--dir dir", t("help.opt.profile_dir",
+                                     "bind / unbind / auto: the project dir (default: the "
+                                     "current one)")),
+                     ("--global", t("help.opt.profile_global",
+                                    "bind / unbind: the profile for every dir with no "
+                                    "binding of its own"))],
             examples=["profile save work", "profile diff work", "profile apply work --dry-run",
-                      "profile list", "profile rename work flutter", "profile delete flutter"]),
+                      "profile list", "profile rename work flutter", "profile delete flutter",
+                      "profile bind flutter --dir ~/code/app", "profile bind work --global",
+                      "profile auto --dry-run", "profile unbind --dir ~/code/app"]),
         "status": Cmd(
             "status",
             t("help.status.summary", "health check"),

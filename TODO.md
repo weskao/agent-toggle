@@ -180,12 +180,12 @@ mentioned there. The repo is already public, and `claude plugin validate .` and
       on stderr off a TTY too) and points at `agent-toggle update` in a terminal (`update` is not a
       mod verb: it prints no JSON and self-installs)
 
-## Project-aware profile loading (planned)
+## Project-aware profile loading
 
-- [ ] detect the project type (python, web, flutter, ...) from marker files, or let the user
-      set the project path explicitly in config
-- [ ] on the AI agent hook (session start), load the matching profile list (1 to N profiles)
-      when a related setting exists; do nothing when none is configured
+- [x] set the project path explicitly: `profile bind <name> [--dir D | --global]` / `unbind`;
+      the nearest bound dir at or above the cwd wins, else the global binding
+- [x] on the Claude Code session start, the mod runs `profile auto` and applies the one bound
+      profile; nothing happens when none is bound
 
 ## Project + global scope together (planned)
 

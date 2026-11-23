@@ -25,6 +25,8 @@ Usage:
     agent_toggle.py doctor [--harness H]       # drift + state check (y/n fixes on a TTY); exit 1 on problems
     agent_toggle.py migrate                    # import old state, move legacy park dirs
     agent_toggle.py profile save|apply|diff|list|delete|rename [name|file] [new] [--out F] [--dry-run]
+    agent_toggle.py profile bind <name> [--dir D | --global] | unbind [--dir D | --global]
+    agent_toggle.py profile auto [--dir D] [--dry-run]   # apply the profile bound to D, else the global one
     agent_toggle.py install-shims [--dry-run] [--gitignore | --no-gitignore]
                                                # skill shim per harness; stale .gitignore lines
     agent_toggle.py config [--json]            # settings menu (curses, else numbered list)
@@ -685,13 +687,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="skip the stale park-dir line check")
     sp.set_defaults(prompt=True)        # the config menu passes False: no y/n under curses
     pp = sub.add_parser("profile", parents=[common],
-                        help="save / apply / diff / list / delete / rename named sets of live items")
-    pp.add_argument("action", help="save | apply | diff | list | delete | rename")
+                        help="save / apply / diff / list / delete / rename named sets of live "
+                             "items; bind one to a project")
+    pp.add_argument("action",
+                    help="save | apply | diff | list | delete | rename | bind | unbind | auto")
     pp.add_argument("target", nargs="?", metavar="name|file")
     pp.add_argument("new_name", nargs="?", metavar="new", help="rename: the new name")
     pp.add_argument("--out", metavar="file", help="save: write the profile here instead")
-    pp.add_argument("--dry-run", action="store_true", help="apply: show the plan; change nothing")
+    pp.add_argument("--dry-run", action="store_true",
+                    help="apply / auto: show the plan; change nothing")
     pp.add_argument("--project", metavar="dir", help=PROJECT_HELP)
+    pp.add_argument("--dir", metavar="dir",
+                    help="bind / unbind / auto: the project dir (default: the current one)")
+    pp.add_argument("--global", dest="everywhere", action="store_true",
+                    help="bind / unbind: the profile for every dir with no binding of its own")
     sub.add_parser("doctor", parents=[common],
                    help="check harness layouts and state against disk; offers y/n fixes")
     sub.add_parser("update", parents=[common],

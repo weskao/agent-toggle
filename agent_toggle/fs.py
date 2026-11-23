@@ -72,6 +72,12 @@ def profiles_dir() -> Path:
     return state_dir() / "profiles"
 
 
+def bindings_file() -> Path:
+    """Which profile each project dir loads. Outside profiles/: that dir may be synced
+    between machines, and these keys are this machine's absolute paths."""
+    return state_dir() / "profile-bindings.json"
+
+
 def parked_dir() -> Path:
     return state_dir() / "parked"
 

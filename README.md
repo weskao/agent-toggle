@@ -184,6 +184,7 @@ agent-toggle <command> [args]          # or: python3 agent_toggle.py <command> [
 | `enable --all` | put back **every** disabled item (`--harness H` narrows it, `--project <dir>` takes only that project's) |
 | `undo` | reverse the last logged batch (`--dry-run` shows the plan) |
 | `profile save\|apply\|diff\|list\|delete\|rename` | named sets of live items; see [Profiles](#profiles) |
+| `profile bind\|unbind\|auto` | load a profile per project, or a global one; see [Project bindings](#project-bindings) |
 | `config` | settings menu (curses, else a numbered list); `config --json` lists every setting and the package version; see [Settings & config menu](#settings--config-menu) |
 | `config test\|sync-ci` | send one Telegram test message / set the GitHub CI secrets; see [CI notifications](#ci-notifications) |
 | `help [command]` | styled help; `help ui` = `--help ui` = `ui --help`; see [Help](#help) |
@@ -237,7 +238,7 @@ asked, plus `owner`, the harness whose park dir and state entry hold the item;
 unshared).
 
 `--dry-run` (`disable` / `enable` / `enable --all` / `undo` / `profile apply` /
-`install-shims` / `ui`) computes the plan --
+`profile auto` / `install-shims` / `ui`) computes the plan --
 moves, companions, backups, MCP edits, warnings -- and writes nothing: no state,
 log, lock or backup, and no chmod; it never shells out to `claude`, except one
 read-only `claude plugin list --json` (up to 30 s) when a killed run left a plugin
@@ -700,8 +701,8 @@ one batch, logged, undoable with `undo`).
   `~/.agent-toggle/profiles`. `..` in a path, and names that are not plain file
   names, are refused (exit `2`), as are a bad version, an unknown harness or
   type, an invalid item name, a duplicate item or a file over 1 MiB.
-- `--out` belongs to `save` only; `--dry-run` to `apply` / `diff`. `--harness H`
-  narrows `save`, `apply` and `diff` to one harness.
+- `--out` belongs to `save` only; `--dry-run` to `apply` / `diff` / `auto`. `--harness H`
+  narrows `save`, `apply`, `diff` and `auto` to one harness.
 - `diff` and `apply --dry-run` do not read plugin state (that needs the claude
   CLI, and a dry run never shells out), so profile plugin items show as
   `skipped` there.
@@ -721,6 +722,36 @@ one batch, logged, undoable with `undo`).
   `<new>` already exists (it never overwrites) or is not a valid profile name, and
   keeps the file byte for byte. Neither takes `--dry-run` or `--project`: a
   project profile is renamed or deleted by its name like any other.
+
+### Project bindings
+
+Bind a stored profile to a project and a session opened there applies it. A project
+with no binding applies the global profile; with nothing bound, nothing happens.
+
+```sh
+agent-toggle profile bind work --dir ~/code/app      # default: the current dir
+agent-toggle profile bind base --global              # every dir with no binding of its own
+agent-toggle profile list                            # shows what each profile is bound to
+agent-toggle profile auto --dir ~/code/app/src       # applies work, as a session start does
+agent-toggle profile unbind --dir ~/code/app         # or: profile unbind --global
+```
+
+- **Lookup:** the nearest bound dir at or above the cwd wins, so subdirs and worktrees
+  inside it inherit the binding; then the global binding; then nothing (exit `0`, no rows).
+- With the [Claude Code mod](docs/MOD.md), each session start runs `profile auto` for its
+  cwd, off the start so it never blocks it, and reloads what changed. Other harnesses can
+  run `profile auto` from their own hook.
+- A binding names a stored user-scope profile. A `--project` profile or a file path cannot
+  be bound.
+- `delete` drops the bindings to that profile and `rename` moves them. A bound profile
+  that is no longer saved gives a `skipped` `auto` row, not a failure.
+- Bindings live in `~/.agent-toggle/profile-bindings.json`, outside `profiles/`: that dir
+  may be synced between machines, and these keys are this machine's absolute paths.
+
+**Limitation: the last session start wins.** A profile changes shared user state (file
+moves under `~/.claude`, plugin flags), not one session's view. With two sessions in
+different projects, the later start switches the state and the other running session is
+not told. Agents and rules need a new session to change either way.
 
 ## Undo and `enable --all`
 
@@ -906,6 +937,7 @@ bookkeeping.
 | `parked/user/<owner>/<dir>/` | user-scope items, e.g. `parked/user/claude/skills/<name>` (`<owner>` = the harness whose home holds the dir; a dir shared by several harnesses parks once, under its owner); an absolute OpenCode `skills.paths` dir parks under `parked/user/opencode/ext-<sha8>/` (`<sha8>` of its resolved path). Nothing is ever parked inside a harness home |
 | `parked/<sha8>/` | items parked by `--project` (`<sha8>` = first 8 hex of the SHA-1 of the resolved project dir) |
 | `profiles/` | `<name>.json` profiles (dir `0700`, files `0600`) |
+| `profile-bindings.json` | which profile each project dir loads, plus the global one ([Project bindings](#project-bindings)); machine-local absolute paths, do not sync |
 | `config.json` | [settings](#settings--config-menu) and the Telegram chat id (mode `0600`, atomic write, unknown keys kept) |
 | `update-check.json` | the [update check](#update-check)'s skipped version (mode `0600`, atomic write) |
 

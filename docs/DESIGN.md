@@ -445,9 +445,27 @@ profile name and the file size (1 MiB) are validated; any violation exits 2.
 `--project <dir>` saves, diffs and applies one project's items instead, and
 project-scope entries are never part of a user-scope profile. Nothing else is
 exportable: `state.json` holds machine-local absolute paths; `mcp-backups/` holds
-auth material. Per-project auto-switch is deliberately **not** in scope until
-`profile apply` has been used for a while; it would require a hook per
-harness and a definition of "project" that differs per harness.
+auth material.
+
+**Bindings (`bind` / `unbind` / `auto`).** `profile bind <name> [--dir D | --global]`
+records which stored user-scope profile a dir loads, in
+`~/.agent-toggle/profile-bindings.json`. It sits outside `profiles/` because that dir
+may be synced between machines and these keys are this machine's absolute paths.
+`profile auto [--dir D]` resolves the nearest bound dir at or above `D` (subdirs and
+worktrees inherit), else the global binding, else exits 0 with no rows. "Project" is
+therefore an explicit bound path, the same for every harness, with no marker-file
+detection. `--project` profiles are a different concept and are not bindable. `delete`
+drops a profile's bindings, `rename` moves them, and a bound profile that is no longer
+saved gives a `skipped` `auto` row, not a failure.
+
+The Claude Code mod runs the real `profile auto` at session start, deferred so it never
+blocks the start. It never uses `diff` / `--dry-run`, which do not read plugin state and
+so cannot tell whether a plugin item would change. Measured: ~0.05 s with nothing bound,
+~0.96 s bound and already in place (about 0.7 s is `claude plugin list --json`).
+
+Known limitation: a profile changes shared user state (`~/.claude` file moves, plugin
+flags), so with two sessions in different projects the last session start wins and the
+other running session is not notified. Agents and rules still need a new session.
 
 ### 5.8 New resource types
 

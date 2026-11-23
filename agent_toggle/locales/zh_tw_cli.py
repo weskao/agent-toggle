@@ -18,8 +18,12 @@ CATALOG: dict[str, str] = {
                         "--all 還原全部（可搭配一個 --harness）。",
     "help.undo.summary": "復原最近一次記錄的批次",
     "help.undo.desc": "依記錄復原最近一次 disable/enable 批次。",
-    "help.profile.summary": "儲存 / 套用 / 比較 / 列出 / 刪除 / 改名具名的啟用項目組合",
-    "help.profile.desc": "設定檔記錄哪些項目是啟用的，讓整組設定一步切換。",
+    "help.profile.summary": "儲存 / 套用 / 比較 / 列出 / 刪除 / 改名具名的啟用項目組合；"
+                            "可綁定到專案",
+    "help.profile.desc": "設定檔記錄哪些項目是啟用的，讓整組設定一步切換。`bind` 把已儲存的"
+                         "設定檔綁定到專案目錄（加 --global 則用於所有沒有綁定的目錄）；"
+                         "`auto` 套用某目錄所綁定的設定檔，Claude Code 外掛在該目錄開啟 "
+                         "session 時就是這麼做。",
     "help.status.summary": "健康檢查",
     "help.status.desc": "顯示狀態檔、每個已安裝的 harness 與其暫存項目，以及值得修正的偏差。",
     "help.list.summary": "目前停用了哪些項目",
@@ -58,7 +62,9 @@ CATALOG: dict[str, str] = {
     "help.arg.profile_target": "設定檔名稱或 JSON 檔",
     "help.arg.profile_new": "rename：新名稱",
     "help.opt.out": "save：改寫到這個檔案",
-    "help.opt.profile_dry_run": "apply：只顯示計畫，不做任何變更",
+    "help.opt.profile_dry_run": "apply / auto：只顯示計畫，不做任何變更",
+    "help.opt.profile_dir": "bind / unbind / auto：專案目錄（預設為目前目錄）",
+    "help.opt.profile_global": "bind / unbind：所有沒有自己綁定的目錄都用這個設定檔",
     "help.opt.type": "只看這種類型：%s",
     "help.opt.list_project": "只看這個專案的項目",
     "help.opt.cost_project": "計算此專案的 .claude 與 .mcp.json，而非使用者範圍",

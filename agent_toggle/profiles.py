@@ -4,6 +4,9 @@ A profile holds ONLY {harness, type, name, live} per item -- never a path or a
 secret -- so it can sit in a dotfiles repo. `apply` toggles just the items the
 profile mentions: an item installed after the save is never touched, and an item
 the profile names that this machine lacks is skipped, not failed.
+
+Bindings (`bind` / `unbind` / `auto`) say which stored profile a project dir loads,
+with one global fallback; `auto` applies the one that matches a dir.
 """
 from __future__ import annotations
 
@@ -22,7 +25,8 @@ MAX_BYTES = 1 << 20                      # a real profile is a few KB
 ITEM_KEYS = {"harness", "type", "name", "live"}
 WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                 *(f"LPT{i}" for i in range(1, 10))}     # not valid file names on Windows
-ACTIONS = ("save", "apply", "diff", "list", "delete", "rename")
+ACTIONS = ("save", "apply", "diff", "list", "delete", "rename", "bind", "unbind", "auto")
+NO_TARGET = ("list", "unbind", "auto")
 
 
 def _is_path(arg: str) -> bool:
@@ -192,14 +196,20 @@ def cmd_list(out: Result) -> None:
     files = stored()
     if not files:
         out.say("no profiles saved")
+    binds = bindings()
     for p in files:
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
             detail = f"{len(doc['items'])} items, saved {str(doc.get('saved_at', '?'))[:10]}"
         except (OSError, ValueError, KeyError, TypeError):
             detail = "unreadable"
+        dirs = sorted(d for d, n in binds["projects"].items() if n == p.stem)
+        bound = {**({"global": True} if binds["global"] == p.stem else {}),
+                 **({"bound": dirs} if dirs else {})}
+        if bound:                           # an unbound profile's row and line stay as before
+            detail += " <- " + ", ".join([*(["global"] if "global" in bound else []), *dirs])
         out.say(f"  {p.stem:<24} {detail}")
-        out.row(None, None, p.stem, "list", "ok", detail, show=False, path=str(p))
+        out.row(None, None, p.stem, "list", "ok", detail, show=False, path=str(p), **bound)
 
 
 def _existing(name: str) -> Path:
@@ -218,6 +228,7 @@ def cmd_delete(name: str, out: Result) -> None:
         p.unlink()
     except OSError as e:
         die(f"cannot delete profile {name!r}: {e.strerror or e}", 1)
+    _rebind(name, None)
     out.say(f"deleted {name} ({p})")
     out.row(None, None, name, "delete", "ok", str(p), show=False, path=str(p))
 
@@ -233,26 +244,139 @@ def cmd_rename(old: str, new: str, out: Result) -> None:
         os.rename(src, dst)      # shortcut: a profile saved as `new` between the check and here is overwritten on POSIX
     except OSError as e:
         die(f"cannot rename profile {old!r}: {e.strerror or e}", 1)
+    _rebind(old, new)
     out.say(f"renamed {old} -> {new} ({dst})")
     out.row(None, None, new, "rename", "ok", f"from {old}", show=False, path=str(dst), old=old)
+
+
+# ---------------------------------------------------------------- bindings
+
+def bindings() -> dict:
+    """{"global": name | None, "projects": {resolved dir: name}}; a missing, corrupt or
+    hand-edited file reads as no bindings, entry by entry."""
+    try:
+        doc = json.loads(fs.bindings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        doc = {}
+    doc = doc if isinstance(doc, dict) else {}
+    projects = doc.get("projects")
+    return {"global": doc["global"] if isinstance(doc.get("global"), str) else None,
+            "projects": {d: n for d, n in (projects if isinstance(projects, dict) else {}).items()
+                         if isinstance(n, str)}}
+
+
+def _write_bindings(binds: dict) -> None:
+    fs.private_dir(fs.state_dir())
+    fs.atomic_write(fs.bindings_file(),
+                    json.dumps({"version": VERSION, **binds}, indent=2, ensure_ascii=False) + "\n")
+
+
+def _rebind(old: str, new: str | None) -> None:
+    """Follow a rename (`new`) or drop a deleted profile's bindings (None)."""
+    binds = bindings()
+    kept = {"global": new if binds["global"] == old else binds["global"],
+            "projects": {d: new if n == old else n for d, n in binds["projects"].items()
+                         if n != old or new}}
+    if kept != binds:
+        _write_bindings(kept)
+
+
+def _dir(arg: str | None) -> Path:
+    """The resolved dir a binding is keyed by (default: the cwd); exit 2 unless it exists."""
+    p = Path(arg).expanduser() if arg else Path.cwd()
+    if not p.is_dir():
+        die(f"not a directory: {arg}", 2)
+    return p.resolve()
+
+
+def bound_profile(where: Path) -> tuple[str | None, str]:
+    """(profile name, what bound it) for `where`: the nearest bound dir at or above it,
+    else the global binding, else (None, "")."""
+    binds = bindings()
+    by_dir = {os.path.normcase(d): (n, d) for d, n in binds["projects"].items()}  # Windows: any case
+    for d in (where, *where.parents):
+        if os.path.normcase(str(d)) in by_dir:
+            return by_dir[os.path.normcase(str(d))]
+    return binds["global"], "global" if binds["global"] else ""
+
+
+def cmd_bind(name: str, where: str | None, everywhere: bool, out: Result) -> None:
+    _existing(name)
+    load_scoped(name)                       # exit 2 for a project-scope or broken profile
+    binds = bindings()
+    key = "global" if everywhere else str(_dir(where))
+    if everywhere:
+        binds["global"] = name
+    else:
+        binds["projects"][key] = name
+    _write_bindings(binds)
+    out.say(f"bound {name} -> {key}")
+    out.row(None, None, name, "bind", "ok", key, show=False)
+
+
+def cmd_unbind(where: str | None, everywhere: bool, out: Result) -> None:
+    binds = bindings()
+    if everywhere:
+        key, name, binds["global"] = "global", binds["global"], None
+    else:
+        here = str(_dir(where))
+        key = next((d for d in binds["projects"]
+                    if os.path.normcase(d) == os.path.normcase(here)), here)
+        name = binds["projects"].pop(key, None)
+    if name is None:
+        die(f"no profile is bound to {key} (see: profile list)", 2)
+    _write_bindings(binds)
+    out.say(f"unbound {name} from {key}")
+    out.row(None, None, name, "unbind", "ok", key, show=False)
+
+
+def cmd_auto(where: str | None, only: str | None, dry_run: bool, out: Result) -> None:
+    """Apply the profile bound to `where` (else the global one). Nothing bound changes
+    nothing and exits 0: a session-start hook runs this in every project."""
+    name, source = bound_profile(_dir(where))
+    if name is None:
+        out.say("no profile is bound here and no global profile is set")
+        return
+    if not (_valid_name(name) and _stored_path(name).is_file()):
+        why = f"profile {name!r} (bound to {source}) is not saved; see: profile list"
+        out.say(why, warn=True)
+        out.row(None, None, name, "auto", "skipped", why, show=False, source=source)
+        return
+    out.say(f"profile {name} (bound to {source})")
+    out.row(None, None, name, "auto", "ok", source, show=False, source=source)
+    cmd_apply(name, only, dry_run, out)
 
 
 def cmd_profile(args, out: Result) -> None:
     action, target = args.action, args.target
     if action not in ACTIONS:
         die(f"unknown profile action {action!r} (expected: {', '.join(ACTIONS)})", 2)
-    if (action == "list") == (target is not None):
-        die("profile list takes no argument" if action == "list"
+    if (action in NO_TARGET) == (target is not None):
+        die(f"profile {action} takes no argument" if action in NO_TARGET
             else f"profile {action} needs a <name|file>", 2)
     if (action == "rename") != (args.new_name is not None):
         die("profile rename needs <old> <new>" if action == "rename"
             else f"profile {action} takes one <name|file>", 2)
     if args.out and action != "save":
         die("--out only applies to `profile save`", 2)
-    if args.dry_run and action not in ("apply", "diff"):
-        die("--dry-run only applies to `profile apply` / `diff`", 2)
-    if args.project is not None and action in ("list", "delete", "rename"):
+    if args.dry_run and action not in ("apply", "diff", "auto"):
+        die("--dry-run only applies to `profile apply` / `diff` / `auto`", 2)
+    if args.project is not None and action not in ("save", "apply", "diff"):
         die(f"--project does not apply to `profile {action}`", 2)
+    binding = action in ("bind", "unbind", "auto")
+    if (args.dir is not None or args.everywhere) and not binding:
+        die("--dir and --global only apply to `profile bind` / `unbind` / `auto`", 2)
+    if args.everywhere and (args.dir is not None or action == "auto"):
+        die("--global does not go with --dir" if args.dir is not None
+            else "--global does not apply to `profile auto`", 2)
+    if binding:
+        if action == "bind":
+            cmd_bind(target, args.dir, args.everywhere, out)
+        elif action == "unbind":
+            cmd_unbind(args.dir, args.everywhere, out)
+        else:
+            cmd_auto(args.dir, args.harness, args.dry_run, out)
+        return
     project = project_dir(args.project, args.harness)
     if action == "save":
         cmd_save(target, args.out, args.harness, out, project)

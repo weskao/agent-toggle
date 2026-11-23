@@ -359,6 +359,113 @@ class ValidationTest(ProfileCase):
         self.assert_usage("profile", "rename", "work", "a:b")
 
 
+class BindingTest(ProfileCase):
+    """bind / unbind / auto: a project dir loads its own profile, any other dir the global one."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.skill = self.home / "skills" / "demo-skill"
+        self.proj = self.tmp / "work" / "app"
+        (self.proj / "lib").mkdir(parents=True)
+        self.other = self.tmp / "work" / "other"
+        self.other.mkdir()
+        self.run_cli("profile", "save", "full")              # demo-skill live
+        self.run_cli("disable", "skill", "demo-skill")
+        self.run_cli("profile", "save", "lean")              # demo-skill parked
+
+    def auto(self, where: Path, *flags: str) -> tuple[int, list[dict]]:
+        rc, env = self.run_json("profile", "auto", "--dir", str(where), *flags)
+        return rc, env["results"]
+
+    def test_a_bound_dir_gets_its_profile_and_any_other_dir_the_global_one(self) -> None:
+        self.assertEqual(self.run_cli("profile", "bind", "lean", "--dir", str(self.proj))[0], 0)
+        self.assertEqual(self.run_cli("profile", "bind", "full", "--global")[0], 0)
+        rc, rows = self.auto(self.other)
+        self.assertEqual((rc, rows[0]["name"], rows[0]["action"], rows[0]["source"]),
+                         (0, "full", "auto", "global"))
+        self.assertTrue(self.skill.exists())
+        rc, rows = self.auto(self.proj / "lib")              # a dir inside the bound one
+        self.assertEqual((rc, rows[0]["name"], rows[0]["source"]),
+                         (0, "lean", str(self.proj.resolve())))
+        self.assertEqual([(r["type"], r["name"], r["action"], r["status"]) for r in rows[1:]],
+                         [("skill", "demo-skill", "disable", "ok")])
+        self.assertFalse(self.skill.exists())
+
+    def test_the_nearest_bound_dir_wins(self) -> None:
+        self.run_cli("profile", "bind", "full", "--dir", str(self.proj))
+        self.run_cli("profile", "bind", "lean", "--dir", str(self.proj / "lib"))
+        self.assertEqual(self.auto(self.proj / "lib", "--dry-run")[1][0]["name"], "lean")
+        self.assertEqual(self.auto(self.proj, "--dry-run")[1][0]["name"], "full")
+
+    def test_nothing_bound_changes_nothing_and_exits_0(self) -> None:
+        before = snapshot(self.tmp)
+        self.assertEqual(self.auto(self.proj), (0, []))
+        self.assertEqual(snapshot(self.tmp), before)
+        self.assertIn("no profile is bound", self.run_cli("profile", "auto", "--dir", str(self.proj))[1])
+
+    def test_auto_dry_run_writes_nothing(self) -> None:
+        self.run_cli("profile", "bind", "full", "--global")
+        before = snapshot(self.tmp)
+        rc, rows = self.auto(self.proj, "--dry-run")
+        self.assertEqual((rc, [r["status"] for r in rows]), (0, ["ok", "planned"]))
+        self.assertEqual(snapshot(self.tmp), before)
+
+    def test_unbind_falls_back_to_the_global_profile_then_to_nothing(self) -> None:
+        self.run_cli("profile", "bind", "lean", "--dir", str(self.proj))
+        self.run_cli("profile", "bind", "full", "--global")
+        self.assertEqual(self.run_cli("profile", "unbind", "--dir", str(self.proj))[0], 0)
+        self.assertEqual(self.auto(self.proj, "--dry-run")[1][0]["name"], "full")
+        self.assertEqual(self.run_cli("profile", "unbind", "--global")[0], 0)
+        self.assertEqual(self.auto(self.proj, "--dry-run"), (0, []))
+
+    def test_rename_follows_a_binding_and_delete_drops_it(self) -> None:
+        self.run_cli("profile", "bind", "lean", "--dir", str(self.proj))
+        self.run_cli("profile", "bind", "lean", "--global")
+        self.run_cli("profile", "rename", "lean", "slim")
+        self.assertEqual(self.auto(self.proj, "--dry-run")[1][0]["name"], "slim")
+        self.assertEqual(self.auto(self.other, "--dry-run")[1][0]["name"], "slim")
+        self.run_cli("profile", "delete", "slim")
+        self.assertEqual(self.auto(self.proj, "--dry-run"), (0, []))
+
+    def test_a_binding_to_a_profile_that_is_gone_is_skipped_not_failed(self) -> None:
+        self.run_cli("profile", "bind", "lean", "--global")
+        (fs.profiles_dir() / "lean.json").unlink()           # removed by hand, not by `delete`
+        before = snapshot(self.tmp)
+        rc, rows = self.auto(self.proj)
+        self.assertEqual((rc, [(r["name"], r["action"], r["status"]) for r in rows]),
+                         (0, [("lean", "auto", "skipped")]))
+        self.assertEqual(snapshot(self.tmp), before)
+
+    def test_list_names_what_a_profile_is_bound_to(self) -> None:
+        self.run_cli("profile", "bind", "lean", "--dir", str(self.proj))
+        self.run_cli("profile", "bind", "lean", "--global")
+        rows = {r["name"]: r for r in self.run_json("profile", "list")[1]["results"]}
+        self.assertEqual((rows["lean"]["global"], rows["lean"]["bound"]),
+                         (True, [str(self.proj.resolve())]))
+        self.assertFalse({"global", "bound"} & set(rows["full"]))
+        self.assertIn(f"<- global, {self.proj.resolve()}", self.run_cli("profile", "list")[1])
+
+    def test_a_corrupt_bindings_file_reads_as_no_bindings(self) -> None:
+        fs.bindings_file().write_text('{"global": 3, "projects": [1]', encoding="utf-8")
+        self.assertEqual(self.auto(self.proj), (0, []))
+
+    def test_misuse_exits_2_and_changes_nothing(self) -> None:
+        proj = self.tmp / "repo"
+        (proj / ".claude" / "skills").mkdir(parents=True)
+        self.run_cli("profile", "save", "scoped", "--project", str(proj))
+        before = snapshot(self.tmp)
+        for argv in (("bind",), ("bind", "nope"), ("bind", "scoped"), ("bind", "x.json"),
+                     ("bind", "lean", "--dir", str(self.tmp / "missing")),
+                     ("bind", "lean", "--global", "--dir", str(self.proj)),
+                     ("bind", "lean", "--project", str(proj)),
+                     ("unbind",), ("unbind", "--global"), ("unbind", "lean"),
+                     ("auto", "lean"), ("auto", "--global"),
+                     ("list", "--dir", str(self.proj)), ("apply", "lean", "--global")):
+            rc, env = self.run_json("profile", *argv)
+            self.assertEqual((rc, env["ok"]), (2, False), argv)
+        self.assertEqual(snapshot(self.tmp), before)
+
+
 @unittest.skipIf(os.name == "nt", "POSIX modes")
 class ModeTest(ProfileCase):
     def test_stored_profile_is_private(self) -> None:

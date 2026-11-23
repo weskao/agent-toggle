@@ -20,7 +20,7 @@ If `agent-toggle` is not on PATH, ask the user to install it (`uv tool install a
 Commands: `status` (run first), `doctor` (read-only health check), `update` (installs the newest release, then refreshes the plugin and shims; run it only when the user asks to update), `list [type]`,
 `cost [--type T]` (startup token estimates, biggest first), `disable <type> <name>...` (type `all`: every type with that name),
 `enable <type> <name>...`, `enable --all`, `undo` (reverse the last batch),
-`profile save|apply|diff|delete <name>`, `profile rename <old> <new>`, `profile list` (see Profiles), `migrate`; add `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`
+`profile save|apply|diff|delete <name>`, `profile rename <old> <new>`, `profile list`, `profile bind|unbind|auto` (see Profiles), `migrate`; add `--harness claude|codex|grok|opencode|openclaw|copilot|vibe|devin|agy`
 (default `claude`) and `--dry-run` to preview. `--project <dir>` targets a repo's own `.claude/` and `.mcp.json`
 (warn the user: git shows the deletion). `<type>` = `skill` / `agent` /
 `command` / `rule` / `plugin` / `mcp`. A colon addresses nesting: `orch:batch`.
@@ -53,6 +53,9 @@ A profile is a saved snapshot of which items are live, one file per name in
 | update ("update work with what I have now") | `profile save <name>`: overwrites it with the live state |
 | rename | `profile rename <old> <new>` (refuses a name that exists) |
 | delete | `profile delete <name>` (removes the file; `undo` does not restore it) |
+| load one per project ("use work in this repo") | `profile bind <name> --dir <project>`; every dir with no binding of its own: `profile bind <name> --global`. A session start there applies it; with two sessions in different projects the last start wins |
+| stop that | `profile unbind --dir <project>` or `profile unbind --global` |
+| apply the bound one now | `profile auto --dir <project>` |
 
 Ask with `AskUserQuestion` instead of guessing, and run `profile list --json` first:
 
