@@ -482,6 +482,72 @@ describe('agent-toggle pane', () => {
     expect(r.toasts).toEqual([])
   })
 
+  // session start against a faked `agent-toggle profile auto`; `answer` is its process.run reply
+  const AUTO = ['agent-toggle', 'profile', 'auto', '--dir', '/work/app', '--json']
+  const autoStart = async ($: T, on: On, answer: () => object) => {
+    mock.env(on, {}) // no HOME: keepOff and the reload.json poll stay out of it
+    const clock = mock.clock(on)
+    const argvs: string[][] = []
+    const ran: string[] = []
+    const toasts: string[] = []
+    on('process.run', (_$, e) => (argvs.push([...e.argv]), answer()))
+    on('command.run', (_$, e) => (ran.push(`${e.command} ${e.args}`.trim()), { text: '' }))
+    on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }))
+    on('tool.register', () => ({ value: { tool: 'pane' } }))
+    on('session.start', (_$, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/work/app', surface: 'terminal', isInteractive: true })
+    await clock.advance(0) // the deferred `profile auto`
+    await clock.advance(0) // the reloads it queued
+    return { argvs, ran, toasts }
+  }
+  const auto = (...results: object[]) => () => ({ value: done(0, JSON.stringify({ ok: true, command: 'profile', results })) })
+  const bound = { type: null, name: 'demo', action: 'auto', status: 'ok', detail: '/work/app', source: '/work/app' }
+  const moved = (harness: string, type: string, name: string, action: string) => ({ harness, type, name, action, status: 'ok' })
+
+  test('at session start nothing bound runs `profile auto` and stays silent', async ($, on) => {
+    const r = await autoStart($, on, auto())
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: [] })
+  })
+
+  test('at session start the bound profile reloads what it changed and says so', async ($, on) => {
+    const r = await autoStart($, on, auto(bound,
+      moved('claude', 'skill', 'demo-skill', 'disable'),
+      moved('claude', 'plugin', 'demo-plugin', 'enable'),
+      moved('claude', 'mcp', 'example-mcp', 'disable'),
+      { harness: 'claude', type: 'skill', name: 'other-skill', action: 'enable', status: 'skipped' }))
+    expect(r.argvs).toEqual([AUTO])
+    expect(r.ran).toEqual(['reload-skills', 'reload-plugins', 'mcp disable example-mcp'])
+    expect(r.toasts).toEqual(['agent-toggle: profile demo, 3 changed (/reload-skills, /reload-plugins, /mcp disable example-mcp)'])
+  })
+
+  test('at session start rows of another harness are counted but not reloaded', async ($, on) => {
+    const r = await autoStart($, on, auto(bound, moved('codex', 'skill', 'demo-skill', 'disable')))
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: ['agent-toggle: profile demo, 1 changed'] })
+  })
+
+  test('at session start a bound profile already in place stays silent', async ($, on) => {
+    const r = await autoStart($, on, auto(bound, { harness: 'claude', type: 'skill', name: 'demo-skill', action: 'disable', status: 'skipped' }))
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: [] })
+  })
+
+  test('at session start a bound profile that is no longer saved toasts why', async ($, on) => {
+    const why = "profile 'demo' (bound to global) is not saved; see: profile list"
+    const r = await autoStart($, on, auto({ ...bound, status: 'skipped', detail: why }))
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: [`agent-toggle: ${why}`] })
+  })
+
+  test('at session start a CLI without `profile auto` (exit 2) stays silent', async ($, on) => {
+    const r = await autoStart($, on, () => ({ value: { ...done(2, ''), stderr: "invalid choice: 'auto'" } }))
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: [] })
+  })
+
+  test('at session start a CLI that cannot run stays silent', async ($, on) => {
+    const r = await autoStart($, on, () => {
+      throw new Error('spawn agent-toggle ENOENT')
+    })
+    expect(r).toEqual({ argvs: [AUTO], ran: [], toasts: [] })
+  })
+
   test('a /mcp disable the session refuses is toasted, not thrown', async ($, on) => {
     mock.env(on, { HOME: '/home/u' })
     const clock = mock.clock(on)

@@ -108,7 +108,7 @@ async function pane($: Engine, action: Action): Promise<string> {
 // The slash command that makes a toggled resource take effect in this session; agents and rules have none (a new
 // session). MCP is `/mcp enable|disable <name>` instead: it connects or disconnects the server too.
 const RELOAD: Record<string, string> = { skill: 'reload-skills', command: 'reload-skills', plugin: 'reload-plugins' }
-type Done = { type?: unknown; name?: unknown; action?: unknown; status?: unknown; backup?: unknown }
+type Done = { harness?: unknown; type?: unknown; name?: unknown; action?: unknown; status?: unknown; detail?: unknown; backup?: unknown }
 
 // Deferred a tick: `$.command.run` rejects inside a hook the turn is waiting on (`/agent-toggle disable ...` is one),
 // and runs once the session is idle; a refusal is toasted.
@@ -157,6 +157,28 @@ async function keepOff($: Engine, home: string, cwd: string) {
     const marks = cfg.projects?.[cwd]?.disabledMcpServers
     queue($, names.filter(n => !(Array.isArray(marks) && marks.includes(n))).map(n => `mcp disable ${n}`))
   } catch {} // no state yet, or a file that does not parse: nothing to keep off
+}
+
+// The profile bound to this project (`agent-toggle profile bind`), else the global one, applied as the session opens.
+// The CLI resolves the binding: nothing bound answers no rows in ~50 ms; a profile already in place costs ~1 s
+// (`claude plugin list`) and changes nothing, so this runs off the start (deferred by the caller) and reloads what it
+// changed. The state is the user's, not the session's: a session opened later in another project switches it again.
+// Silent on exit 2 (a CLI from before `profile auto`) and when the CLI cannot run.
+async function autoProfile($: Engine, cwd: string) {
+  try {
+    const run = await $.process.run(['agent-toggle', 'profile', 'auto', '--dir', cwd, '--json'])
+    if (run.exitCode === 2) return
+    const done = ((JSON.parse(run.stdout) as { results?: Done[] }).results ?? [])
+    const auto = done.find(r => r.action === 'auto')
+    if (!auto) return
+    if (auto.status !== 'ok') return $.ui.toast(`agent-toggle: ${auto.detail}`)
+    const moved = done.filter(r => r.status === 'ok' && (r.action === 'disable' || r.action === 'enable'))
+    const failed = done.filter(r => r.status === 'error' || r.status === 'unsupported').length
+    if (moved.length === 0 && failed === 0) return
+    const note = reload($, moved.filter(r => r.harness === 'claude'))
+    $.ui.toast(`agent-toggle: profile ${auto.name}, ${moved.length} changed${failed ? `, ${failed} failed` : ''}${note && ` (${note})`}`)
+    await repaint($)
+  } catch {}
 }
 
 // Bumped by each toggle: a refresh that started before one would draw that row's old state.
@@ -316,6 +338,7 @@ export const register: Register = on => {
       await watch($, home)
       await keepOff($, home, e.cwd)
     }
+    $.clock.after(0, () => void autoProfile($, e.cwd))
 
     return next(e)
   })

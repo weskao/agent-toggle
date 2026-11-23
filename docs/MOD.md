@@ -95,6 +95,12 @@ clock.every(5 s), started at session.start   # `agent-toggle ui` in another term
 session.start → keepOff()                     # a project dir opened after an MCP disable
   └─ ~/.agent-toggle/state.json: claude mcp entries with `connector` (marked off in place)
   └─ ~/.claude.json projects[cwd].disabledMcpServers lacks one → /mcp disable <name>, deferred a tick
+
+session.start → autoProfile(), deferred a tick  # the profile bound to this project, else the global one
+  └─ agent-toggle profile auto --dir <cwd> --json   (the real run: a dry run does not read plugin state)
+  └─ no rows, exit 2 (older CLI) or the CLI cannot run → silent
+  └─ `auto` row not ok (bound profile no longer saved) → toast its detail
+  └─ changed rows → reload(claude rows) → toast "profile <name>, N changed" → refresh an open pane
 ```
 
 `cost --json` is used instead of `list --json` because its rows already carry
